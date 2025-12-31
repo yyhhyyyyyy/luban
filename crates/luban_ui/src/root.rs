@@ -1,10 +1,11 @@
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, Context, ElementId, IntoElement, MouseButton, PromptButton, PromptLevel,
+    AnyElement, Context, ElementId, IntoElement, MouseButton, Pixels, PromptButton, PromptLevel,
     SharedString, Window, div, px, rems,
 };
 use gpui_component::{
-    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, Size, StyledExt as _,
+    ActiveTheme as _, Disableable as _, ElementExt as _, Icon, IconName, Sizable as _, Size,
+    StyledExt as _,
     button::*,
     collapsible::Collapsible,
     input::{Input, InputEvent, InputState},
@@ -70,6 +71,7 @@ pub struct LubanRootView {
     chat_input: Option<gpui::Entity<InputState>>,
     expanded_agent_items: HashSet<String>,
     expanded_agent_turns: HashSet<String>,
+    chat_column_width: Option<Pixels>,
     running_turn_started_at: HashMap<WorkspaceId, Instant>,
     running_turn_tickers: HashSet<WorkspaceId>,
     chat_scroll_handle: gpui::ScrollHandle,
@@ -86,6 +88,7 @@ impl LubanRootView {
             chat_input: None,
             expanded_agent_items: HashSet::new(),
             expanded_agent_turns: HashSet::new(),
+            chat_column_width: None,
             running_turn_started_at: HashMap::new(),
             running_turn_tickers: HashSet::new(),
             chat_scroll_handle: gpui::ScrollHandle::new(),
@@ -107,6 +110,7 @@ impl LubanRootView {
             chat_input: None,
             expanded_agent_items: HashSet::new(),
             expanded_agent_turns: HashSet::new(),
+            chat_column_width: None,
             running_turn_started_at: HashMap::new(),
             running_turn_tickers: HashSet::new(),
             chat_scroll_handle: gpui::ScrollHandle::new(),
@@ -1033,6 +1037,7 @@ impl LubanRootView {
                     theme,
                     &expanded,
                     &expanded_turns,
+                    self.chat_column_width,
                     &view_handle,
                 );
                 let rendered_item_count = history_children.len()
@@ -1060,6 +1065,18 @@ impl LubanRootView {
                 self.last_chat_workspace_id = Some(workspace_id);
                 self.last_chat_item_count = rendered_item_count;
 
+                let mut in_progress_children = Vec::with_capacity(in_progress_items.len());
+                for item in in_progress_items {
+                    in_progress_children.push(render_codex_item(
+                        item,
+                        theme,
+                        true,
+                        &expanded,
+                        self.chat_column_width,
+                        &view_handle,
+                    ));
+                }
+
                 let history = div()
                     .flex_1()
                     .id("workspace-chat-scroll")
@@ -1069,23 +1086,35 @@ impl LubanRootView {
                     .w_full()
                     .px_4()
                     .py_3()
-                    .child(
+                    .child(min_width_zero(
                         div()
+                            .debug_selector(|| "workspace-chat-column".to_owned())
+                            .on_prepaint({
+                                let view_handle = view_handle.clone();
+                                move |bounds, _window, app| {
+                                    let width = bounds.size.width;
+                                    let _ = view_handle.update(app, |view, cx| {
+                                        let should_update = match view.chat_column_width {
+                                            Some(prev) => (prev - width).abs() > px(0.5),
+                                            None => true,
+                                        };
+                                        if should_update {
+                                            view.chat_column_width = Some(width);
+                                            cx.notify();
+                                        }
+                                    });
+                                }
+                            })
                             .w_full()
                             .max_w(px(900.0))
                             .mx_auto()
                             .flex()
                             .flex_col()
                             .gap_3()
+                            .whitespace_normal()
                             .pb(px(160.0))
                             .children(history_children)
-                            .children(in_progress_items.into_iter().map({
-                                let view_handle = view_handle.clone();
-                                let expanded = expanded.clone();
-                                move |item| {
-                                    render_codex_item(item, theme, true, &expanded, &view_handle)
-                                }
-                            }))
+                            .children(in_progress_children)
                             .when_some(running_elapsed, |s, elapsed| {
                                 s.child(render_turn_duration_row(theme, elapsed, true))
                             })
@@ -1117,7 +1146,7 @@ impl LubanRootView {
                                         ),
                                 )
                             }),
-                    );
+                    ));
 
                 let composer = div()
                     .absolute()
@@ -1167,47 +1196,49 @@ impl LubanRootView {
             .bg(theme.title_bar)
             .child(div().text_sm().child(title));
 
-        div()
-            .flex_1()
-            .h_full()
-            .flex()
-            .flex_col()
-            .bg(theme.background)
-            .when(show_title_bar, |s| s.child(title_bar))
-            .when_some(self.state.last_error.clone(), |s, message| {
-                let theme = cx.theme();
-                let view_handle = cx.entity().downgrade();
-                s.child(
-                    div()
-                        .mx_4()
-                        .mt_3()
-                        .p_3()
-                        .rounded_md()
-                        .bg(theme.danger)
-                        .border_1()
-                        .border_color(theme.danger_hover)
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .text_color(theme.danger_foreground)
-                        .child(div().child(message))
-                        .child(
-                            div().debug_selector(|| "error-dismiss".to_owned()).child(
-                                Button::new("error-dismiss")
-                                    .ghost()
-                                    .compact()
-                                    .label("Dismiss")
-                                    .on_click(move |_, _, app| {
-                                        let _ = view_handle.update(app, |view, cx| {
-                                            view.dispatch(Action::ClearError, cx);
-                                        });
-                                    }),
+        min_width_zero(
+            div()
+                .flex_1()
+                .h_full()
+                .flex()
+                .flex_col()
+                .bg(theme.background)
+                .when(show_title_bar, |s| s.child(title_bar))
+                .when_some(self.state.last_error.clone(), |s, message| {
+                    let theme = cx.theme();
+                    let view_handle = cx.entity().downgrade();
+                    s.child(
+                        div()
+                            .mx_4()
+                            .mt_3()
+                            .p_3()
+                            .rounded_md()
+                            .bg(theme.danger)
+                            .border_1()
+                            .border_color(theme.danger_hover)
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .text_color(theme.danger_foreground)
+                            .child(div().child(message))
+                            .child(
+                                div().debug_selector(|| "error-dismiss".to_owned()).child(
+                                    Button::new("error-dismiss")
+                                        .ghost()
+                                        .compact()
+                                        .label("Dismiss")
+                                        .on_click(move |_, _, app| {
+                                            let _ = view_handle.update(app, |view, cx| {
+                                                view.dispatch(Action::ClearError, cx);
+                                            });
+                                        }),
+                                ),
                             ),
-                        ),
-                )
-            })
-            .child(content)
-            .into_any_element()
+                    )
+                })
+                .child(content),
+        )
+        .into_any_element()
     }
 }
 
@@ -1230,27 +1261,47 @@ fn render_conversation_entry(
     entry: &luban_domain::ConversationEntry,
     theme: &gpui_component::Theme,
     expanded_items: &HashSet<String>,
+    chat_column_width: Option<Pixels>,
     view_handle: &gpui::WeakEntity<LubanRootView>,
 ) -> AnyElement {
     match entry {
         luban_domain::ConversationEntry::UserMessage { text } => {
-            let markdown = chat_markdown_view(&format!("user-message-{entry_index}"), text);
-            let bubble = div()
-                .max_w(px(680.0))
-                .p_2()
-                .rounded_md()
-                .bg(theme.accent)
-                .border_1()
-                .border_color(theme.border)
-                .child(div().text_color(theme.foreground).child(markdown));
+            let wrap_width = chat_column_width
+                .map(|w| w.min(px(680.0)))
+                .map(|w| (w - px(32.0)).max(px(0.0)));
+            let message = chat_message_view(
+                &format!("user-message-{entry_index}"),
+                text,
+                wrap_width,
+                theme.foreground,
+            );
+            let bubble = min_width_zero(
+                div()
+                    .w_full()
+                    .max_w(px(680.0))
+                    .overflow_x_hidden()
+                    .p_2()
+                    .rounded_md()
+                    .bg(theme.accent)
+                    .border_1()
+                    .border_color(theme.border)
+                    .child(min_width_zero(
+                        div().w_full().whitespace_normal().child(message),
+                    )),
+            );
 
             div()
+                .debug_selector(move || format!("conversation-user-row-{entry_index}"))
                 .id(format!("conversation-user-{entry_index}"))
                 .w_full()
+                .overflow_x_hidden()
                 .flex()
                 .flex_row()
                 .justify_end()
-                .child(bubble)
+                .child(
+                    bubble
+                        .debug_selector(move || format!("conversation-user-bubble-{entry_index}")),
+                )
                 .into_any_element()
         }
         luban_domain::ConversationEntry::CodexItem { item } => div()
@@ -1264,6 +1315,7 @@ fn render_conversation_entry(
                 theme,
                 false,
                 expanded_items,
+                chat_column_width,
                 view_handle,
             ))
             .into_any_element(),
@@ -1298,18 +1350,27 @@ fn min_width_zero(mut element: gpui::Div) -> gpui::Div {
     element
 }
 
+#[derive(Clone, Copy)]
+struct TurnSummaryCounts {
+    tool_calls: usize,
+    reasonings: usize,
+    messages: usize,
+}
+
 fn build_workspace_history_children(
     entries: &[luban_domain::ConversationEntry],
     theme: &gpui_component::Theme,
     expanded_items: &HashSet<String>,
     expanded_turns: &HashSet<String>,
+    chat_column_width: Option<Pixels>,
     view_handle: &gpui::WeakEntity<LubanRootView>,
 ) -> Vec<AnyElement> {
     struct TurnAccumulator<'a> {
         id: String,
         tool_calls: usize,
+        reasonings: usize,
         messages: usize,
-        ops: Vec<&'a CodexThreadItem>,
+        summary_items: Vec<&'a CodexThreadItem>,
         agent_messages: Vec<&'a CodexThreadItem>,
     }
 
@@ -1318,7 +1379,7 @@ fn build_workspace_history_children(
     let mut current_turn: Option<TurnAccumulator<'_>> = None;
 
     let flush_turn = |turn: TurnAccumulator<'_>, children: &mut Vec<AnyElement>| {
-        if turn.ops.is_empty() && turn.agent_messages.is_empty() {
+        if turn.summary_items.is_empty() && turn.agent_messages.is_empty() {
             return;
         }
 
@@ -1327,24 +1388,33 @@ fn build_workspace_history_children(
         let expanded = expanded_turns.contains(&turn.id);
         let header = render_agent_turn_summary_row(
             &turn.id,
-            turn.tool_calls,
-            turn.messages,
-            !turn.ops.is_empty(),
+            TurnSummaryCounts {
+                tool_calls: turn.tool_calls,
+                reasonings: turn.reasonings,
+                messages: turn.messages,
+            },
+            !turn.summary_items.is_empty(),
             expanded,
             theme,
             view_handle,
         );
+        let mut summary_children = Vec::with_capacity(turn.summary_items.len());
+        for item in turn.summary_items {
+            summary_children.push(render_tool_summary_item(
+                &turn_id,
+                item,
+                theme,
+                expanded_items,
+                chat_column_width,
+                view_handle,
+            ));
+        }
         let content = div()
             .pl_4()
             .flex()
             .flex_col()
             .gap_2()
-            .children(turn.ops.into_iter().map({
-                let turn_id = turn_id.clone();
-                move |item| {
-                    render_tool_summary_item(&turn_id, item, theme, expanded_items, view_handle)
-                }
-            }));
+            .children(summary_children);
 
         children.push(
             div()
@@ -1366,6 +1436,7 @@ fn build_workspace_history_children(
                 theme,
                 false,
                 expanded_items,
+                chat_column_width,
                 view_handle,
             ));
         }
@@ -1383,13 +1454,15 @@ fn build_workspace_history_children(
                     entry,
                     theme,
                     expanded_items,
+                    chat_column_width,
                     view_handle,
                 ));
                 current_turn = Some(TurnAccumulator {
                     id: format!("agent-turn-{turn_index}"),
                     tool_calls: 0,
+                    reasonings: 0,
                     messages: 0,
-                    ops: Vec::new(),
+                    summary_items: Vec::new(),
                     agent_messages: Vec::new(),
                 });
                 turn_index += 1;
@@ -1403,9 +1476,15 @@ fn build_workspace_history_children(
                         continue;
                     }
 
+                    if matches!(item, CodexThreadItem::Reasoning { .. }) {
+                        turn.reasonings += 1;
+                        turn.summary_items.push(item);
+                        continue;
+                    }
+
                     if codex_item_is_tool_call(item) {
                         turn.tool_calls += 1;
-                        turn.ops.push(item);
+                        turn.summary_items.push(item);
                     }
                     continue;
                 }
@@ -1415,6 +1494,7 @@ fn build_workspace_history_children(
                     theme,
                     false,
                     expanded_items,
+                    chat_column_width,
                     view_handle,
                 ));
             }
@@ -1433,6 +1513,7 @@ fn build_workspace_history_children(
                     entry,
                     theme,
                     expanded_items,
+                    chat_column_width,
                     view_handle,
                 ));
             }
@@ -1448,14 +1529,16 @@ fn build_workspace_history_children(
 
 fn render_agent_turn_summary_row(
     id: &str,
-    tool_calls: usize,
-    messages: usize,
+    counts: TurnSummaryCounts,
     has_ops: bool,
     expanded: bool,
     theme: &gpui_component::Theme,
     view_handle: &gpui::WeakEntity<LubanRootView>,
 ) -> AnyElement {
     let debug_id = format!("agent-turn-summary-{id}");
+    let view_handle_for_click = view_handle.clone();
+    let id_for_click = id.to_owned();
+
     let row = div()
         .debug_selector(move || debug_id.clone())
         .h(px(28.0))
@@ -1464,7 +1547,18 @@ fn render_agent_turn_summary_row(
         .flex()
         .items_center()
         .gap_2()
-        .group("");
+        .group("")
+        .when(has_ops, move |s| {
+            let view_handle = view_handle_for_click.clone();
+            let id = id_for_click.clone();
+            s.cursor_pointer()
+                .on_mouse_down(MouseButton::Left, move |_, _, app| {
+                    let _ = view_handle.update(app, |view, cx| {
+                        view.toggle_agent_turn_expanded(&id);
+                        cx.notify();
+                    });
+                })
+        });
 
     let disclosure_icon = if expanded {
         IconName::ChevronDown
@@ -1479,27 +1573,21 @@ fn render_agent_turn_summary_row(
             .gap_2()
             .child(min_width_zero(
                 div()
-                    .max_w(px(520.0))
+                    .flex_1()
                     .truncate()
                     .text_left()
                     .text_color(theme.muted_foreground)
-                    .child(format!("{tool_calls} tool calls, {messages} messages")),
+                    .child(format!(
+                        "{} tool calls, {} reasoning, {} messages",
+                        counts.tool_calls, counts.reasonings, counts.messages
+                    )),
             ))
             .child(div().w(px(16.0)).when(has_ops, |s| {
-                let id = id.to_owned();
-                let view_handle = view_handle.clone();
                 let debug_id = format!("agent-turn-toggle-{id}");
                 s.debug_selector(move || debug_id.clone())
                     .invisible()
                     .when(expanded, |s| s.visible())
                     .group_hover("", |s| s.visible())
-                    .cursor_pointer()
-                    .on_mouse_down(MouseButton::Left, move |_, _, app| {
-                        let _ = view_handle.update(app, |view, cx| {
-                            view.toggle_agent_turn_expanded(&id);
-                            cx.notify();
-                        });
-                    })
                     .child(
                         Icon::new(disclosure_icon)
                             .with_size(Size::Small)
@@ -1515,12 +1603,14 @@ fn render_tool_summary_item(
     item: &CodexThreadItem,
     theme: &gpui_component::Theme,
     expanded_items: &HashSet<String>,
+    chat_column_width: Option<Pixels>,
     view_handle: &gpui::WeakEntity<LubanRootView>,
 ) -> AnyElement {
     let item_id = codex_item_id(item);
     let item_key = format!("{turn_id}::{item_id}");
     let expanded = expanded_items.contains(&item_key);
     let element_id = format!("conversation-turn-item-{}", item_key.replace("::", "-"));
+    let debug_id = format!("agent-turn-item-summary-{turn_id}-{item_id}");
 
     let (title, summary) = codex_item_summary(item, false);
     let icon = Icon::new(codex_item_icon_name(item))
@@ -1533,9 +1623,10 @@ fn render_tool_summary_item(
         IconName::ChevronRight
     };
 
-    let view_handle = view_handle.clone();
+    let view_handle_for_click = view_handle.clone();
     let item_key_for_click = item_key.clone();
     let header = div()
+        .debug_selector(move || debug_id.clone())
         .h(px(28.0))
         .w_full()
         .px_2()
@@ -1544,6 +1635,13 @@ fn render_tool_summary_item(
         .items_center()
         .gap_2()
         .group("")
+        .cursor_pointer()
+        .on_mouse_down(MouseButton::Left, move |_, _, app| {
+            let _ = view_handle_for_click.update(app, |view, cx| {
+                view.toggle_agent_item_expanded(&item_key_for_click);
+                cx.notify();
+            });
+        })
         .child(icon)
         .child(
             div()
@@ -1552,7 +1650,7 @@ fn render_tool_summary_item(
         )
         .child(min_width_zero(
             div()
-                .max_w(px(760.0))
+                .flex_1()
                 .truncate()
                 .text_color(theme.muted_foreground)
                 .child(summary),
@@ -1563,13 +1661,6 @@ fn render_tool_summary_item(
                 .invisible()
                 .when(expanded, |s| s.visible())
                 .group_hover("", |s| s.visible())
-                .cursor_pointer()
-                .on_mouse_down(MouseButton::Left, move |_, _, app| {
-                    let _ = view_handle.update(app, |view, cx| {
-                        view.toggle_agent_item_expanded(&item_key_for_click);
-                        cx.notify();
-                    });
-                })
                 .child(
                     Icon::new(disclosure_icon)
                         .with_size(Size::Small)
@@ -1582,7 +1673,12 @@ fn render_tool_summary_item(
         .overflow_x_hidden()
         .whitespace_normal()
         .pl_6()
-        .child(render_codex_item_details(item, theme));
+        .child(render_codex_item_details(
+            item,
+            theme,
+            chat_column_width,
+            view_handle,
+        ));
 
     div()
         .id(element_id)
@@ -1602,18 +1698,30 @@ fn render_codex_item(
     theme: &gpui_component::Theme,
     in_progress: bool,
     expanded_items: &HashSet<String>,
+    chat_column_width: Option<Pixels>,
     view_handle: &gpui::WeakEntity<LubanRootView>,
 ) -> AnyElement {
     if !in_progress && let CodexThreadItem::AgentMessage { id, text } = item {
-        let markdown = chat_markdown_view(&format!("agent-message-{id}"), text);
+        let wrap_width = chat_column_width.map(|w| (w - px(32.0)).max(px(0.0)));
+        let message = chat_message_view(
+            &format!("agent-message-{id}"),
+            text,
+            wrap_width,
+            theme.foreground,
+        );
+        let debug_id = format!("conversation-agent-message-{id}");
         return div()
+            .debug_selector(move || debug_id.clone())
             .id(format!("codex-agent-message-{id}"))
             .w_full()
+            .overflow_x_hidden()
             .px_2()
             .py_1()
             .flex()
             .flex_col()
-            .child(div().text_color(theme.foreground).child(markdown))
+            .child(min_width_zero(
+                div().w_full().whitespace_normal().child(message),
+            ))
             .into_any_element();
     }
 
@@ -1688,18 +1796,20 @@ fn render_codex_item(
     }
 
     let header = div()
+        .w_full()
         .flex()
         .items_center()
         .justify_between()
         .gap_2()
-        .child(
+        .child(min_width_zero(
             div()
+                .flex_1()
                 .flex()
                 .flex_col()
                 .gap_1()
                 .child(div().text_color(theme.muted_foreground).child(title))
                 .child(min_width_zero(div().truncate().child(summary))),
-        )
+        ))
         .when_some(toggle_button, |s, b| s.child(b));
 
     div()
@@ -1708,39 +1818,66 @@ fn render_codex_item(
         .child(
             Collapsible::new()
                 .open(expanded)
+                .w_full()
                 .p_2()
                 .rounded_md()
                 .bg(theme.secondary)
                 .border_1()
                 .border_color(theme.border)
                 .child(header)
-                .content(render_codex_item_details(item, theme)),
+                .content(render_codex_item_details(
+                    item,
+                    theme,
+                    chat_column_width,
+                    view_handle,
+                )),
         )
         .into_any_element()
 }
 
-fn render_codex_item_details(item: &CodexThreadItem, theme: &gpui_component::Theme) -> AnyElement {
+fn render_codex_item_details(
+    item: &CodexThreadItem,
+    theme: &gpui_component::Theme,
+    chat_column_width: Option<Pixels>,
+    _view_handle: &gpui::WeakEntity<LubanRootView>,
+) -> AnyElement {
     match item {
         CodexThreadItem::AgentMessage { id, text } => {
-            let markdown = chat_markdown_view(&format!("agent-message-{id}-details"), text);
+            let wrap_width = chat_column_width.map(|w| (w - px(80.0)).max(px(0.0)));
+            let message = chat_message_view(
+                &format!("agent-message-{id}-details"),
+                text,
+                wrap_width,
+                theme.foreground,
+            );
             div()
                 .mt_2()
                 .w_full()
                 .overflow_x_hidden()
-                .child(markdown)
+                .child(min_width_zero(
+                    div().w_full().whitespace_normal().child(message),
+                ))
                 .into_any_element()
         }
         CodexThreadItem::Reasoning { id, text } => {
-            let markdown = chat_markdown_view(&format!("reasoning-{id}-details"), text)
-                .text_color(theme.muted_foreground);
+            let wrap_width = chat_column_width.map(|w| (w - px(80.0)).max(px(0.0)));
+            let message = chat_message_view(
+                &format!("reasoning-{id}-details"),
+                text,
+                wrap_width,
+                theme.muted_foreground,
+            );
             div()
                 .mt_2()
                 .w_full()
                 .overflow_x_hidden()
-                .child(markdown)
+                .child(min_width_zero(
+                    div().w_full().whitespace_normal().child(message),
+                ))
                 .into_any_element()
         }
         CodexThreadItem::CommandExecution {
+            id,
             command,
             aggregated_output,
             exit_code,
@@ -1753,16 +1890,35 @@ fn render_codex_item_details(item: &CodexThreadItem, theme: &gpui_component::The
             .flex()
             .flex_col()
             .gap_2()
-            .child(div().whitespace_normal().child(command.clone()))
+            .child(min_width_zero(
+                div()
+                    .w_full()
+                    .overflow_x_hidden()
+                    .whitespace_normal()
+                    .child(
+                        chat_markdown_view(
+                            &format!("command-{id}-details"),
+                            &fenced_code_block("sh", command),
+                            chat_column_width.map(|w| (w - px(80.0)).max(px(0.0))),
+                        )
+                        .text_color(theme.foreground),
+                    ),
+            ))
             .when(!aggregated_output.trim().is_empty(), |s| {
-                s.child(
+                s.child(min_width_zero(
                     div()
                         .w_full()
                         .overflow_x_hidden()
                         .whitespace_normal()
-                        .text_color(theme.muted_foreground)
-                        .child(aggregated_output.clone()),
-                )
+                        .child(
+                            chat_markdown_view(
+                                &format!("command-{id}-output"),
+                                &fenced_code_block("", aggregated_output),
+                                chat_column_width.map(|w| (w - px(80.0)).max(px(0.0))),
+                            )
+                            .text_color(theme.muted_foreground),
+                        ),
+                ))
             })
             .when_some(*exit_code, |s, code| {
                 s.child(
@@ -1847,13 +2003,91 @@ fn render_codex_item_details(item: &CodexThreadItem, theme: &gpui_component::The
     }
 }
 
-fn chat_markdown_view(id: &str, source: &str) -> TextView {
-    TextView::markdown(
+fn chat_markdown_view(id: &str, source: &str, wrap_width: Option<Pixels>) -> TextView {
+    let mut code_block_style = gpui::StyleRefinement::default();
+    code_block_style.size.width = Some(gpui::relative(1.).into());
+    code_block_style.max_size.width = Some(gpui::relative(1.).into());
+    code_block_style.min_size.width = Some(px(0.0).into());
+
+    let mut view = TextView::markdown(
         ElementId::Name(SharedString::from(format!("{id}-markdown"))),
         source.to_owned(),
     )
-    .style(TextViewStyle::default().paragraph_gap(rems(0.5)))
+    .style(
+        TextViewStyle::default()
+            .paragraph_gap(rems(0.5))
+            .code_block(code_block_style),
+    )
     .text_size(px(16.0))
+    .whitespace_normal()
+    .flex()
+    .flex_col();
+
+    gpui::Styled::style(&mut view).align_items = Some(gpui::AlignItems::Stretch);
+
+    if let Some(wrap_width) = wrap_width {
+        view.w(wrap_width)
+    } else {
+        view.w_full()
+    }
+}
+
+fn fenced_code_block(lang: &str, code: &str) -> String {
+    let mut max_ticks = 0usize;
+    let mut current = 0usize;
+    for ch in code.chars() {
+        if ch == '`' {
+            current += 1;
+            max_ticks = max_ticks.max(current);
+        } else {
+            current = 0;
+        }
+    }
+
+    let fence_len = (max_ticks + 1).max(3);
+    let fence = "`".repeat(fence_len);
+
+    if lang.is_empty() {
+        format!("{fence}\n{code}\n{fence}")
+    } else {
+        format!("{fence}{lang}\n{code}\n{fence}")
+    }
+}
+
+fn chat_message_view(
+    id: &str,
+    source: &str,
+    wrap_width: Option<Pixels>,
+    text_color: gpui::Hsla,
+) -> AnyElement {
+    let markdown_like = source.contains("```")
+        || source.contains("**")
+        || source.contains('`')
+        || source.contains("](")
+        || source
+            .lines()
+            .any(|line| line.starts_with("# ") || line.starts_with("- ") || line.starts_with("* "));
+
+    if markdown_like {
+        return chat_markdown_view(id, source, wrap_width)
+            .text_color(text_color)
+            .into_any_element();
+    }
+
+    let mut container = div()
+        .id(ElementId::Name(SharedString::from(format!("{id}-text"))))
+        .text_size(px(16.0))
+        .whitespace_normal()
+        .text_color(text_color)
+        .child(source.to_owned());
+
+    if let Some(wrap_width) = wrap_width {
+        container = container.w(wrap_width);
+    } else {
+        container = container.w_full();
+    }
+
+    container.into_any_element()
 }
 
 fn codex_item_id(item: &CodexThreadItem) -> &str {
@@ -1889,7 +2123,13 @@ fn codex_item_summary(item: &CodexThreadItem, in_progress: bool) -> (&'static st
         ),
         CodexThreadItem::CommandExecution {
             command, status, ..
-        } => ("Command", format!("{status:?}{progress_suffix}: {command}")),
+        } => (
+            "Command",
+            format!(
+                "{status:?}{progress_suffix}: {}",
+                command.lines().next().unwrap_or("")
+            ),
+        ),
         CodexThreadItem::FileChange {
             changes, status, ..
         } => (
@@ -1943,7 +2183,9 @@ fn codex_item_compact_summary(item: &CodexThreadItem) -> (&'static str, String) 
             };
             ("Thinking", summary)
         }
-        CodexThreadItem::CommandExecution { command, .. } => ("Bash", command.clone()),
+        CodexThreadItem::CommandExecution { command, .. } => {
+            ("Bash", command.lines().next().unwrap_or("").to_owned())
+        }
         CodexThreadItem::FileChange { changes, .. } => {
             ("Patch", format!("{} file(s)", changes.len()))
         }
@@ -2072,7 +2314,7 @@ fn workspace_agent_context(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::Modifiers;
+    use gpui::{Modifiers, px, size};
     use luban_domain::ConversationEntry;
     use std::sync::Arc;
 
@@ -2162,7 +2404,7 @@ mod tests {
     fn compact_item_summary_is_stable() {
         let item = CodexThreadItem::CommandExecution {
             id: "cmd-1".to_owned(),
-            command: "echo hello".to_owned(),
+            command: "echo hello\necho world".to_owned(),
             aggregated_output: String::new(),
             exit_code: None,
             status: luban_domain::CodexCommandExecutionStatus::InProgress,
@@ -2339,15 +2581,22 @@ mod tests {
                     ConversationEntry::CodexItem {
                         item: Box::new(CodexThreadItem::AgentMessage {
                             id: "item-1".to_owned(),
-                            text: "Reply with a link: [gpui](https://example.com)".to_owned(),
+                            text: "Reply:\n\n- one\n- two\n\n[gpui](https://example.com)"
+                                .to_owned(),
                         }),
                     },
                 ],
             },
         });
 
-        let _ = cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
-        cx.refresh().unwrap();
+        let (_, window_cx) =
+            cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+        window_cx.refresh().unwrap();
+
+        let bounds = window_cx
+            .debug_bounds("conversation-agent-message-item-1")
+            .expect("missing debug bounds for conversation-agent-message-item-1");
+        assert!(bounds.size.height > px(0.0));
     }
 
     #[gpui::test]
@@ -2402,16 +2651,298 @@ mod tests {
         let expanded = view.read_with(cx, |v, _| v.expanded_agent_turns.contains("agent-turn-0"));
         assert!(!expanded);
 
-        let toggle_bounds = cx
-            .debug_bounds("agent-turn-toggle-agent-turn-0")
-            .expect("missing debug bounds for agent-turn-toggle-agent-turn-0");
-        cx.simulate_mouse_move(toggle_bounds.center(), None, Modifiers::none());
-        cx.refresh().unwrap();
-        cx.simulate_click(toggle_bounds.center(), Modifiers::none());
+        let row_bounds = cx
+            .debug_bounds("agent-turn-summary-agent-turn-0")
+            .expect("missing debug bounds for agent-turn-summary-agent-turn-0");
+        cx.simulate_click(row_bounds.center(), Modifiers::none());
         cx.refresh().unwrap();
 
         let expanded = view.read_with(cx, |v, _| v.expanded_agent_turns.contains("agent-turn-0"));
         assert!(expanded);
+    }
+
+    #[gpui::test]
+    async fn clicking_turn_item_summary_row_toggles_expanded(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "abandon-about".to_owned(),
+            branch_name: "luban/abandon-about".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+        });
+        let workspace_id = state.projects[0].workspaces[0].id;
+        state.main_pane = MainPane::Workspace(workspace_id);
+        state.apply(Action::ConversationLoaded {
+            workspace_id,
+            snapshot: ConversationSnapshot {
+                thread_id: Some("thread-1".to_owned()),
+                entries: vec![
+                    ConversationEntry::UserMessage {
+                        text: "Test".to_owned(),
+                    },
+                    ConversationEntry::CodexItem {
+                        item: Box::new(CodexThreadItem::Reasoning {
+                            id: "item-1".to_owned(),
+                            text: "Reasoning details".to_owned(),
+                        }),
+                    },
+                    ConversationEntry::CodexItem {
+                        item: Box::new(CodexThreadItem::AgentMessage {
+                            id: "item-2".to_owned(),
+                            text: "Reply".to_owned(),
+                        }),
+                    },
+                ],
+            },
+        });
+
+        let (view, cx) = cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+        cx.refresh().unwrap();
+
+        let row_bounds = cx
+            .debug_bounds("agent-turn-summary-agent-turn-0")
+            .expect("missing debug bounds for agent-turn-summary-agent-turn-0");
+        cx.simulate_click(row_bounds.center(), Modifiers::none());
+        cx.refresh().unwrap();
+
+        let expanded = view.read_with(cx, |v, _| v.expanded_agent_turns.contains("agent-turn-0"));
+        assert!(expanded);
+
+        let item_bounds = cx
+            .debug_bounds("agent-turn-item-summary-agent-turn-0-item-1")
+            .expect("missing debug bounds for agent-turn-item-summary-agent-turn-0-item-1");
+        cx.simulate_click(item_bounds.center(), Modifiers::none());
+        cx.refresh().unwrap();
+
+        let expanded = view.read_with(cx, |v, _| {
+            v.expanded_agent_items.contains("agent-turn-0::item-1")
+        });
+        assert!(expanded);
+    }
+
+    #[gpui::test]
+    async fn user_message_reflows_on_window_resize(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "abandon-about".to_owned(),
+            branch_name: "luban/abandon-about".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+        });
+        let workspace_id = state.projects[0].workspaces[0].id;
+        state.main_pane = MainPane::Workspace(workspace_id);
+
+        let long_text = std::iter::repeat_n("word", 200)
+            .collect::<Vec<_>>()
+            .join(" ");
+        state.apply(Action::ConversationLoaded {
+            workspace_id,
+            snapshot: ConversationSnapshot {
+                thread_id: Some("thread-1".to_owned()),
+                entries: vec![ConversationEntry::UserMessage { text: long_text }],
+            },
+        });
+
+        let (_view, window_cx) =
+            cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+
+        window_cx.simulate_resize(size(px(1200.0), px(800.0)));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+        let wide_column = window_cx
+            .debug_bounds("workspace-chat-column")
+            .expect("missing debug bounds for workspace-chat-column");
+        let wide_bubble = window_cx
+            .debug_bounds("conversation-user-bubble-0")
+            .expect("missing debug bounds for conversation-user-bubble-0");
+
+        window_cx.simulate_resize(size(px(520.0), px(800.0)));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+        let narrow_column = window_cx
+            .debug_bounds("workspace-chat-column")
+            .expect("missing debug bounds for workspace-chat-column");
+        let narrow_bubble = window_cx
+            .debug_bounds("conversation-user-bubble-0")
+            .expect("missing debug bounds for conversation-user-bubble-0");
+
+        assert!(narrow_column.size.width < wide_column.size.width);
+        assert!(
+            narrow_bubble.size.height > wide_bubble.size.height,
+            "wide={:?} narrow={:?}",
+            wide_bubble.size,
+            narrow_bubble.size
+        );
+        assert!(narrow_bubble.right() <= narrow_column.right() + px(2.0));
+        assert!(narrow_bubble.right() >= narrow_column.right() - px(8.0));
+    }
+
+    #[gpui::test]
+    async fn long_in_progress_reasoning_does_not_expand_chat_column(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "abandon-about".to_owned(),
+            branch_name: "luban/abandon-about".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+        });
+        let workspace_id = state.projects[0].workspaces[0].id;
+        state.main_pane = MainPane::Workspace(workspace_id);
+
+        state.apply(Action::SendAgentMessage {
+            workspace_id,
+            text: "Test".to_owned(),
+        });
+        state.apply(Action::AgentEventReceived {
+            workspace_id,
+            event: CodexThreadEvent::ItemStarted {
+                item: CodexThreadItem::Reasoning {
+                    id: "item-1".to_owned(),
+                    text: "a".repeat(16_384),
+                },
+            },
+        });
+
+        let (view, window_cx) =
+            cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+        window_cx.simulate_resize(size(px(720.0), px(800.0)));
+        window_cx.refresh().unwrap();
+
+        window_cx.update(|_, app| {
+            view.update(app, |view, cx| {
+                view.expanded_agent_items.insert("item-1".to_owned());
+                cx.notify();
+            });
+        });
+        window_cx.refresh().unwrap();
+
+        let column = window_cx
+            .debug_bounds("workspace-chat-column")
+            .expect("missing debug bounds for workspace-chat-column");
+        assert!(column.size.width <= px(720.0));
+
+        let bubble = window_cx
+            .debug_bounds("conversation-user-bubble-0")
+            .expect("missing debug bounds for conversation-user-bubble-0");
+        assert!(bubble.right() <= column.right() + px(2.0));
+        assert!(bubble.right() >= column.right() - px(8.0));
+    }
+
+    #[gpui::test]
+    async fn long_command_execution_does_not_expand_chat_column(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "abandon-about".to_owned(),
+            branch_name: "luban/abandon-about".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+        });
+        let workspace_id = state.projects[0].workspaces[0].id;
+        state.main_pane = MainPane::Workspace(workspace_id);
+
+        let long_command = format!(
+            "bash -lc 'echo {} && echo \"{}\" && printf \"%s\" {}'",
+            "a".repeat(4096),
+            "b".repeat(4096),
+            "c".repeat(4096)
+        );
+        let long_output = format!("{}\n{}", "x".repeat(4096), "y".repeat(4096));
+
+        state.apply(Action::ConversationLoaded {
+            workspace_id,
+            snapshot: ConversationSnapshot {
+                thread_id: Some("thread-1".to_owned()),
+                entries: vec![
+                    ConversationEntry::UserMessage {
+                        text: "Test".to_owned(),
+                    },
+                    ConversationEntry::CodexItem {
+                        item: Box::new(CodexThreadItem::CommandExecution {
+                            id: "item-1".to_owned(),
+                            command: long_command,
+                            aggregated_output: long_output,
+                            exit_code: Some(0),
+                            status: luban_domain::CodexCommandExecutionStatus::Completed,
+                        }),
+                    },
+                    ConversationEntry::CodexItem {
+                        item: Box::new(CodexThreadItem::AgentMessage {
+                            id: "item-2".to_owned(),
+                            text: "Reply".to_owned(),
+                        }),
+                    },
+                ],
+            },
+        });
+
+        let (view, window_cx) =
+            cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+        window_cx.simulate_resize(size(px(720.0), px(800.0)));
+        window_cx.refresh().unwrap();
+
+        let turn_bounds = window_cx
+            .debug_bounds("agent-turn-summary-agent-turn-0")
+            .expect("missing debug bounds for agent-turn-summary-agent-turn-0");
+        window_cx.simulate_click(turn_bounds.center(), Modifiers::none());
+        window_cx.refresh().unwrap();
+
+        let row_bounds = window_cx
+            .debug_bounds("agent-turn-item-summary-agent-turn-0-item-1")
+            .expect("missing debug bounds for agent-turn-item-summary-agent-turn-0-item-1");
+        window_cx.simulate_click(row_bounds.center(), Modifiers::none());
+        window_cx.refresh().unwrap();
+
+        let expanded = view.read_with(window_cx, |v, _| {
+            v.expanded_agent_items.contains("agent-turn-0::item-1")
+        });
+        assert!(expanded);
+
+        let column = window_cx
+            .debug_bounds("workspace-chat-column")
+            .expect("missing debug bounds for workspace-chat-column");
+        assert!(column.size.width <= px(720.0));
+
+        let bubble = window_cx
+            .debug_bounds("conversation-user-bubble-0")
+            .expect("missing debug bounds for conversation-user-bubble-0");
+        assert!(bubble.right() <= column.right() + px(2.0));
+        assert!(bubble.right() >= column.right() - px(8.0));
     }
 
     #[gpui::test]
