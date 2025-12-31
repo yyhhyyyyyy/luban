@@ -4,8 +4,8 @@ use gpui::{
     SharedString, Window, div, px, rems,
 };
 use gpui_component::{
-    ActiveTheme as _, Disableable as _, Icon, IconName, IconNamed as _, Sizable as _, Size,
-    StyledExt as _,
+    ActiveTheme as _, Disableable as _, ElementExt as _, Icon, IconName, IconNamed as _,
+    Sizable as _, Size, StyledExt as _,
     button::*,
     collapsible::Collapsible,
     input::{Input, InputEvent, InputState},
