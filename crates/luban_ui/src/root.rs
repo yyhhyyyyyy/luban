@@ -1266,9 +1266,14 @@ fn render_conversation_entry(
 ) -> AnyElement {
     match entry {
         luban_domain::ConversationEntry::UserMessage { text } => {
-            let wrap_width = chat_column_width
-                .map(|w| w.min(px(680.0)))
-                .map(|w| (w - px(32.0)).max(px(0.0)));
+            let is_short_single_line = text.lines().nth(1).is_none() && text.chars().count() <= 80;
+            let wrap_width = if is_short_single_line {
+                None
+            } else {
+                chat_column_width
+                    .map(|w| w.min(px(680.0)))
+                    .map(|w| (w - px(32.0)).max(px(0.0)))
+            };
             let message = chat_message_view(
                 &format!("user-message-{entry_index}"),
                 text,
@@ -1277,7 +1282,6 @@ fn render_conversation_entry(
             );
             let bubble = min_width_zero(
                 div()
-                    .w_full()
                     .max_w(px(680.0))
                     .overflow_x_hidden()
                     .p_2()
@@ -2028,7 +2032,7 @@ fn chat_markdown_view(id: &str, source: &str, wrap_width: Option<Pixels>) -> Tex
     if let Some(wrap_width) = wrap_width {
         view.w(wrap_width)
     } else {
-        view.w_full()
+        view
     }
 }
 
@@ -2083,8 +2087,6 @@ fn chat_message_view(
 
     if let Some(wrap_width) = wrap_width {
         container = container.w(wrap_width);
-    } else {
-        container = container.w_full();
     }
 
     container.into_any_element()
@@ -2795,6 +2797,48 @@ mod tests {
         );
         assert!(narrow_bubble.right() <= narrow_column.right() + px(2.0));
         assert!(narrow_bubble.right() >= narrow_column.right() - px(8.0));
+    }
+
+    #[gpui::test]
+    async fn short_user_message_does_not_fill_max_width(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "abandon-about".to_owned(),
+            branch_name: "luban/abandon-about".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+        });
+        let workspace_id = state.projects[0].workspaces[0].id;
+        state.main_pane = MainPane::Workspace(workspace_id);
+
+        state.apply(Action::ConversationLoaded {
+            workspace_id,
+            snapshot: ConversationSnapshot {
+                thread_id: Some("thread-1".to_owned()),
+                entries: vec![ConversationEntry::UserMessage {
+                    text: "Test".to_owned(),
+                }],
+            },
+        });
+
+        let (_, window_cx) =
+            cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+        window_cx.simulate_resize(size(px(1200.0), px(800.0)));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        let bubble = window_cx
+            .debug_bounds("conversation-user-bubble-0")
+            .expect("missing debug bounds for conversation-user-bubble-0");
+        assert!(bubble.size.width < px(300.0), "bubble={:?}", bubble.size);
     }
 
     #[gpui::test]
