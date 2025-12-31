@@ -30,12 +30,14 @@ just run
 
 ### Codex SDK (local sidecar)
 
-The Agent chat panel uses the `@openai/codex-sdk` TypeScript SDK via a small Node.js sidecar.
-`just run` and `just test` will install the sidecar dependencies automatically (requires Node.js 18+).
+The Agent chat panel uses the `@openai/codex-sdk` TypeScript SDK via a small sidecar.
+
+The bundled sidecar (`tools/codex_sidecar/dist/run.mjs`) is checked in. You generally should not rebuild it unless you bump the SDK version.
+
+To rebuild the bundled script:
 
 ```bash
-cd crates/luban_app/agent_sidecar
-npm install
+just sidecar-build
 ```
 
 ### Build
