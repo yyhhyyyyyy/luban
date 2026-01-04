@@ -796,10 +796,11 @@ impl LubanRootView {
         }
 
         let available = viewport - sidebar_width;
-        let min_main_width = px(720.0);
+        let min_main_width = px(640.0);
         let preferred_main_width = px(900.0);
-        let max_width = px(420.0);
-        let ratio_width = px((f32::from(available) * 0.33).round()).min(max_width);
+        let min_width = px(240.0);
+        let max_width = px(480.0);
+        let ratio_width = px((f32::from(available) * 0.34).round()).clamp(min_width, max_width);
 
         if available > preferred_main_width + px(1.0) {
             let max_by_preferred_main = available - preferred_main_width;
@@ -4770,12 +4771,21 @@ mod tests {
         let chat_bounds = window_cx
             .debug_bounds("workspace-chat-column")
             .expect("missing debug bounds for workspace-chat-column");
+        let main_bounds = window_cx
+            .debug_bounds("main-pane")
+            .expect("missing debug bounds for main-pane");
         let right_pane_bounds = window_cx
             .debug_bounds("workspace-right-pane")
             .expect("missing debug bounds for workspace-right-pane");
 
         assert!(
-            chat_bounds.size.width >= px(640.0),
+            main_bounds.size.width >= px(640.0),
+            "main={:?} right_pane={:?}",
+            main_bounds.size,
+            right_pane_bounds.size
+        );
+        assert!(
+            chat_bounds.size.width >= px(600.0),
             "chat={:?} right_pane={:?}",
             chat_bounds.size,
             right_pane_bounds.size
@@ -4784,6 +4794,59 @@ mod tests {
             chat_bounds.size.width >= right_pane_bounds.size.width + px(120.0),
             "chat={:?} right_pane={:?}",
             chat_bounds.size,
+            right_pane_bounds.size
+        );
+    }
+
+    #[gpui::test]
+    async fn terminal_pane_has_reasonable_default_width(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "abandon-about".to_owned(),
+            branch_name: "repo/branch".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+        });
+        let workspace_id = state.projects[0].workspaces[0].id;
+        state.main_pane = MainPane::Workspace(workspace_id);
+        state.right_pane = RightPane::Terminal;
+
+        state.apply(Action::ConversationLoaded {
+            workspace_id,
+            snapshot: ConversationSnapshot {
+                thread_id: Some("thread-1".to_owned()),
+                entries: vec![ConversationEntry::UserMessage {
+                    text: "Test".to_owned(),
+                }],
+            },
+        });
+
+        let (_view, window_cx) = cx.add_window_view(|_window, cx| {
+            let mut view = LubanRootView::with_state(services, state, cx);
+            view.terminal_enabled = true;
+            view.workspace_terminal_errors
+                .insert(workspace_id, "stub terminal".to_owned());
+            view
+        });
+
+        window_cx.simulate_resize(size(px(1200.0), px(720.0)));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        let right_pane_bounds = window_cx
+            .debug_bounds("workspace-right-pane")
+            .expect("missing debug bounds for workspace-right-pane");
+        assert!(
+            right_pane_bounds.size.width >= px(240.0),
+            "right_pane={:?}",
             right_pane_bounds.size
         );
     }
