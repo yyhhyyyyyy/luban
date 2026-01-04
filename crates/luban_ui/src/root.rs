@@ -740,8 +740,10 @@ impl gpui::Render for LubanRootView {
 
         let theme = cx.theme();
         let sidebar_width = px(300.0);
-        let should_render_right_pane =
-            self.terminal_enabled && self.state.right_pane == RightPane::Terminal;
+        let right_pane_width = self.right_pane_width(window, sidebar_width);
+        let should_render_right_pane = self.terminal_enabled
+            && self.state.right_pane == RightPane::Terminal
+            && right_pane_width > px(0.0);
 
         div()
             .size_full()
@@ -762,7 +764,7 @@ impl gpui::Render for LubanRootView {
                     .child(render_sidebar(cx, &self.state, sidebar_width))
                     .child(self.render_main(window, cx))
                     .when(should_render_right_pane, |s| {
-                        s.child(self.render_right_pane(window, cx))
+                        s.child(self.render_right_pane(right_pane_width, window, cx))
                     }),
             )
     }
@@ -784,16 +786,31 @@ impl LubanRootView {
         self._subscriptions.push(subscription);
     }
 
-    fn right_pane_width(&self) -> gpui::Pixels {
-        px(420.0)
+    fn right_pane_width(&self, window: &Window, sidebar_width: Pixels) -> gpui::Pixels {
+        let viewport = window.viewport_size().width;
+        if viewport <= sidebar_width + px(1.0) {
+            return px(0.0);
+        }
+
+        let available = viewport - sidebar_width;
+        let min_width = px(260.0);
+        let max_width = px(420.0);
+        let ratio_width = px((f32::from(available) * 0.33).round());
+
+        ratio_width.max(min_width).min(max_width).min(available)
     }
 
     fn right_pane_header_height(&self) -> gpui::Pixels {
         px(40.0)
     }
 
-    fn right_pane_grid_size(&self, window: &mut Window) -> Option<(u16, u16)> {
-        let width = f32::from(self.right_pane_width()).max(1.0);
+    fn right_pane_grid_size(
+        &self,
+        window: &mut Window,
+        sidebar_width: Pixels,
+    ) -> Option<(u16, u16)> {
+        let right_pane_width = self.right_pane_width(window, sidebar_width);
+        let width = f32::from(right_pane_width).max(1.0);
         let height = (f32::from(window.viewport_size().height)
             - f32::from(self.right_pane_header_height()))
         .max(1.0);
@@ -805,7 +822,8 @@ impl LubanRootView {
     }
 
     fn resize_workspace_terminals(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some((cols, rows)) = self.right_pane_grid_size(window) else {
+        let sidebar_width = px(300.0);
+        let Some((cols, rows)) = self.right_pane_grid_size(window, sidebar_width) else {
             return;
         };
         for terminal in self.workspace_terminals.values() {
@@ -848,8 +866,12 @@ impl LubanRootView {
         }
     }
 
-    fn render_right_pane(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let right_pane_width = self.right_pane_width();
+    fn render_right_pane(
+        &mut self,
+        right_pane_width: Pixels,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let header_height = self.right_pane_header_height();
 
         let MainPane::Workspace(workspace_id) = self.state.main_pane else {
@@ -872,9 +894,9 @@ impl LubanRootView {
         let theme = cx.theme();
 
         div()
+            .debug_selector(|| "workspace-right-pane".to_owned())
             .w(right_pane_width)
             .h_full()
-            .flex_shrink_0()
             .flex()
             .flex_col()
             .bg(theme.secondary)
@@ -4384,6 +4406,64 @@ mod tests {
             .debug_bounds("workspace-archive-0-0")
             .expect("missing debug bounds for workspace-archive-0-0");
         assert!(archive_bounds.right() <= row_bounds.right() + px(2.0));
+    }
+
+    #[gpui::test]
+    async fn chat_column_remains_primary_when_terminal_is_visible(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "abandon-about".to_owned(),
+            branch_name: "luban/abandon-about".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+        });
+        let workspace_id = state.projects[0].workspaces[0].id;
+        state.main_pane = MainPane::Workspace(workspace_id);
+        state.right_pane = RightPane::Terminal;
+
+        state.apply(Action::ConversationLoaded {
+            workspace_id,
+            snapshot: ConversationSnapshot {
+                thread_id: Some("thread-1".to_owned()),
+                entries: vec![ConversationEntry::UserMessage {
+                    text: "Test".to_owned(),
+                }],
+            },
+        });
+
+        let (_view, window_cx) = cx.add_window_view(|_window, cx| {
+            let mut view = LubanRootView::with_state(services, state, cx);
+            view.terminal_enabled = true;
+            view.workspace_terminal_errors
+                .insert(workspace_id, "stub terminal".to_owned());
+            view
+        });
+
+        window_cx.simulate_resize(size(px(1200.0), px(720.0)));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        let chat_bounds = window_cx
+            .debug_bounds("workspace-chat-column")
+            .expect("missing debug bounds for workspace-chat-column");
+        let right_pane_bounds = window_cx
+            .debug_bounds("workspace-right-pane")
+            .expect("missing debug bounds for workspace-right-pane");
+
+        assert!(
+            chat_bounds.size.width >= right_pane_bounds.size.width + px(120.0),
+            "chat={:?} right_pane={:?}",
+            chat_bounds.size,
+            right_pane_bounds.size
+        );
     }
 
     #[gpui::test]
