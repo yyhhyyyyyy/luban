@@ -760,7 +760,7 @@ impl gpui::Render for LubanRootView {
                 sidebar_width,
                 self.terminal_enabled,
             ))
-            .child(
+            .child(min_height_zero(
                 div()
                     .flex_1()
                     .flex()
@@ -769,7 +769,7 @@ impl gpui::Render for LubanRootView {
                     .when(should_render_right_pane, |s| {
                         s.child(self.render_right_pane(right_pane_width, window, cx))
                     }),
-            )
+            ))
     }
 }
 
@@ -2213,20 +2213,22 @@ impl LubanRootView {
                             ),
                     );
 
-                div()
-                    .flex()
-                    .flex_col()
-                    .h_full()
-                    .child(history)
-                    .child(composer)
-                    .into_any_element()
+                min_height_zero(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .h_full()
+                        .child(history)
+                        .child(composer),
+                )
+                .into_any_element()
             }
         };
 
         let theme = cx.theme();
         let debug_layout_enabled = self.debug_layout_enabled;
 
-        min_width_zero(
+        min_width_zero(min_height_zero(
             div()
                 .debug_selector(|| "main-pane".to_owned())
                 .when(debug_layout_enabled, |s| {
@@ -2272,7 +2274,7 @@ impl LubanRootView {
                     )
                 })
                 .child(content),
-        )
+        ))
         .into_any_element()
     }
 }
@@ -4560,8 +4562,10 @@ mod tests {
         let (_view, window_cx) =
             cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
         window_cx.simulate_resize(size(px(1200.0), px(720.0)));
-        window_cx.run_until_parked();
-        window_cx.refresh().unwrap();
+        for _ in 0..3 {
+            window_cx.run_until_parked();
+            window_cx.refresh().unwrap();
+        }
 
         let send_bounds = window_cx
             .debug_bounds("chat-send-message")
@@ -4570,7 +4574,12 @@ mod tests {
             .debug_bounds("main-pane")
             .expect("missing debug bounds for main-pane");
         assert!(send_bounds.size.height > px(0.0));
-        assert!(send_bounds.bottom() <= main_bounds.bottom() + px(2.0));
+        assert!(
+            main_bounds.bottom() <= px(720.0) + px(1.0),
+            "main={:?}",
+            main_bounds
+        );
+        assert!(send_bounds.bottom() <= px(720.0) + px(1.0));
     }
 
     #[gpui::test]
