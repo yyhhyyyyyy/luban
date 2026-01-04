@@ -1357,9 +1357,11 @@ fn render_titlebar(
         .items_center()
         .gap_2()
         .child(
-            Icon::new(IconName::GitHub)
-                .with_size(Size::Small)
-                .text_color(theme.muted_foreground),
+            div()
+                .debug_selector(|| "titlebar-branch-symbol".to_owned())
+                .text_sm()
+                .text_color(theme.muted_foreground)
+                .child("⎇"),
         )
         .child(div().text_sm().child(branch_label));
 
@@ -4129,6 +4131,38 @@ mod tests {
             "toggle={:?} window={:?}",
             toggle_bounds,
             window_size
+        );
+    }
+
+    #[gpui::test]
+    async fn titlebar_uses_branch_symbol_instead_of_github_icon(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "abandon-about".to_owned(),
+            branch_name: "repo/branch".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+        });
+        let workspace_id = state.projects[0].workspaces[0].id;
+        state.apply(Action::OpenWorkspace { workspace_id });
+
+        let (_view, window_cx) =
+            cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+        window_cx.simulate_resize(size(px(900.0), px(240.0)));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        assert!(
+            window_cx.debug_bounds("titlebar-branch-symbol").is_some(),
+            "expected branch symbol to be rendered in titlebar"
         );
     }
 
