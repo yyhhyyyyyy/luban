@@ -1796,6 +1796,44 @@ fn render_project(
     };
     let create_loading = matches!(project.create_workspace_status, OperationStatus::Running);
 
+    let create_button = {
+        let view_handle = view_handle.clone();
+        let create_icon = if create_loading {
+            IconName::LoaderCircle
+        } else {
+            IconName::Plus
+        };
+
+        Button::new(format!("project-create-workspace-{project_index}"))
+            .ghost()
+            .compact()
+            .disabled(create_loading)
+            .icon(Icon::new(create_icon).text_color(theme.muted_foreground))
+            .tooltip("New workspace")
+            .on_click(move |_, _, app| {
+                if create_loading {
+                    return;
+                }
+                let _ = view_handle.update(app, |view, cx| {
+                    view.dispatch(Action::CreateWorkspace { project_id }, cx);
+                });
+            })
+    };
+
+    let settings_button = {
+        let view_handle = view_handle.clone();
+        Button::new(format!("project-settings-{project_index}"))
+            .ghost()
+            .compact()
+            .icon(Icon::new(IconName::Settings2).text_color(theme.muted_foreground))
+            .tooltip("Project settings")
+            .on_click(move |_, _, app| {
+                let _ = view_handle.update(app, |view, cx| {
+                    view.dispatch(Action::OpenProjectSettings { project_id }, cx);
+                });
+            })
+    };
+
     let header = div()
         .mx_3()
         .mt_2()
@@ -1825,90 +1863,44 @@ fn render_project(
                         }
                     }),
                 )
-                .child(
+                .child(min_width_zero(
                     div()
-                        .w_full()
+                        .flex_1()
                         .truncate()
                         .text_lg()
                         .font_semibold()
                         .child(project.name.clone()),
+                ))
+                .child(
+                    div()
+                        .w(px(16.0))
+                        .flex_shrink_0()
+                        .debug_selector(move || format!("project-toggle-{project_index}"))
+                        .child(
+                            Icon::new(disclosure_icon)
+                                .with_size(Size::Small)
+                                .text_color(theme.muted_foreground),
+                        ),
                 ),
         ))
         .child(
             div()
-                .w(px(16.0))
+                .flex()
+                .items_center()
+                .gap_1()
                 .flex_shrink_0()
-                .debug_selector(move || format!("project-toggle-{project_index}"))
+                .debug_selector(move || format!("project-actions-{project_index}"))
                 .child(
-                    Icon::new(disclosure_icon)
-                        .with_size(Size::Small)
-                        .text_color(theme.muted_foreground),
+                    div()
+                        .debug_selector(move || format!("project-create-workspace-{project_index}"))
+                        .child(create_button),
+                )
+                .child(
+                    div()
+                        .debug_selector(move || format!("project-settings-{project_index}"))
+                        .child(settings_button),
                 ),
         );
-
-    let new_workspace_row = {
-        let view_handle = view_handle.clone();
-        let create_icon = if create_loading {
-            IconName::LoaderCircle
-        } else {
-            IconName::Plus
-        };
-
-        div()
-            .mx_3()
-            .mt_1()
-            .h(px(32.0))
-            .px_2()
-            .rounded_md()
-            .flex()
-            .items_center()
-            .justify_between()
-            .text_color(theme.muted_foreground)
-            .hover(|s| s.bg(theme.sidebar_accent))
-            .debug_selector(move || format!("project-new-workspace-{project_index}"))
-            .child(min_width_zero(
-                div()
-                    .flex_1()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .when(!create_loading, |s| s.cursor_pointer())
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _, _, cx| {
-                            if create_loading {
-                                return;
-                            }
-                            this.dispatch(Action::CreateWorkspace { project_id }, cx);
-                        }),
-                    )
-                    .child(
-                        Icon::new(create_icon)
-                            .with_size(Size::Small)
-                            .text_color(theme.muted_foreground),
-                    )
-                    .child(min_width_zero(
-                        div().flex_1().truncate().text_sm().child("New workspace"),
-                    )),
-            ))
-            .child(
-                div()
-                    .flex_shrink_0()
-                    .debug_selector(move || format!("project-settings-{project_index}"))
-                    .child(
-                        Button::new(format!("project-settings-{project_index}"))
-                            .ghost()
-                            .compact()
-                            .icon(Icon::new(IconName::Ellipsis).text_color(theme.muted_foreground))
-                            .tooltip("Project settings")
-                            .on_click(move |_, _, app| {
-                                let _ = view_handle.update(app, |view, cx| {
-                                    view.dispatch(Action::OpenProjectSettings { project_id }, cx);
-                                });
-                            }),
-                    ),
-            )
-    };
 
     let main_workspace = project
         .workspaces
@@ -1951,7 +1943,6 @@ fn render_project(
                     .flex()
                     .flex_col()
                     .when_some(main_workspace, |s, row| s.child(row))
-                    .child(new_workspace_row)
                     .child(div().mt_1().flex().flex_col().children(workspace_rows)),
             )
         })
@@ -5625,15 +5616,16 @@ mod tests {
         let toggle_bounds = window_cx
             .debug_bounds("project-toggle-0")
             .expect("missing debug bounds for project-toggle-0");
-        assert!(toggle_bounds.right() <= header_bounds.right() + px(2.0));
-
-        let new_workspace_bounds = window_cx
-            .debug_bounds("project-new-workspace-0")
-            .expect("missing debug bounds for project-new-workspace-0");
+        let create_bounds = window_cx
+            .debug_bounds("project-create-workspace-0")
+            .expect("missing debug bounds for project-create-workspace-0");
         let settings_bounds = window_cx
             .debug_bounds("project-settings-0")
             .expect("missing debug bounds for project-settings-0");
-        assert!(settings_bounds.right() <= new_workspace_bounds.right() + px(2.0));
+
+        assert!(settings_bounds.right() <= header_bounds.right() + px(2.0));
+        assert!(create_bounds.right() <= settings_bounds.left() + px(4.0));
+        assert!(toggle_bounds.right() <= create_bounds.left() + px(8.0));
 
         let row_bounds = window_cx
             .debug_bounds("workspace-row-0-0")
