@@ -1934,9 +1934,7 @@ fn render_project(
         .workspaces
         .iter()
         .find(|w| w.status == WorkspaceStatus::Active && w.worktree_path == project.path)
-        .map(|workspace| {
-            render_main_workspace_row(cx, project_index, &project.slug, workspace, main_pane)
-        });
+        .map(|workspace| render_main_workspace_row(cx, project_index, workspace, main_pane));
 
     let workspace_rows: Vec<AnyElement> = project
         .workspaces
@@ -1953,7 +1951,6 @@ fn render_project(
                 view_handle.clone(),
                 project_index,
                 workspace_index,
-                &project.slug,
                 workspace,
                 main_pane,
                 pr_info,
@@ -1999,7 +1996,6 @@ fn render_workspace_row(
     view_handle: gpui::WeakEntity<LubanRootView>,
     project_index: usize,
     workspace_index: usize,
-    project_slug: &str,
     workspace: &luban_domain::Workspace,
     main_pane: MainPane,
     pr_info: Option<PullRequestInfo>,
@@ -2014,7 +2010,7 @@ fn render_workspace_row(
         IconName::Inbox
     };
 
-    let title = format!("{}/{}", project_slug, workspace.workspace_name);
+    let title = sidebar_workspace_title(workspace);
     let metadata = {
         let age = format_relative_age(workspace.last_activity_at);
         match age {
@@ -2177,7 +2173,6 @@ fn render_workspace_row(
 fn render_main_workspace_row(
     cx: &mut Context<LubanRootView>,
     project_index: usize,
-    project_slug: &str,
     workspace: &luban_domain::Workspace,
     main_pane: MainPane,
 ) -> AnyElement {
@@ -2185,8 +2180,8 @@ fn render_main_workspace_row(
     let is_selected = matches!(main_pane, MainPane::Workspace(id) if id == workspace.id);
     let workspace_id = workspace.id;
 
-    let title = project_slug.to_owned();
-    let metadata = workspace.branch_name.clone();
+    let title = sidebar_workspace_title(workspace);
+    let metadata = sidebar_main_workspace_metadata(workspace);
 
     div()
         .mx_3()
@@ -2238,16 +2233,30 @@ fn render_main_workspace_row(
                         .font_semibold()
                         .child(title),
                 )
-                .child(
-                    div()
-                        .w_full()
-                        .truncate()
-                        .text_xs()
-                        .text_color(theme.muted_foreground)
-                        .child(metadata),
-                ),
+                .when_some(metadata, |s, metadata| {
+                    s.child(
+                        div()
+                            .w_full()
+                            .truncate()
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child(metadata),
+                    )
+                }),
         ))
         .into_any_element()
+}
+
+fn sidebar_workspace_title(workspace: &luban_domain::Workspace) -> String {
+    workspace.workspace_name.clone()
+}
+
+fn sidebar_main_workspace_metadata(workspace: &luban_domain::Workspace) -> Option<String> {
+    if workspace.branch_name == workspace.workspace_name {
+        None
+    } else {
+        Some(workspace.branch_name.clone())
+    }
 }
 
 impl LubanRootView {
@@ -4523,6 +4532,46 @@ mod tests {
             main_pane_title(&state, MainPane::Workspace(workspace_id)),
             "abandon-about".to_owned()
         );
+    }
+
+    #[test]
+    fn sidebar_workspace_title_uses_workspace_name() {
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "w1".to_owned(),
+            branch_name: "repo/w1".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/w1"),
+        });
+
+        let workspace = state
+            .projects
+            .iter()
+            .flat_map(|p| &p.workspaces)
+            .find(|w| w.status == WorkspaceStatus::Active && w.workspace_name == "w1")
+            .expect("missing workspace w1");
+
+        assert_eq!(sidebar_workspace_title(workspace), "w1".to_owned());
+    }
+
+    #[test]
+    fn sidebar_main_workspace_metadata_is_hidden_when_it_matches_title() {
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project = &state.projects[0];
+        let workspace = project
+            .workspaces
+            .iter()
+            .find(|w| w.status == WorkspaceStatus::Active && w.worktree_path == project.path)
+            .expect("missing main workspace");
+
+        assert_eq!(sidebar_main_workspace_metadata(workspace), None);
     }
 
     #[test]
