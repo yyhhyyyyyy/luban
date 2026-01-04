@@ -24,6 +24,8 @@ fn linear_light_theme() -> ThemeConfig {
     colors.accent = Some("#eef2ff".into());
     colors.accent_foreground = Some("#3730a3".into());
     colors.ring = Some("#5e6ad2".into());
+    colors.scrollbar_thumb = Some("#cbd5e1".into());
+    colors.scrollbar_thumb_hover = Some("#94a3b8".into());
     colors.sidebar = Some("#f7f7f8".into());
     colors.sidebar_foreground = Some("#111827".into());
     colors.sidebar_border = Some("#e5e7eb".into());

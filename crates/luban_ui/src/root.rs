@@ -140,6 +140,7 @@ pub struct LubanRootView {
     terminal_enabled: bool,
     terminal_resize_hooked: bool,
     debug_layout_enabled: bool,
+    debug_scrollbar_enabled: bool,
     sidebar_width_preview: Option<Pixels>,
     sidebar_resize: Option<SidebarResizeState>,
     terminal_pane_width_preview: Option<Pixels>,
@@ -179,6 +180,7 @@ impl LubanRootView {
             terminal_enabled: true,
             terminal_resize_hooked: false,
             debug_layout_enabled: debug_layout::enabled_from_env(),
+            debug_scrollbar_enabled: debug_scrollbar::enabled_from_env(),
             sidebar_width_preview: None,
             sidebar_resize: None,
             terminal_pane_width_preview: None,
@@ -226,6 +228,7 @@ impl LubanRootView {
             terminal_enabled: false,
             terminal_resize_hooked: false,
             debug_layout_enabled: false,
+            debug_scrollbar_enabled: false,
             sidebar_width_preview: None,
             sidebar_resize: None,
             terminal_pane_width_preview: None,
@@ -994,6 +997,7 @@ impl gpui::Render for LubanRootView {
                         sidebar_width,
                         &self.workspace_pull_request_numbers,
                         &self.projects_scroll_handle,
+                        self.debug_scrollbar_enabled,
                     ))
                     .child(
                         div()
@@ -1648,10 +1652,12 @@ fn render_sidebar(
     sidebar_width: gpui::Pixels,
     workspace_pull_request_numbers: &HashMap<WorkspaceId, Option<PullRequestInfo>>,
     projects_scroll_handle: &gpui::ScrollHandle,
+    debug_scrollbar_enabled: bool,
 ) -> impl IntoElement {
     let theme = cx.theme();
     let view_handle = cx.entity().downgrade();
     let projects_scroll_handle = projects_scroll_handle.clone();
+    let debug_scroll_handle = projects_scroll_handle.clone();
 
     let add_project_button = Button::new("add-project")
         .ghost()
@@ -1750,6 +1756,16 @@ fn render_sidebar(
                         .overflow_y_scroll()
                         .track_scroll(&projects_scroll_handle)
                         .py_2()
+                        .when(debug_scrollbar_enabled, move |s| {
+                            s.on_prepaint(move |bounds, window, _app| {
+                                debug_scrollbar::record(
+                                    "projects-scroll",
+                                    window.viewport_size(),
+                                    bounds,
+                                    &debug_scroll_handle,
+                                );
+                            })
+                        })
                         .children(state.projects.iter().enumerate().map(|(i, project)| {
                             render_project(
                                 cx,
@@ -3109,6 +3125,105 @@ mod debug_layout {
             LayoutSample::to_f32(sample.y10),
             LayoutSample::to_f32(sample.w10),
             LayoutSample::to_f32(sample.h10),
+        );
+    }
+}
+
+mod debug_scrollbar {
+    use gpui::{Bounds, Pixels, ScrollHandle, Size};
+    use std::{
+        collections::HashMap,
+        sync::{Mutex, OnceLock},
+    };
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct ScrollSample {
+        viewport_w10: i32,
+        viewport_h10: i32,
+        x10: i32,
+        y10: i32,
+        w10: i32,
+        h10: i32,
+        offset_x10: i32,
+        offset_y10: i32,
+        max_x10: i32,
+        max_y10: i32,
+    }
+
+    impl ScrollSample {
+        fn new(viewport: Size<Pixels>, bounds: Bounds<Pixels>, handle: &ScrollHandle) -> Self {
+            let offset = handle.offset();
+            let max = handle.max_offset();
+            Self {
+                viewport_w10: quantize(viewport.width),
+                viewport_h10: quantize(viewport.height),
+                x10: quantize(bounds.origin.x),
+                y10: quantize(bounds.origin.y),
+                w10: quantize(bounds.size.width),
+                h10: quantize(bounds.size.height),
+                offset_x10: quantize(offset.x),
+                offset_y10: quantize(offset.y),
+                max_x10: quantize(max.width),
+                max_y10: quantize(max.height),
+            }
+        }
+
+        fn to_f32(v10: i32) -> f32 {
+            v10 as f32 / 10.0
+        }
+    }
+
+    fn quantize(pixels: Pixels) -> i32 {
+        (f32::from(pixels) * 10.0).round() as i32
+    }
+
+    fn store() -> &'static Mutex<HashMap<&'static str, ScrollSample>> {
+        static STORE: OnceLock<Mutex<HashMap<&'static str, ScrollSample>>> = OnceLock::new();
+        STORE.get_or_init(|| Mutex::new(HashMap::new()))
+    }
+
+    pub(super) fn enabled_from_env() -> bool {
+        parse_enabled(std::env::var("LUBAN_DEBUG_SCROLLBAR").ok().as_deref())
+    }
+
+    fn parse_enabled(value: Option<&str>) -> bool {
+        let Some(raw) = value else {
+            return false;
+        };
+        let normalized = raw.trim().to_ascii_lowercase();
+        matches!(normalized.as_str(), "1" | "true" | "yes" | "on")
+    }
+
+    pub(super) fn record(
+        label: &'static str,
+        viewport: Size<Pixels>,
+        bounds: Bounds<Pixels>,
+        handle: &ScrollHandle,
+    ) {
+        let sample = ScrollSample::new(viewport, bounds, handle);
+        let mut map = store().lock().unwrap();
+        if map.get(label).copied() == Some(sample) {
+            return;
+        }
+        map.insert(label, sample);
+
+        let content_w10 = sample.w10 + sample.max_x10;
+        let content_h10 = sample.h10 + sample.max_y10;
+
+        eprintln!(
+            "scroll {label} viewport={:.1}x{:.1} bounds=({:.1},{:.1}) {:.1}x{:.1} offset=({:.1},{:.1}) max=({:.1},{:.1}) content={:.1}x{:.1}",
+            ScrollSample::to_f32(sample.viewport_w10),
+            ScrollSample::to_f32(sample.viewport_h10),
+            ScrollSample::to_f32(sample.x10),
+            ScrollSample::to_f32(sample.y10),
+            ScrollSample::to_f32(sample.w10),
+            ScrollSample::to_f32(sample.h10),
+            ScrollSample::to_f32(sample.offset_x10),
+            ScrollSample::to_f32(sample.offset_y10),
+            ScrollSample::to_f32(sample.max_x10),
+            ScrollSample::to_f32(sample.max_y10),
+            ScrollSample::to_f32(content_w10),
+            ScrollSample::to_f32(content_h10),
         );
     }
 }
