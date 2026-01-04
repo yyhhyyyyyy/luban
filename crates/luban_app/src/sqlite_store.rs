@@ -390,6 +390,17 @@ impl SqliteDatabase {
             });
         }
 
+        let sidebar_width = self
+            .conn
+            .query_row(
+                "SELECT value FROM app_settings WHERE key = 'sidebar_width'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .context("failed to load sidebar width")?
+            .and_then(|value| u16::try_from(value).ok());
+
         let terminal_pane_width = self
             .conn
             .query_row(
@@ -403,6 +414,7 @@ impl SqliteDatabase {
 
         Ok(PersistedAppState {
             projects,
+            sidebar_width,
             terminal_pane_width,
         })
     }
@@ -483,6 +495,19 @@ impl SqliteDatabase {
                 &format!("DELETE FROM workspaces WHERE id NOT IN ({placeholders})"),
                 params_from_iter(workspace_ids.iter().copied().map(|id| id as i64)),
             )?;
+        }
+
+        if let Some(value) = snapshot.sidebar_width {
+            tx.execute(
+                "INSERT INTO app_settings (key, value, created_at, updated_at)
+                 VALUES (?1, ?2, COALESCE((SELECT created_at FROM app_settings WHERE key = ?1), ?3), ?3)
+                 ON CONFLICT(key) DO UPDATE SET
+                   value = excluded.value,
+                   updated_at = excluded.updated_at",
+                params!["sidebar_width", value as i64, now],
+            )?;
+        } else {
+            tx.execute("DELETE FROM app_settings WHERE key = 'sidebar_width'", [])?;
         }
 
         if let Some(value) = snapshot.terminal_pane_width {
@@ -777,6 +802,7 @@ mod tests {
                     last_activity_at_unix_seconds: None,
                 }],
             }],
+            sidebar_width: Some(280),
             terminal_pane_width: Some(360),
         };
 
@@ -805,6 +831,7 @@ mod tests {
                     last_activity_at_unix_seconds: None,
                 }],
             }],
+            sidebar_width: None,
             terminal_pane_width: None,
         };
         db.save_app_state(&snapshot).unwrap();
@@ -853,6 +880,7 @@ mod tests {
                     last_activity_at_unix_seconds: None,
                 }],
             }],
+            sidebar_width: None,
             terminal_pane_width: None,
         };
         db.save_app_state(&snapshot).unwrap();

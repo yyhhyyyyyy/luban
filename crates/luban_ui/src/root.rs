@@ -35,6 +35,7 @@ pub struct CreatedWorkspace {
 }
 
 const TERMINAL_PANE_RESIZER_WIDTH: f32 = 6.0;
+const SIDEBAR_RESIZER_WIDTH: f32 = 6.0;
 
 #[derive(Clone, Copy, Debug)]
 struct TerminalPaneResizeState {
@@ -48,6 +49,23 @@ struct TerminalPaneResizeDrag;
 struct TerminalPaneResizeGhost;
 
 impl gpui::Render for TerminalPaneResizeGhost {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        div().w(px(0.0)).h(px(0.0)).hidden()
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct SidebarResizeState {
+    start_mouse_x: Pixels,
+    start_width: Pixels,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct SidebarResizeDrag;
+
+struct SidebarResizeGhost;
+
+impl gpui::Render for SidebarResizeGhost {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         div().w(px(0.0)).h(px(0.0)).hidden()
     }
@@ -107,6 +125,8 @@ pub struct LubanRootView {
     terminal_enabled: bool,
     terminal_resize_hooked: bool,
     debug_layout_enabled: bool,
+    sidebar_width_preview: Option<Pixels>,
+    sidebar_resize: Option<SidebarResizeState>,
     terminal_pane_width_preview: Option<Pixels>,
     terminal_pane_resize: Option<TerminalPaneResizeState>,
     workspace_terminals: HashMap<WorkspaceId, WorkspaceTerminal>,
@@ -136,6 +156,8 @@ impl LubanRootView {
             terminal_enabled: true,
             terminal_resize_hooked: false,
             debug_layout_enabled: debug_layout::enabled_from_env(),
+            sidebar_width_preview: None,
+            sidebar_resize: None,
             terminal_pane_width_preview: None,
             terminal_pane_resize: None,
             workspace_terminals: HashMap::new(),
@@ -173,6 +195,8 @@ impl LubanRootView {
             terminal_enabled: false,
             terminal_resize_hooked: false,
             debug_layout_enabled: false,
+            sidebar_width_preview: None,
+            sidebar_resize: None,
             terminal_pane_width_preview: None,
             terminal_pane_resize: None,
             workspace_terminals: HashMap::new(),
@@ -771,7 +795,7 @@ impl gpui::Render for LubanRootView {
         let foreground = theme.foreground;
         let transparent = theme.transparent;
         let muted = theme.muted;
-        let sidebar_width = px(300.0);
+        let sidebar_width = self.sidebar_width(window);
         let right_pane_width = self.right_pane_width(window, sidebar_width);
         let should_render_right_pane = self.terminal_enabled
             && self.state.right_pane == RightPane::Terminal
@@ -795,6 +819,69 @@ impl gpui::Render for LubanRootView {
                     .flex_1()
                     .flex()
                     .child(render_sidebar(cx, &self.state, sidebar_width))
+                    .child(
+                        div()
+                            .w(px(SIDEBAR_RESIZER_WIDTH))
+                            .h_full()
+                            .flex_shrink_0()
+                            .cursor(CursorStyle::ResizeLeftRight)
+                            .id("sidebar-resizer")
+                            .debug_selector(|| "sidebar-resizer".to_owned())
+                            .bg(transparent)
+                            .hover(move |s| s.bg(muted))
+                            .on_drag(SidebarResizeDrag, {
+                                let view_handle = view_handle.clone();
+                                move |_, _offset, window, app| {
+                                    let start_mouse_x = window.mouse_position().x;
+                                    let start_width = sidebar_width;
+                                    let _ = view_handle.update(app, |view, cx| {
+                                        view.sidebar_resize = Some(SidebarResizeState {
+                                            start_mouse_x,
+                                            start_width,
+                                        });
+                                        view.sidebar_width_preview = Some(start_width);
+                                        cx.notify();
+                                    });
+                                    app.new(|_| SidebarResizeGhost)
+                                }
+                            })
+                            .on_drag_move::<SidebarResizeDrag>({
+                                let view_handle = view_handle.clone();
+                                move |event, window, app| {
+                                    let mouse_x = event.event.position.x;
+                                    let viewport_width = window.viewport_size().width;
+                                    let _ = view_handle.update(app, |view, cx| {
+                                        let Some(state) = view.sidebar_resize else {
+                                            return;
+                                        };
+                                        let desired =
+                                            state.start_width + (mouse_x - state.start_mouse_x);
+                                        let clamped =
+                                            view.clamp_sidebar_width(desired, viewport_width);
+                                        view.sidebar_width_preview = Some(clamped);
+                                        cx.notify();
+                                    });
+                                }
+                            })
+                            .on_mouse_up(MouseButton::Left, {
+                                let view_handle = view_handle.clone();
+                                move |_, window, app| {
+                                    let viewport_width = window.viewport_size().width;
+                                    let _ = view_handle.update(app, |view, cx| {
+                                        view.finish_sidebar_resize(viewport_width, cx);
+                                    });
+                                }
+                            })
+                            .on_mouse_up_out(MouseButton::Left, {
+                                let view_handle = view_handle.clone();
+                                move |_, window, app| {
+                                    let viewport_width = window.viewport_size().width;
+                                    let _ = view_handle.update(app, |view, cx| {
+                                        view.finish_sidebar_resize(viewport_width, cx);
+                                    });
+                                }
+                            }),
+                    )
                     .child(self.render_main(window, cx))
                     .when(should_render_right_pane, |s| {
                         let resizer = div()
@@ -893,14 +980,70 @@ impl LubanRootView {
         self._subscriptions.push(subscription);
     }
 
-    fn right_pane_width(&self, window: &Window, sidebar_width: Pixels) -> gpui::Pixels {
-        let viewport = window.viewport_size().width;
-        let divider_width = px(TERMINAL_PANE_RESIZER_WIDTH);
-        if viewport <= sidebar_width + divider_width + px(1.0) {
+    fn sidebar_width(&self, window: &Window) -> Pixels {
+        let viewport_width = window.viewport_size().width;
+        let desired = self
+            .sidebar_width_preview
+            .or_else(|| self.state.sidebar_width.map(|v| px(v as f32)))
+            .unwrap_or(px(300.0));
+        self.clamp_sidebar_width(desired, viewport_width)
+    }
+
+    fn clamp_sidebar_width(&self, desired: Pixels, viewport_width: Pixels) -> Pixels {
+        let divider_width = px(SIDEBAR_RESIZER_WIDTH);
+        if viewport_width <= divider_width + px(1.0) {
             return px(0.0);
         }
 
-        let available = viewport - sidebar_width - divider_width;
+        let min_width = px(240.0);
+        let max_width = px(480.0);
+        let min_main_width = px(480.0);
+        let min_terminal_width = px(240.0) + px(TERMINAL_PANE_RESIZER_WIDTH);
+        let reserved_right =
+            if self.terminal_enabled && self.state.right_pane == RightPane::Terminal {
+                min_terminal_width
+            } else {
+                px(0.0)
+            };
+
+        let absolute_max = viewport_width - divider_width;
+        let max_by_layout = if viewport_width > divider_width + reserved_right + min_main_width {
+            viewport_width - divider_width - reserved_right - min_main_width
+        } else {
+            px(0.0)
+        };
+        let layout_max = if max_by_layout > px(0.0) {
+            max_by_layout
+        } else {
+            absolute_max
+        };
+        let max_allowed = max_width.min(absolute_max).min(layout_max);
+        let min_allowed = min_width.min(max_allowed);
+
+        desired.clamp(min_allowed, max_allowed)
+    }
+
+    fn finish_sidebar_resize(&mut self, viewport_width: Pixels, cx: &mut Context<Self>) {
+        self.sidebar_resize = None;
+
+        let Some(preview) = self.sidebar_width_preview.take() else {
+            return;
+        };
+
+        let clamped = self.clamp_sidebar_width(preview, viewport_width);
+        let width = f32::from(clamped).round().max(0.0) as u16;
+        self.dispatch(Action::SidebarWidthChanged { width }, cx);
+    }
+
+    fn right_pane_width(&self, window: &Window, sidebar_width: Pixels) -> gpui::Pixels {
+        let viewport = window.viewport_size().width;
+        let sidebar_divider_width = px(SIDEBAR_RESIZER_WIDTH);
+        let divider_width = px(TERMINAL_PANE_RESIZER_WIDTH);
+        if viewport <= sidebar_width + sidebar_divider_width + divider_width + px(1.0) {
+            return px(0.0);
+        }
+
+        let available = viewport - sidebar_width - sidebar_divider_width - divider_width;
         let min_main_width = px(640.0);
         let min_user_main_width = px(480.0);
         let preferred_main_width = px(900.0);
@@ -944,12 +1087,13 @@ impl LubanRootView {
         viewport_width: Pixels,
         sidebar_width: Pixels,
     ) -> Pixels {
+        let sidebar_divider_width = px(SIDEBAR_RESIZER_WIDTH);
         let divider_width = px(TERMINAL_PANE_RESIZER_WIDTH);
-        if viewport_width <= sidebar_width + divider_width + px(1.0) {
+        if viewport_width <= sidebar_width + sidebar_divider_width + divider_width + px(1.0) {
             return px(0.0);
         }
 
-        let available = viewport_width - sidebar_width - divider_width;
+        let available = viewport_width - sidebar_width - sidebar_divider_width - divider_width;
         let min_main_width = px(480.0);
         let min_width = px(240.0);
         let max_width = px(480.0);
@@ -1380,6 +1524,7 @@ fn render_sidebar(
         .flex_shrink_0()
         .flex()
         .flex_col()
+        .debug_selector(|| "sidebar".to_owned())
         .bg(theme.sidebar)
         .text_color(theme.sidebar_foreground)
         .border_r_1()
@@ -3721,6 +3866,7 @@ mod tests {
         fn load_app_state(&self) -> Result<PersistedAppState, String> {
             Ok(PersistedAppState {
                 projects: Vec::new(),
+                sidebar_width: None,
                 terminal_pane_width: None,
             })
         }
@@ -5094,6 +5240,71 @@ mod tests {
             initial_right_pane.size,
             resized_right_pane.size
         );
+    }
+
+    #[gpui::test]
+    async fn sidebar_can_be_resized_by_dragging_divider(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "abandon-about".to_owned(),
+            branch_name: "repo/branch".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+        });
+        let workspace_id = state.projects[0].workspaces[0].id;
+        state.main_pane = MainPane::Workspace(workspace_id);
+
+        let (view, window_cx) = cx.add_window_view(|_window, cx| {
+            let mut view = LubanRootView::with_state(services, state, cx);
+            view.terminal_enabled = true;
+            view
+        });
+
+        window_cx.simulate_resize(size(px(1200.0), px(720.0)));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        let initial_sidebar = window_cx
+            .debug_bounds("sidebar")
+            .expect("missing debug bounds for sidebar");
+        let resizer = window_cx
+            .debug_bounds("sidebar-resizer")
+            .expect("missing debug bounds for sidebar-resizer");
+
+        let start = resizer.center();
+        let mid = point(start.x + px(24.0), start.y);
+        let end = point(start.x + px(200.0), start.y);
+
+        window_cx.simulate_mouse_down(start, gpui::MouseButton::Left, Modifiers::none());
+        window_cx.simulate_mouse_move(mid, Some(gpui::MouseButton::Left), Modifiers::none());
+        window_cx.simulate_mouse_move(end, Some(gpui::MouseButton::Left), Modifiers::none());
+        window_cx.simulate_mouse_up(end, gpui::MouseButton::Left, Modifiers::none());
+
+        for _ in 0..3 {
+            window_cx.run_until_parked();
+            window_cx.refresh().unwrap();
+        }
+
+        let resized_sidebar = window_cx
+            .debug_bounds("sidebar")
+            .expect("missing debug bounds for sidebar");
+        assert!(
+            resized_sidebar.size.width >= initial_sidebar.size.width + px(120.0),
+            "initial={:?} resized={:?}",
+            initial_sidebar.size,
+            resized_sidebar.size
+        );
+
+        let saved_width = view.read_with(window_cx, |v, _| v.debug_state().sidebar_width);
+        assert!(saved_width.is_some());
     }
 
     #[gpui::test]

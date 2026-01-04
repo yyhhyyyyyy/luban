@@ -298,6 +298,7 @@ pub struct AppState {
     pub projects: Vec<Project>,
     pub main_pane: MainPane,
     pub right_pane: RightPane,
+    pub sidebar_width: Option<u16>,
     pub terminal_pane_width: Option<u16>,
     pub conversations: HashMap<WorkspaceId, WorkspaceConversation>,
     pub last_error: Option<String>,
@@ -306,6 +307,7 @@ pub struct AppState {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PersistedAppState {
     pub projects: Vec<PersistedProject>,
+    pub sidebar_width: Option<u16>,
     pub terminal_pane_width: Option<u16>,
 }
 
@@ -417,6 +419,9 @@ pub enum Action {
     TerminalPaneWidthChanged {
         width: u16,
     },
+    SidebarWidthChanged {
+        width: u16,
+    },
 
     AppStateLoaded {
         persisted: PersistedAppState,
@@ -469,6 +474,7 @@ impl AppState {
             projects: Vec::new(),
             main_pane: MainPane::None,
             right_pane: RightPane::None,
+            sidebar_width: None,
             terminal_pane_width: None,
             conversations: HashMap::new(),
             last_error: None,
@@ -904,6 +910,10 @@ impl AppState {
                 self.terminal_pane_width = Some(width);
                 vec![Effect::SaveAppState]
             }
+            Action::SidebarWidthChanged { width } => {
+                self.sidebar_width = Some(width);
+                vec![Effect::SaveAppState]
+            }
 
             Action::AppStateLoaded { persisted } => {
                 if !self.projects.is_empty() {
@@ -937,6 +947,7 @@ impl AppState {
                             .collect(),
                     })
                     .collect();
+                self.sidebar_width = persisted.sidebar_width;
                 self.terminal_pane_width = persisted.terminal_pane_width;
 
                 let max_project_id = self.projects.iter().map(|p| p.id.0).max().unwrap_or(0);
@@ -998,6 +1009,7 @@ impl AppState {
                         .collect(),
                 })
                 .collect(),
+            sidebar_width: self.sidebar_width,
             terminal_pane_width: self.terminal_pane_width,
         }
     }
@@ -1251,16 +1263,40 @@ mod tests {
         assert!(matches!(effects[0], Effect::SaveAppState));
 
         let persisted = state.to_persisted();
+        assert_eq!(persisted.sidebar_width, None);
         assert_eq!(persisted.terminal_pane_width, Some(360));
 
         let mut state = AppState::new();
         state.apply(Action::AppStateLoaded {
             persisted: PersistedAppState {
                 projects: Vec::new(),
+                sidebar_width: None,
                 terminal_pane_width: Some(480),
             },
         });
         assert_eq!(state.terminal_pane_width, Some(480));
+    }
+
+    #[test]
+    fn sidebar_width_is_persisted() {
+        let mut state = AppState::new();
+        let effects = state.apply(Action::SidebarWidthChanged { width: 280 });
+        assert_eq!(state.sidebar_width, Some(280));
+        assert_eq!(effects.len(), 1);
+        assert!(matches!(effects[0], Effect::SaveAppState));
+
+        let persisted = state.to_persisted();
+        assert_eq!(persisted.sidebar_width, Some(280));
+
+        let mut state = AppState::new();
+        state.apply(Action::AppStateLoaded {
+            persisted: PersistedAppState {
+                projects: Vec::new(),
+                sidebar_width: Some(360),
+                terminal_pane_width: None,
+            },
+        });
+        assert_eq!(state.sidebar_width, Some(360));
     }
 
     #[test]
