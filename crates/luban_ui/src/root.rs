@@ -745,13 +745,20 @@ impl gpui::Render for LubanRootView {
         div()
             .size_full()
             .flex()
+            .flex_col()
             .bg(theme.background)
             .text_color(theme.foreground)
-            .child(render_sidebar(cx, &self.state, sidebar_width))
-            .child(self.render_main(window, cx))
-            .when(should_render_right_pane, |s| {
-                s.child(self.render_right_pane(window, cx))
-            })
+            .child(render_titlebar(cx, &self.state, sidebar_width))
+            .child(
+                div()
+                    .flex_1()
+                    .flex()
+                    .child(render_sidebar(cx, &self.state, sidebar_width))
+                    .child(self.render_main(window, cx))
+                    .when(should_render_right_pane, |s| {
+                        s.child(self.render_right_pane(window, cx))
+                    }),
+            )
     }
 }
 
@@ -904,13 +911,20 @@ impl LubanRootView {
     }
 }
 
-fn render_sidebar(
+fn render_titlebar(
     cx: &mut Context<LubanRootView>,
     state: &AppState,
     sidebar_width: gpui::Pixels,
-) -> impl IntoElement {
+) -> AnyElement {
     let theme = cx.theme();
     let view_handle = cx.entity().downgrade();
+
+    let titlebar_height = px(44.0);
+    let sidebar_leading_padding = if cfg!(target_os = "macos") {
+        px(72.0)
+    } else {
+        px(12.0)
+    };
 
     let add_project_button = Button::new("add-project")
         .ghost()
@@ -951,6 +965,202 @@ fn render_sidebar(
             .detach();
         });
 
+    let TitlebarContext {
+        branch_label,
+        worktree_label,
+        ide_workspace_id,
+    } = titlebar_context(state);
+
+    let open_in_zed_tooltip = if ide_workspace_id.is_some() {
+        "Open in Zed"
+    } else {
+        "Select a workspace to open in Zed"
+    };
+    let open_in_zed_button = {
+        let view_handle = cx.entity().downgrade();
+        Button::new("titlebar-open-in-zed")
+            .outline()
+            .compact()
+            .disabled(ide_workspace_id.is_none())
+            .label("Open ▾")
+            .tooltip(open_in_zed_tooltip)
+            .on_click(move |_, _, app| {
+                let Some(workspace_id) = ide_workspace_id else {
+                    return;
+                };
+                let _ = view_handle.update(app, |view, cx| {
+                    view.dispatch(Action::OpenWorkspaceInIde { workspace_id }, cx);
+                });
+            })
+    };
+
+    let sidebar_titlebar = div()
+        .w(sidebar_width)
+        .h(titlebar_height)
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .justify_between()
+        .bg(theme.sidebar)
+        .text_color(theme.sidebar_foreground)
+        .border_r_1()
+        .border_color(theme.sidebar_border)
+        .border_b_1()
+        .border_color(theme.sidebar_border)
+        .group("")
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .pl(sidebar_leading_padding)
+                .child(
+                    Icon::new(IconName::GalleryVerticalEnd)
+                        .with_size(Size::Small)
+                        .text_color(theme.muted_foreground),
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .font_semibold()
+                        .text_color(theme.muted_foreground)
+                        .child("Workspaces"),
+                ),
+        )
+        .child(
+            div()
+                .pr_2()
+                .debug_selector(|| "add-project".to_owned())
+                .invisible()
+                .group_hover("", |s| s.visible())
+                .child(add_project_button),
+        );
+
+    let nav_back = Button::new("titlebar-nav-back")
+        .ghost()
+        .compact()
+        .disabled(true)
+        .icon(IconName::ArrowLeft)
+        .tooltip("Back");
+    let nav_forward = Button::new("titlebar-nav-forward")
+        .ghost()
+        .compact()
+        .disabled(true)
+        .icon(IconName::ArrowRight)
+        .tooltip("Forward");
+
+    let branch_indicator = div()
+        .flex()
+        .items_center()
+        .gap_2()
+        .child(
+            Icon::new(IconName::GitHub)
+                .with_size(Size::Small)
+                .text_color(theme.muted_foreground),
+        )
+        .child(div().text_sm().child(branch_label));
+
+    let worktree_chip = worktree_label
+        .map(|label| {
+            let icon = div()
+                .w(px(18.0))
+                .h(px(18.0))
+                .rounded_sm()
+                .bg(theme.foreground)
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    Icon::new(IconName::FolderOpen)
+                        .with_size(Size::Small)
+                        .text_color(theme.primary_foreground),
+                );
+
+            div()
+                .h(px(28.0))
+                .px_2()
+                .flex()
+                .items_center()
+                .gap_2()
+                .rounded_md()
+                .border_1()
+                .border_color(theme.border)
+                .bg(theme.background)
+                .child(icon)
+                .child(div().text_sm().child(label))
+                .into_any_element()
+        })
+        .unwrap_or_else(|| div().hidden().into_any_element());
+
+    let main_titlebar = div()
+        .flex_1()
+        .h(titlebar_height)
+        .px_4()
+        .flex()
+        .items_center()
+        .justify_between()
+        .border_b_1()
+        .border_color(theme.title_bar_border)
+        .bg(theme.title_bar)
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(nav_back)
+                .child(nav_forward)
+                .child(div().w(px(8.0)))
+                .child(branch_indicator),
+        )
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(worktree_chip)
+                .child(open_in_zed_button),
+        );
+
+    div()
+        .w_full()
+        .flex()
+        .child(sidebar_titlebar)
+        .child(main_titlebar)
+        .into_any_element()
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct TitlebarContext {
+    branch_label: String,
+    worktree_label: Option<String>,
+    ide_workspace_id: Option<WorkspaceId>,
+}
+
+fn titlebar_context(state: &AppState) -> TitlebarContext {
+    let active_workspace = match state.main_pane {
+        MainPane::Workspace(workspace_id) => state.workspace(workspace_id),
+        _ => None,
+    };
+    let fallback_title = main_pane_title(state, state.main_pane);
+
+    TitlebarContext {
+        branch_label: active_workspace
+            .map(|workspace| workspace.branch_name.clone())
+            .unwrap_or(fallback_title),
+        worktree_label: active_workspace
+            .and_then(|workspace| workspace.worktree_path.file_name())
+            .map(|name| format!("/{}", name.to_string_lossy())),
+        ide_workspace_id: active_workspace.map(|workspace| workspace.id),
+    }
+}
+
+fn render_sidebar(
+    cx: &mut Context<LubanRootView>,
+    state: &AppState,
+    sidebar_width: gpui::Pixels,
+) -> impl IntoElement {
+    let theme = cx.theme();
+
     div()
         .w(sidebar_width)
         .h_full()
@@ -961,27 +1171,6 @@ fn render_sidebar(
         .text_color(theme.sidebar_foreground)
         .border_r_1()
         .border_color(theme.sidebar_border)
-        .child(
-            div()
-                .h(px(40.0))
-                .px_2()
-                .flex()
-                .items_center()
-                .justify_between()
-                .border_b_1()
-                .border_color(theme.sidebar_border)
-                .child(
-                    div()
-                        .text_color(theme.muted_foreground)
-                        .text_xs()
-                        .child("PROJECTS"),
-                )
-                .child(
-                    div()
-                        .debug_selector(|| "add-project".to_owned())
-                        .child(add_project_button),
-                ),
-        )
         .child(
             div()
                 .flex_1()
@@ -1362,7 +1551,6 @@ impl LubanRootView {
 
     fn render_main(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let view_handle = cx.entity().downgrade();
-        let title = main_pane_title(&self.state, self.state.main_pane);
 
         let content = match self.state.main_pane {
             MainPane::None => {
@@ -1889,60 +2077,6 @@ impl LubanRootView {
         };
 
         let theme = cx.theme();
-        let ide_workspace_id = match self.state.main_pane {
-            MainPane::Workspace(workspace_id) if self.state.workspace(workspace_id).is_some() => {
-                Some(workspace_id)
-            }
-            _ => None,
-        };
-        let ide_tooltip = if ide_workspace_id.is_some() {
-            "Open in Zed"
-        } else {
-            "Select a workspace to open in Zed"
-        };
-        let open_in_zed_button = {
-            let view_handle = view_handle.clone();
-            Button::new("open-in-zed")
-                .ghost()
-                .compact()
-                .disabled(ide_workspace_id.is_none())
-                .icon(
-                    Icon::empty()
-                        .path("icons/zed.svg")
-                        .with_size(Size::Small)
-                        .text_color(theme.muted_foreground),
-                )
-                .label("Zed")
-                .tooltip(ide_tooltip)
-                .on_click(move |_, _, app| {
-                    let Some(workspace_id) = ide_workspace_id else {
-                        return;
-                    };
-                    let _ = view_handle.update(app, |view, cx| {
-                        view.dispatch(Action::OpenWorkspaceInIde { workspace_id }, cx);
-                    });
-                })
-        };
-        let ide_tile = div()
-            .h(px(28.0))
-            .px_1()
-            .flex()
-            .items_center()
-            .rounded_md()
-            .border_1()
-            .border_color(theme.border)
-            .child(open_in_zed_button);
-        let title_bar = div()
-            .h(px(44.0))
-            .px_4()
-            .flex()
-            .items_center()
-            .justify_between()
-            .border_b_1()
-            .border_color(theme.title_bar_border)
-            .bg(theme.title_bar)
-            .child(div().text_sm().child(title))
-            .child(ide_tile);
 
         min_width_zero(
             div()
@@ -1951,7 +2085,6 @@ impl LubanRootView {
                 .flex()
                 .flex_col()
                 .bg(theme.background)
-                .child(title_bar)
                 .when_some(self.state.last_error.clone(), |s, message| {
                     let theme = cx.theme();
                     let view_handle = cx.entity().downgrade();
@@ -3346,6 +3479,39 @@ mod tests {
             main_pane_title(&state, MainPane::Workspace(workspace_id)),
             "abandon-about".to_owned()
         );
+    }
+
+    #[test]
+    fn titlebar_context_tracks_selected_workspace() {
+        let mut state = AppState::new();
+        assert_eq!(
+            titlebar_context(&state),
+            TitlebarContext {
+                branch_label: String::new(),
+                worktree_label: None,
+                ide_workspace_id: None,
+            }
+        );
+
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "abandon-about".to_owned(),
+            branch_name: "luban/abandon-about".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+        });
+        let workspace_id = state.projects[0].workspaces[0].id;
+
+        state.apply(Action::OpenWorkspace { workspace_id });
+
+        let context = titlebar_context(&state);
+        assert_eq!(context.branch_label, "luban/abandon-about".to_owned());
+        assert_eq!(context.worktree_label.as_deref(), Some("/abandon-about"));
+        assert_eq!(context.ide_workspace_id, Some(workspace_id));
     }
 
     #[gpui::test]

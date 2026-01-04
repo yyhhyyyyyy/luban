@@ -1,5 +1,6 @@
 use gpui::{
-    App, Application, Bounds, KeyBinding, WindowBounds, WindowOptions, prelude::*, px, size,
+    App, Application, Bounds, KeyBinding, TitlebarOptions, WindowBounds, WindowOptions, point,
+    prelude::*, px, size,
 };
 use gpui_component::{Root, Theme, ThemeMode};
 use gpui_ghostty_terminal::view::{Copy, Paste, SelectAll};
@@ -32,6 +33,11 @@ fn main() {
             cx.open_window(
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
+                    titlebar: Some(TitlebarOptions {
+                        title: None,
+                        appears_transparent: true,
+                        traffic_light_position: Some(point(px(12.0), px(12.0))),
+                    }),
                     ..Default::default()
                 },
                 move |window, cx| {
