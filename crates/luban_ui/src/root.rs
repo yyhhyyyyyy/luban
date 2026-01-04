@@ -1291,53 +1291,7 @@ fn render_titlebar(
     terminal_enabled: bool,
 ) -> AnyElement {
     let theme = cx.theme();
-    let view_handle = cx.entity().downgrade();
-
     let titlebar_height = px(44.0);
-    let sidebar_leading_padding = if cfg!(target_os = "macos") {
-        px(72.0)
-    } else {
-        px(12.0)
-    };
-
-    let add_project_button = Button::new("add-project")
-        .ghost()
-        .compact()
-        .icon(Icon::new(IconName::Plus).text_color(theme.muted_foreground))
-        .tooltip("Add project")
-        .on_click(move |_, _window, app| {
-            let view_handle = view_handle.clone();
-            let options = gpui::PathPromptOptions {
-                files: false,
-                directories: true,
-                multiple: false,
-                prompt: Some("Add Project".into()),
-            };
-
-            let receiver = app.prompt_for_paths(options);
-            app.spawn(move |cx: &mut gpui::AsyncApp| {
-                let mut async_cx = cx.clone();
-                async move {
-                    let Ok(result) = receiver.await else {
-                        return;
-                    };
-                    let Ok(Some(mut paths)) = result else {
-                        return;
-                    };
-                    let Some(path) = paths.pop() else {
-                        return;
-                    };
-
-                    let _ = view_handle.update(
-                        &mut async_cx,
-                        |view: &mut LubanRootView, view_cx: &mut Context<LubanRootView>| {
-                            view.dispatch(Action::AddProject { path }, view_cx);
-                        },
-                    );
-                }
-            })
-            .detach();
-        });
 
     let TitlebarContext {
         branch_label,
@@ -1403,54 +1357,12 @@ fn render_titlebar(
         .flex_shrink_0()
         .flex()
         .items_center()
-        .justify_between()
         .bg(theme.sidebar)
         .text_color(theme.sidebar_foreground)
         .border_r_1()
         .border_color(theme.sidebar_border)
         .border_b_1()
-        .border_color(theme.sidebar_border)
-        .group("")
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .gap_2()
-                .pl(sidebar_leading_padding)
-                .child(
-                    Icon::new(IconName::GalleryVerticalEnd)
-                        .with_size(Size::Small)
-                        .text_color(theme.muted_foreground),
-                )
-                .child(
-                    div()
-                        .text_sm()
-                        .font_semibold()
-                        .text_color(theme.muted_foreground)
-                        .child("Workspaces"),
-                ),
-        )
-        .child(
-            div()
-                .pr_2()
-                .debug_selector(|| "add-project".to_owned())
-                .invisible()
-                .group_hover("", |s| s.visible())
-                .child(add_project_button),
-        );
-
-    let nav_back = Button::new("titlebar-nav-back")
-        .ghost()
-        .compact()
-        .disabled(true)
-        .icon(IconName::ArrowLeft)
-        .tooltip("Back");
-    let nav_forward = Button::new("titlebar-nav-forward")
-        .ghost()
-        .compact()
-        .disabled(true)
-        .icon(IconName::ArrowRight)
-        .tooltip("Forward");
+        .border_color(theme.sidebar_border);
 
     let branch_indicator = div()
         .flex()
@@ -1473,16 +1385,7 @@ fn render_titlebar(
         .border_b_1()
         .border_color(theme.title_bar_border)
         .bg(theme.title_bar)
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .gap_2()
-                .child(nav_back)
-                .child(nav_forward)
-                .child(div().w(px(8.0)))
-                .child(branch_indicator),
-        )
+        .child(div().flex().items_center().gap_2().child(branch_indicator))
         .child(
             div()
                 .flex()
@@ -1536,6 +1439,46 @@ fn render_sidebar(
     sidebar_width: gpui::Pixels,
 ) -> impl IntoElement {
     let theme = cx.theme();
+    let view_handle = cx.entity().downgrade();
+
+    let add_project_button = Button::new("add-project")
+        .ghost()
+        .compact()
+        .icon(Icon::new(IconName::Plus).text_color(theme.muted_foreground))
+        .tooltip("Add project")
+        .on_click(move |_, _window, app| {
+            let view_handle = view_handle.clone();
+            let options = gpui::PathPromptOptions {
+                files: false,
+                directories: true,
+                multiple: false,
+                prompt: Some("Add Project".into()),
+            };
+
+            let receiver = app.prompt_for_paths(options);
+            app.spawn(move |cx: &mut gpui::AsyncApp| {
+                let mut async_cx = cx.clone();
+                async move {
+                    let Ok(result) = receiver.await else {
+                        return;
+                    };
+                    let Ok(Some(mut paths)) = result else {
+                        return;
+                    };
+                    let Some(path) = paths.pop() else {
+                        return;
+                    };
+
+                    let _ = view_handle.update(
+                        &mut async_cx,
+                        |view: &mut LubanRootView, view_cx: &mut Context<LubanRootView>| {
+                            view.dispatch(Action::AddProject { path }, view_cx);
+                        },
+                    );
+                }
+            })
+            .detach();
+        });
 
     div()
         .w(sidebar_width)
@@ -1548,6 +1491,40 @@ fn render_sidebar(
         .text_color(theme.sidebar_foreground)
         .border_r_1()
         .border_color(theme.sidebar_border)
+        .child(
+            div()
+                .h(px(44.0))
+                .px_4()
+                .flex()
+                .items_center()
+                .justify_between()
+                .border_b_1()
+                .border_color(theme.sidebar_border)
+                .debug_selector(|| "sidebar-workspaces-header".to_owned())
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            Icon::new(IconName::GalleryVerticalEnd)
+                                .with_size(Size::Small)
+                                .text_color(theme.muted_foreground),
+                        )
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_semibold()
+                                .text_color(theme.muted_foreground)
+                                .child("Workspaces"),
+                        ),
+                )
+                .child(
+                    div()
+                        .debug_selector(|| "add-project".to_owned())
+                        .child(add_project_button),
+                ),
+        )
         .child(
             div()
                 .flex_1()
