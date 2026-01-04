@@ -80,6 +80,12 @@ pub struct RunAgentTurnRequest {
     pub prompt: String,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PullRequestInfo {
+    pub number: u64,
+    pub is_draft: bool,
+}
+
 pub trait ProjectWorkspaceService: Send + Sync {
     fn load_app_state(&self) -> Result<PersistedAppState, String>;
 
@@ -120,7 +126,10 @@ pub trait ProjectWorkspaceService: Send + Sync {
 
     fn gh_is_authorized(&self) -> Result<bool, String>;
 
-    fn gh_pull_request_number(&self, worktree_path: PathBuf) -> Result<Option<u64>, String>;
+    fn gh_pull_request_info(
+        &self,
+        worktree_path: PathBuf,
+    ) -> Result<Option<PullRequestInfo>, String>;
 }
 
 pub struct LubanRootView {
@@ -140,7 +149,7 @@ pub struct LubanRootView {
     gh_authorized: Option<bool>,
     gh_auth_check_inflight: bool,
     gh_last_auth_check_at: Option<Instant>,
-    workspace_pull_request_numbers: HashMap<WorkspaceId, Option<u64>>,
+    workspace_pull_request_numbers: HashMap<WorkspaceId, Option<PullRequestInfo>>,
     workspace_pull_request_inflight: HashSet<WorkspaceId>,
     chat_input: Option<gpui::Entity<InputState>>,
     expanded_agent_items: HashSet<String>,
@@ -387,11 +396,11 @@ impl LubanRootView {
                         async move {
                             let result = async_cx
                                 .background_spawn(async move {
-                                    services.gh_pull_request_number(worktree_path)
+                                    services.gh_pull_request_info(worktree_path)
                                 })
                                 .await;
 
-                            let pr_number: Option<u64> = result.unwrap_or_default();
+                            let pr_number: Option<PullRequestInfo> = result.unwrap_or_default();
 
                             let _ = this.update(
                                 &mut async_cx,
@@ -1585,7 +1594,7 @@ fn render_sidebar(
     cx: &mut Context<LubanRootView>,
     state: &AppState,
     sidebar_width: gpui::Pixels,
-    workspace_pull_request_numbers: &HashMap<WorkspaceId, Option<u64>>,
+    workspace_pull_request_numbers: &HashMap<WorkspaceId, Option<PullRequestInfo>>,
 ) -> impl IntoElement {
     let theme = cx.theme();
     let view_handle = cx.entity().downgrade();
@@ -1697,7 +1706,7 @@ fn render_project(
     project_index: usize,
     project: &luban_domain::Project,
     main_pane: MainPane,
-    workspace_pull_request_numbers: &HashMap<WorkspaceId, Option<u64>>,
+    workspace_pull_request_numbers: &HashMap<WorkspaceId, Option<PullRequestInfo>>,
 ) -> AnyElement {
     let theme = cx.theme();
     let is_selected = matches!(main_pane, MainPane::ProjectSettings(id) if id == project.id);
@@ -1839,7 +1848,7 @@ fn render_project(
         .filter(|w| w.status == WorkspaceStatus::Active && w.worktree_path != project.path)
         .enumerate()
         .map(|(workspace_index, workspace)| {
-            let pr_number = workspace_pull_request_numbers
+            let pr_info = workspace_pull_request_numbers
                 .get(&workspace.id)
                 .copied()
                 .flatten();
@@ -1851,7 +1860,7 @@ fn render_project(
                 &project.slug,
                 workspace,
                 main_pane,
-                pr_number,
+                pr_info,
             )
         })
         .collect();
@@ -1898,7 +1907,7 @@ fn render_workspace_row(
     project_slug: &str,
     workspace: &luban_domain::Workspace,
     main_pane: MainPane,
-    pr_number: Option<u64>,
+    pr_info: Option<PullRequestInfo>,
 ) -> AnyElement {
     let theme = cx.theme();
     let is_selected = matches!(main_pane, MainPane::Workspace(id) if id == workspace.id);
@@ -1918,7 +1927,12 @@ fn render_workspace_row(
             None => workspace.branch_name.clone(),
         }
     };
-    let pr_label = pr_number.map(|number| format!("#{number}"));
+    let pr_label = pr_info.map(|info| format!("#{}", info.number));
+    let git_icon = if pr_info.is_some() {
+        "icons/git-pull-request-arrow.svg"
+    } else {
+        "icons/git-branch.svg"
+    };
 
     let row = div()
         .mx_3()
@@ -1942,11 +1956,21 @@ fn render_workspace_row(
         })
         .debug_selector(move || format!("workspace-row-{project_index}-{workspace_index}"))
         .child(
-            div().pt(px(1.0)).child(
-                Icon::new(IconName::Network)
-                    .with_size(Size::Small)
-                    .text_color(theme.muted_foreground),
-            ),
+            div()
+                .pt(px(1.0))
+                .debug_selector(move || {
+                    if pr_info.is_some() {
+                        format!("workspace-git-icon-pr-{project_index}-{workspace_index}")
+                    } else {
+                        format!("workspace-git-icon-branch-{project_index}-{workspace_index}")
+                    }
+                })
+                .child(
+                    Icon::empty()
+                        .path(git_icon)
+                        .with_size(Size::Small)
+                        .text_color(theme.muted_foreground),
+                ),
         )
         .child(min_width_zero(
             div()
@@ -4269,7 +4293,10 @@ mod tests {
             Ok(false)
         }
 
-        fn gh_pull_request_number(&self, _worktree_path: PathBuf) -> Result<Option<u64>, String> {
+        fn gh_pull_request_info(
+            &self,
+            _worktree_path: PathBuf,
+        ) -> Result<Option<PullRequestInfo>, String> {
             Ok(None)
         }
     }
@@ -6440,7 +6467,7 @@ mod tests {
     }
 
     struct FakeGhService {
-        pr_numbers: HashMap<PathBuf, Option<u64>>,
+        pr_numbers: HashMap<PathBuf, Option<PullRequestInfo>>,
     }
 
     impl ProjectWorkspaceService for FakeGhService {
@@ -6512,7 +6539,10 @@ mod tests {
             Ok(true)
         }
 
-        fn gh_pull_request_number(&self, worktree_path: PathBuf) -> Result<Option<u64>, String> {
+        fn gh_pull_request_info(
+            &self,
+            worktree_path: PathBuf,
+        ) -> Result<Option<PullRequestInfo>, String> {
             Ok(self.pr_numbers.get(&worktree_path).copied().flatten())
         }
     }
@@ -6541,7 +6571,13 @@ mod tests {
         state.projects[0].expanded = true;
 
         let mut pr_numbers = HashMap::new();
-        pr_numbers.insert(PathBuf::from("/tmp/luban/worktrees/repo/w1"), Some(123));
+        pr_numbers.insert(
+            PathBuf::from("/tmp/luban/worktrees/repo/w1"),
+            Some(PullRequestInfo {
+                number: 123,
+                is_draft: false,
+            }),
+        );
         pr_numbers.insert(PathBuf::from("/tmp/luban/worktrees/repo/w2"), None);
         let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeGhService { pr_numbers });
 
@@ -6579,6 +6615,18 @@ mod tests {
         assert!(
             window_cx.debug_bounds("workspace-pr-0-1").is_none(),
             "expected PR label to be hidden for workspace without PR number"
+        );
+        assert!(
+            window_cx
+                .debug_bounds("workspace-git-icon-pr-0-0")
+                .is_some(),
+            "expected PR icon for workspace with PR number"
+        );
+        assert!(
+            window_cx
+                .debug_bounds("workspace-git-icon-branch-0-1")
+                .is_some(),
+            "expected branch icon for workspace without PR number"
         );
     }
 }

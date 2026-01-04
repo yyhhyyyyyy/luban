@@ -16,7 +16,7 @@ use std::{
 };
 
 use crate::sqlite_store::SqliteStore;
-use luban_ui::{CreatedWorkspace, ProjectWorkspaceService, RunAgentTurnRequest};
+use luban_ui::{CreatedWorkspace, ProjectWorkspaceService, PullRequestInfo, RunAgentTurnRequest};
 
 const SIDECAR_EVENT_PREFIX: &str = "__LUBAN_EVENT__ ";
 
@@ -1303,9 +1303,19 @@ impl ProjectWorkspaceService for GitWorkspaceService {
         Ok(output.ok().map(|o| o.status.success()).unwrap_or(false))
     }
 
-    fn gh_pull_request_number(&self, worktree_path: PathBuf) -> Result<Option<u64>, String> {
+    fn gh_pull_request_info(
+        &self,
+        worktree_path: PathBuf,
+    ) -> Result<Option<PullRequestInfo>, String> {
+        #[derive(serde::Deserialize)]
+        struct GhPullRequestView {
+            number: u64,
+            #[serde(default, rename = "isDraft")]
+            is_draft: bool,
+        }
+
         let output = Command::new("gh")
-            .args(["pr", "view", "--json", "number"])
+            .args(["pr", "view", "--json", "number,isDraft"])
             .current_dir(worktree_path)
             .output();
 
@@ -1316,10 +1326,13 @@ impl ProjectWorkspaceService for GitWorkspaceService {
             return Ok(None);
         }
 
-        let Ok(value) = serde_json::from_slice::<serde_json::Value>(&output.stdout) else {
+        let Ok(value) = serde_json::from_slice::<GhPullRequestView>(&output.stdout) else {
             return Ok(None);
         };
-        Ok(value.get("number").and_then(|v| v.as_u64()))
+        Ok(Some(PullRequestInfo {
+            number: value.number,
+            is_draft: value.is_draft,
+        }))
     }
 }
 
