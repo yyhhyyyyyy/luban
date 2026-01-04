@@ -2211,7 +2211,8 @@ fn render_main_workspace_row(
         .debug_selector(move || format!("workspace-main-row-{project_index}"))
         .child(
             div().pt(px(1.0)).child(
-                Icon::new(IconName::Star)
+                Icon::empty()
+                    .path("icons/house.svg")
                     .with_size(Size::Small)
                     .text_color(theme.muted_foreground),
             ),
