@@ -4583,6 +4583,88 @@ mod tests {
     }
 
     #[gpui::test]
+    async fn chat_composer_stays_in_viewport_with_terminal_and_long_history(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "abandon-about".to_owned(),
+            branch_name: "luban/abandon-about".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+        });
+        let workspace_id = state.projects[0].workspaces[0].id;
+        state.main_pane = MainPane::Workspace(workspace_id);
+        state.right_pane = RightPane::Terminal;
+
+        let long_text = std::iter::repeat_n(
+            "This is a long message that should wrap and increase history height.\n",
+            120,
+        )
+        .collect::<String>();
+
+        let mut entries = Vec::new();
+        for i in 0..18 {
+            entries.push(ConversationEntry::UserMessage {
+                text: format!("message {i}\n{long_text}"),
+            });
+            entries.push(ConversationEntry::TurnDuration { duration_ms: 1000 });
+        }
+
+        state.apply(Action::ConversationLoaded {
+            workspace_id,
+            snapshot: ConversationSnapshot {
+                thread_id: Some("thread-1".to_owned()),
+                entries,
+            },
+        });
+
+        let (_view, window_cx) = cx.add_window_view(|_window, cx| {
+            let mut view = LubanRootView::with_state(services, state, cx);
+            view.terminal_enabled = true;
+            view.workspace_terminal_errors
+                .insert(workspace_id, "stub terminal".to_owned());
+            view
+        });
+
+        let window_size = size(px(1200.0), px(801.0));
+        window_cx.simulate_resize(window_size);
+
+        for _ in 0..4 {
+            window_cx.run_until_parked();
+            window_cx.refresh().unwrap();
+        }
+
+        let main_bounds = window_cx
+            .debug_bounds("main-pane")
+            .expect("missing debug bounds for main-pane");
+        assert!(
+            main_bounds.bottom() <= window_size.height + px(1.0),
+            "main={:?}",
+            main_bounds
+        );
+
+        let send_bounds = window_cx
+            .debug_bounds("chat-send-message")
+            .expect("missing chat composer send button");
+        assert!(send_bounds.size.height > px(0.0));
+        assert!(
+            send_bounds.bottom() <= window_size.height + px(1.0),
+            "send={:?} main={:?}",
+            send_bounds,
+            main_bounds
+        );
+    }
+
+    #[gpui::test]
     async fn sidebar_buttons_remain_visible_with_long_titles(cx: &mut gpui::TestAppContext) {
         cx.update(gpui_component::init);
 
