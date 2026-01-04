@@ -10,7 +10,7 @@ use gpui_component::{
     button::*,
     collapsible::Collapsible,
     input::{Input, InputEvent, InputState},
-    scroll::ScrollableElement as _,
+    scroll::{Scrollbar, ScrollbarShow},
     spinner::Spinner,
     text::{TextView, TextViewStyle},
 };
@@ -165,6 +165,7 @@ pub struct LubanRootView {
     turn_generation: HashMap<WorkspaceId, u64>,
     turn_cancel_flags: HashMap<WorkspaceId, Arc<AtomicBool>>,
     chat_scroll_handle: gpui::ScrollHandle,
+    projects_scroll_handle: gpui::ScrollHandle,
     last_chat_workspace_id: Option<WorkspaceId>,
     last_chat_item_count: usize,
     _subscriptions: Vec<gpui::Subscription>,
@@ -203,6 +204,7 @@ impl LubanRootView {
             turn_generation: HashMap::new(),
             turn_cancel_flags: HashMap::new(),
             chat_scroll_handle: gpui::ScrollHandle::new(),
+            projects_scroll_handle: gpui::ScrollHandle::new(),
             last_chat_workspace_id: None,
             last_chat_item_count: 0,
             _subscriptions: Vec::new(),
@@ -249,6 +251,7 @@ impl LubanRootView {
             turn_generation: HashMap::new(),
             turn_cancel_flags: HashMap::new(),
             chat_scroll_handle: gpui::ScrollHandle::new(),
+            projects_scroll_handle: gpui::ScrollHandle::new(),
             last_chat_workspace_id: None,
             last_chat_item_count: 0,
             _subscriptions: Vec::new(),
@@ -990,6 +993,7 @@ impl gpui::Render for LubanRootView {
                         &self.state,
                         sidebar_width,
                         &self.workspace_pull_request_numbers,
+                        &self.projects_scroll_handle,
                     ))
                     .child(
                         div()
@@ -1643,9 +1647,11 @@ fn render_sidebar(
     state: &AppState,
     sidebar_width: gpui::Pixels,
     workspace_pull_request_numbers: &HashMap<WorkspaceId, Option<PullRequestInfo>>,
+    projects_scroll_handle: &gpui::ScrollHandle,
 ) -> impl IntoElement {
     let theme = cx.theme();
     let view_handle = cx.entity().downgrade();
+    let projects_scroll_handle = projects_scroll_handle.clone();
 
     let add_project_button = Button::new("add-project")
         .ghost()
@@ -1734,18 +1740,40 @@ fn render_sidebar(
         .child(
             div()
                 .flex_1()
-                .id("projects-scroll")
-                .overflow_y_scrollbar()
-                .py_2()
-                .children(state.projects.iter().enumerate().map(|(i, project)| {
-                    render_project(
-                        cx,
-                        i,
-                        project,
-                        state.main_pane,
-                        workspace_pull_request_numbers,
-                    )
-                })),
+                .relative()
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .flex_1()
+                        .id("projects-scroll")
+                        .overflow_y_scroll()
+                        .track_scroll(&projects_scroll_handle)
+                        .py_2()
+                        .children(state.projects.iter().enumerate().map(|(i, project)| {
+                            render_project(
+                                cx,
+                                i,
+                                project,
+                                state.main_pane,
+                                workspace_pull_request_numbers,
+                            )
+                        })),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .right_0()
+                        .bottom_0()
+                        .debug_selector(|| "projects-scrollbar".to_owned())
+                        .child(
+                            Scrollbar::vertical(&projects_scroll_handle)
+                                .id("projects-scrollbar")
+                                .scrollbar_show(ScrollbarShow::Always),
+                        ),
+                ),
         )
 }
 
@@ -5891,6 +5919,33 @@ mod tests {
 
         let saved_width = view.read_with(window_cx, |v, _| v.debug_state().sidebar_width);
         assert!(saved_width.is_some());
+    }
+
+    #[gpui::test]
+    async fn sidebar_projects_list_renders_scrollbar_when_overflowing(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        for i in 0..48 {
+            state.apply(Action::AddProject {
+                path: PathBuf::from(format!("/tmp/repo-{i}")),
+            });
+        }
+
+        let (_view, window_cx) =
+            cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+        window_cx.simulate_resize(size(px(900.0), px(240.0)));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        assert!(
+            window_cx.debug_bounds("projects-scrollbar").is_some(),
+            "expected a scrollbar for the projects list"
+        );
     }
 
     #[gpui::test]
