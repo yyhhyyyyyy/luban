@@ -1,4 +1,5 @@
 mod root;
+mod selectable_text;
 mod terminal_panel;
 mod theme;
 

@@ -25,6 +25,7 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
+use crate::selectable_text::SelectablePlainText;
 use crate::terminal_panel::{WorkspaceTerminal, spawn_workspace_terminal, terminal_cell_metrics};
 
 pub struct CreatedWorkspace {
@@ -3068,6 +3069,7 @@ fn chat_markdown_view(id: &str, source: &str, wrap_width: Option<Pixels>) -> Tex
             .paragraph_gap(rems(0.5))
             .code_block(code_block_style),
     )
+    .selectable(true)
     .text_size(px(16.0))
     .whitespace_normal()
     .flex()
@@ -3124,12 +3126,17 @@ fn chat_message_view(
             .into_any_element();
     }
 
+    let plain_debug_selector = format!("{id}-plain-text");
     let mut container = div()
+        .debug_selector(move || plain_debug_selector.clone())
         .id(ElementId::Name(SharedString::from(format!("{id}-text"))))
         .text_size(px(16.0))
         .whitespace_normal()
         .text_color(text_color)
-        .child(source.to_owned());
+        .child(SelectablePlainText::new(
+            SharedString::from(format!("{id}-plain")),
+            source.to_owned(),
+        ));
 
     if let Some(wrap_width) = wrap_width {
         container = container.w(wrap_width);
@@ -3363,7 +3370,7 @@ fn workspace_agent_context(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{Modifiers, px, size};
+    use gpui::{Modifiers, point, px, size};
     use luban_domain::ConversationEntry;
     use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
@@ -4222,6 +4229,62 @@ mod tests {
         );
         assert!(narrow_bubble.right() <= narrow_column.right() + px(2.0));
         assert!(narrow_bubble.right() >= narrow_column.right() - px(8.0));
+    }
+
+    #[gpui::test]
+    async fn user_message_text_can_be_selected_and_copied(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "abandon-about".to_owned(),
+            branch_name: "luban/abandon-about".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+        });
+        let workspace_id = state.projects[0].workspaces[0].id;
+        state.main_pane = MainPane::Workspace(workspace_id);
+
+        let message = "select me".to_owned();
+        state.apply(Action::ConversationLoaded {
+            workspace_id,
+            snapshot: ConversationSnapshot {
+                thread_id: Some("thread-1".to_owned()),
+                entries: vec![ConversationEntry::UserMessage {
+                    text: message.clone(),
+                }],
+            },
+        });
+
+        let (_view, window_cx) =
+            cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+        window_cx.simulate_resize(size(px(720.0), px(400.0)));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        let text_bounds = window_cx
+            .debug_bounds("user-message-0-plain-text")
+            .expect("missing debug bounds for user-message-0-plain-text");
+        let y = text_bounds.center().y;
+        let start = point(text_bounds.left() + px(1.0), y);
+        let end = point(text_bounds.right() + px(200.0), y);
+
+        window_cx.simulate_mouse_down(start, gpui::MouseButton::Left, Modifiers::none());
+        window_cx.simulate_mouse_move(end, Some(gpui::MouseButton::Left), Modifiers::none());
+        window_cx.simulate_mouse_up(end, gpui::MouseButton::Left, Modifiers::none());
+        window_cx.refresh().unwrap();
+
+        window_cx.simulate_keystrokes("cmd-c");
+        window_cx.run_until_parked();
+
+        let copied = window_cx.read_from_clipboard().and_then(|item| item.text());
+        assert_eq!(copied, Some(message));
     }
 
     #[gpui::test]
