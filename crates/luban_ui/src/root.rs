@@ -1285,6 +1285,23 @@ fn render_titlebar(
     sidebar_width: gpui::Pixels,
     terminal_enabled: bool,
 ) -> AnyElement {
+    fn handle_titlebar_double_click(window: &Window) {
+        #[cfg(test)]
+        {
+            window.toggle_fullscreen();
+        }
+
+        #[cfg(all(not(test), target_os = "macos"))]
+        {
+            window.titlebar_double_click();
+        }
+
+        #[cfg(all(not(test), not(target_os = "macos")))]
+        {
+            window.zoom_window();
+        }
+    }
+
     let theme = cx.theme();
     let titlebar_height = px(44.0);
 
@@ -1346,6 +1363,20 @@ fn render_titlebar(
         )
         .child(div().text_sm().child(branch_label));
 
+    let titlebar_zoom_area = div()
+        .flex_1()
+        .h(titlebar_height)
+        .flex()
+        .items_center()
+        .debug_selector(|| "titlebar-zoom-area".to_owned())
+        .on_mouse_down(MouseButton::Left, move |event, window, _| {
+            if event.click_count != 2 {
+                return;
+            }
+            handle_titlebar_double_click(window);
+        })
+        .child(branch_indicator);
+
     let main_titlebar = div()
         .flex_1()
         .h(titlebar_height)
@@ -1356,7 +1387,7 @@ fn render_titlebar(
         .border_b_1()
         .border_color(theme.title_bar_border)
         .bg(theme.title_bar)
-        .child(div().flex().items_center().gap_2().child(branch_indicator))
+        .child(min_width_zero(titlebar_zoom_area))
         .child(
             div()
                 .flex()
@@ -3826,7 +3857,7 @@ fn workspace_agent_context(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{Modifiers, point, px, size};
+    use gpui::{Modifiers, MouseButton, MouseDownEvent, point, px, size};
     use luban_domain::ConversationEntry;
     use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
@@ -4098,6 +4129,53 @@ mod tests {
             "toggle={:?} window={:?}",
             toggle_bounds,
             window_size
+        );
+    }
+
+    #[gpui::test]
+    async fn titlebar_double_click_triggers_window_action(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+        let state = AppState::new();
+
+        let (_view, window_cx) =
+            cx.add_window_view(|_window, cx| LubanRootView::with_state(services, state, cx));
+        window_cx.simulate_resize(size(px(900.0), px(240.0)));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        let zoom_bounds = window_cx
+            .debug_bounds("titlebar-zoom-area")
+            .expect("missing titlebar zoom area");
+
+        assert!(
+            !window_cx.update(|window, _| window.is_fullscreen()),
+            "expected test window to start not fullscreen"
+        );
+
+        window_cx.simulate_event(MouseDownEvent {
+            position: zoom_bounds.center(),
+            modifiers: Modifiers::none(),
+            button: MouseButton::Left,
+            click_count: 1,
+            first_mouse: false,
+        });
+        assert!(
+            !window_cx.update(|window, _| window.is_fullscreen()),
+            "single click should not trigger titlebar double-click action"
+        );
+
+        window_cx.simulate_event(MouseDownEvent {
+            position: zoom_bounds.center(),
+            modifiers: Modifiers::none(),
+            button: MouseButton::Left,
+            click_count: 2,
+            first_mouse: false,
+        });
+        assert!(
+            window_cx.update(|window, _| window.is_fullscreen()),
+            "double click should trigger titlebar double-click action"
         );
     }
 
