@@ -62,6 +62,17 @@ pub(super) fn render_titlebar(
     let theme = cx.theme();
     let titlebar_height = px(TITLEBAR_HEIGHT);
 
+    let titlebar_background = if state.main_pane == MainPane::Dashboard {
+        theme.sidebar
+    } else {
+        theme.title_bar
+    };
+    let titlebar_border = if state.main_pane == MainPane::Dashboard {
+        theme.sidebar_border
+    } else {
+        theme.title_bar_border
+    };
+
     let TitlebarContext {
         branch_label,
         ide_workspace_id,
@@ -313,8 +324,8 @@ pub(super) fn render_titlebar(
             .flex()
             .items_center()
             .border_b_1()
-            .border_color(theme.title_bar_border)
-            .bg(theme.title_bar)
+            .border_color(titlebar_border)
+            .bg(titlebar_background)
             .debug_selector(|| "titlebar-main".to_owned())
             .on_mouse_down(MouseButton::Left, move |event, window, app| {
                 if event.click_count == 2 {
@@ -337,8 +348,8 @@ pub(super) fn render_titlebar(
             .flex()
             .items_center()
             .border_b_1()
-            .border_color(theme.title_bar_border)
-            .bg(theme.title_bar)
+            .border_color(titlebar_border)
+            .bg(titlebar_background)
             .debug_selector(|| "titlebar-main".to_owned())
             .child(min_width_zero(titlebar_zoom_area))
             .into_any_element()
@@ -387,8 +398,8 @@ pub(super) fn render_titlebar(
             .flex()
             .items_center()
             .border_b_1()
-            .border_color(theme.title_bar_border)
-            .bg(theme.title_bar)
+            .border_color(titlebar_border)
+            .bg(titlebar_background)
             .debug_selector(|| "titlebar-terminal".to_owned())
             .child(divider)
             .child(content)
