@@ -60,7 +60,7 @@ pub(super) fn render_titlebar(
     }
 
     let theme = cx.theme();
-    let titlebar_height = px(44.0);
+    let titlebar_height = px(TITLEBAR_HEIGHT);
 
     let TitlebarContext {
         branch_label,

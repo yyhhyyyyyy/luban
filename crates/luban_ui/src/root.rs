@@ -44,6 +44,12 @@ use titlebar::render_titlebar;
 const TERMINAL_PANE_RESIZER_WIDTH: f32 = 6.0;
 const SIDEBAR_RESIZER_WIDTH: f32 = 6.0;
 const RIGHT_PANE_CONTENT_PADDING: f32 = 8.0;
+const TITLEBAR_HEIGHT: f32 = 44.0;
+
+#[cfg(not(test))]
+const SUCCESS_TOAST_DURATION: Duration = Duration::from_secs(2);
+#[cfg(test)]
+const SUCCESS_TOAST_DURATION: Duration = Duration::from_millis(30);
 
 #[derive(Clone, Copy, Debug)]
 struct TerminalPaneResizeState {
@@ -116,6 +122,8 @@ pub struct LubanRootView {
     last_chat_workspace_id: Option<WorkspaceId>,
     last_chat_item_count: usize,
     last_workspace_before_dashboard: Option<WorkspaceId>,
+    success_toast_message: Option<String>,
+    success_toast_generation: u64,
     _subscriptions: Vec<gpui::Subscription>,
 }
 
@@ -158,6 +166,8 @@ impl LubanRootView {
             last_chat_workspace_id: None,
             last_chat_item_count: 0,
             last_workspace_before_dashboard: None,
+            success_toast_message: None,
+            success_toast_generation: 0,
             _subscriptions: Vec::new(),
         };
 
@@ -211,6 +221,8 @@ impl LubanRootView {
             last_chat_workspace_id: None,
             last_chat_item_count: 0,
             last_workspace_before_dashboard: None,
+            success_toast_message: None,
+            success_toast_generation: 0,
             _subscriptions: Vec::new(),
         }
     }
@@ -238,6 +250,19 @@ impl LubanRootView {
     fn dispatch(&mut self, action: Action, cx: &mut Context<Self>) {
         let previous_workspace_for_scroll = match self.state.main_pane {
             MainPane::Workspace(workspace_id) => Some(workspace_id),
+            _ => None,
+        };
+
+        let success_toast = match &action {
+            Action::AddProject { .. } => Some("Project added".to_owned()),
+            Action::WorkspaceCreated { workspace_name, .. } => {
+                Some(format!("Workspace \"{workspace_name}\" created"))
+            }
+            Action::WorkspaceArchived { workspace_id } => self
+                .state
+                .workspace(*workspace_id)
+                .map(|workspace| format!("Workspace \"{}\" archived", workspace.workspace_name))
+                .or_else(|| Some("Workspace archived".to_owned())),
             _ => None,
         };
 
@@ -312,6 +337,9 @@ impl LubanRootView {
             }));
         }
         cx.notify();
+        if let Some(message) = success_toast {
+            self.show_success_toast(message, cx);
+        }
 
         if let Some(workspace_id) = start_timer_workspace {
             self.pending_turn_durations.remove(&workspace_id);
@@ -834,6 +862,80 @@ impl LubanRootView {
         )
         .detach();
     }
+
+    fn show_success_toast(&mut self, message: String, cx: &mut Context<Self>) {
+        self.success_toast_generation = self.success_toast_generation.wrapping_add(1);
+        let generation = self.success_toast_generation;
+        self.success_toast_message = Some(message);
+        cx.notify();
+
+        cx.spawn(
+            move |this: gpui::WeakEntity<LubanRootView>, cx: &mut gpui::AsyncApp| {
+                let mut async_cx = cx.clone();
+                async move {
+                    gpui::Timer::after(SUCCESS_TOAST_DURATION).await;
+                    let _ = this.update(
+                        &mut async_cx,
+                        |view: &mut LubanRootView, cx: &mut Context<LubanRootView>| {
+                            view.dismiss_success_toast(generation, cx);
+                        },
+                    );
+                }
+            },
+        )
+        .detach();
+    }
+
+    fn dismiss_success_toast(&mut self, generation: u64, cx: &mut Context<Self>) {
+        if self.success_toast_generation != generation {
+            return;
+        }
+        if self.success_toast_message.is_none() {
+            return;
+        }
+        self.success_toast_message = None;
+        cx.notify();
+    }
+
+    fn render_success_toast(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme();
+        let Some(message) = self.success_toast_message.as_deref() else {
+            return div()
+                .absolute()
+                .top(px(TITLEBAR_HEIGHT))
+                .left_0()
+                .w(px(0.0))
+                .h(px(0.0))
+                .debug_selector(|| "success-toast".to_owned())
+                .into_any_element();
+        };
+
+        div()
+            .absolute()
+            .top(px(TITLEBAR_HEIGHT))
+            .left_0()
+            .right_0()
+            .flex()
+            .justify_center()
+            .pt_2()
+            .debug_selector(|| "success-toast".to_owned())
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .px_3()
+                    .py_2()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(theme.success_hover)
+                    .bg(theme.success)
+                    .text_color(theme.success_foreground)
+                    .child(Icon::new(IconName::Check))
+                    .child(div().text_sm().child(message.to_owned())),
+            )
+            .into_any_element()
+    }
 }
 
 impl gpui::Render for LubanRootView {
@@ -1036,6 +1138,7 @@ impl gpui::Render for LubanRootView {
             .size_full()
             .flex()
             .flex_col()
+            .relative()
             .bg(background)
             .text_color(foreground)
             .child(render_titlebar(
@@ -1046,6 +1149,7 @@ impl gpui::Render for LubanRootView {
                 self.terminal_enabled,
             ))
             .child(content)
+            .child(self.render_success_toast(cx))
     }
 }
 
@@ -6415,6 +6519,68 @@ mod tests {
                 .debug_bounds("workspace-git-icon-branch-0-1")
                 .is_some(),
             "expected branch icon for workspace without PR number"
+        );
+    }
+
+    #[gpui::test]
+    async fn success_toast_is_shown_and_auto_dismissed(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+        let state = AppState::new();
+
+        let (view, window_cx) =
+            cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+        window_cx.simulate_resize(size(px(900.0), px(320.0)));
+
+        window_cx.update(|_, app| {
+            view.update(app, |view, cx| {
+                view.dispatch(
+                    Action::AddProject {
+                        path: PathBuf::from("/tmp/repo"),
+                    },
+                    cx,
+                );
+            });
+        });
+
+        for _ in 0..3 {
+            window_cx.run_until_parked();
+            window_cx.refresh().unwrap();
+        }
+
+        let toast_bounds = window_cx
+            .debug_bounds("success-toast")
+            .expect("missing success toast bounds");
+        assert!(
+            toast_bounds.size.height > px(0.0),
+            "expected success toast to be visible after AddProject: {toast_bounds:?}"
+        );
+
+        let generation = view.read_with(window_cx, |view, _| view.success_toast_generation);
+        window_cx.update(|_, app| {
+            view.update(app, |view, cx| {
+                view.dismiss_success_toast(generation, cx);
+            });
+        });
+        for _ in 0..3 {
+            window_cx.run_until_parked();
+            window_cx.refresh().unwrap();
+        }
+
+        let toast_cleared =
+            view.read_with(window_cx, |view, _| view.success_toast_message.is_none());
+        assert!(
+            toast_cleared,
+            "expected success toast message to be cleared"
+        );
+
+        let toast_bounds_after = window_cx
+            .debug_bounds("success-toast")
+            .expect("missing success toast bounds after dismiss");
+        assert!(
+            toast_bounds_after.size.height <= px(0.0) + px(0.5),
+            "expected success toast to be dismissed: {toast_bounds_after:?}"
         );
     }
 }
