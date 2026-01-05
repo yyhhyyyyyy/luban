@@ -271,6 +271,7 @@ pub(super) fn render_titlebar(
         .flex()
         .items_center()
         .gap_2()
+        .debug_selector(|| "titlebar-branch-indicator".to_owned())
         .child(
             div()
                 .debug_selector(|| "titlebar-branch-symbol".to_owned())
@@ -292,7 +293,16 @@ pub(super) fn render_titlebar(
             }
             handle_titlebar_double_click(window);
         })
-        .child(branch_indicator);
+        .child(branch_indicator)
+        .when_some(open_in_zed_button, |s, button| {
+            s.child(
+                div()
+                    .debug_selector(|| "titlebar-open-in-zed".to_owned())
+                    .child(button)
+                    .flex_shrink_0(),
+            )
+        })
+        .child(div().flex_1());
 
     let main_titlebar = if is_dashboard_selected {
         let view_handle = view_handle.clone();
@@ -326,20 +336,11 @@ pub(super) fn render_titlebar(
             .px_4()
             .flex()
             .items_center()
-            .justify_between()
             .border_b_1()
             .border_color(theme.title_bar_border)
             .bg(theme.title_bar)
             .debug_selector(|| "titlebar-main".to_owned())
             .child(min_width_zero(titlebar_zoom_area))
-            .when_some(open_in_zed_button, |s, button| {
-                s.child(
-                    div()
-                        .debug_selector(|| "titlebar-open-in-zed".to_owned())
-                        .child(button)
-                        .flex_shrink_0(),
-                )
-            })
             .into_any_element()
     };
 

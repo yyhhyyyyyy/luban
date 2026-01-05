@@ -3746,10 +3746,18 @@ mod tests {
         let titlebar_bounds = window_cx
             .debug_bounds("titlebar-main")
             .expect("missing titlebar main segment");
+        let title_bounds = window_cx
+            .debug_bounds("titlebar-branch-indicator")
+            .expect("missing titlebar branch indicator");
         let open_bounds = window_cx
             .debug_bounds("titlebar-open-in-zed")
             .expect("missing titlebar open button");
 
+        let gap = open_bounds.left() - title_bounds.right();
+        assert!(
+            gap >= px(-1.0) && gap <= px(32.0),
+            "open should be placed next to the workspace title: gap={gap:?} title={title_bounds:?} open={open_bounds:?}",
+        );
         assert!(
             open_bounds.right() <= titlebar_bounds.right() + px(2.0),
             "open={:?} titlebar={:?}",
