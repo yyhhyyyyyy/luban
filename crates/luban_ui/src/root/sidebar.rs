@@ -291,13 +291,7 @@ fn render_workspace_row(
     };
 
     let title = sidebar_workspace_title(workspace);
-    let metadata = {
-        let age = format_relative_age(workspace.last_activity_at);
-        match age {
-            Some(age) => format!("{} · {}", workspace.branch_name, age),
-            None => workspace.branch_name.clone(),
-        }
-    };
+    let metadata = sidebar_workspace_metadata(workspace);
     let pr_label = pr_info.map(|info| format!("#{}", info.number));
     let git_icon = if pr_info.is_some() {
         "icons/git-pull-request-arrow.svg"
@@ -460,7 +454,7 @@ fn render_main_workspace_row(
     let workspace_id = workspace.id;
 
     let title = sidebar_workspace_title(workspace);
-    let metadata = sidebar_main_workspace_metadata(workspace);
+    let metadata = sidebar_workspace_metadata(workspace);
 
     div()
         .mx_3()
@@ -514,30 +508,26 @@ fn render_main_workspace_row(
                         .font_semibold()
                         .child(title),
                 )
-                .when_some(metadata, |s, metadata| {
-                    s.child(
-                        div()
-                            .w_full()
-                            .truncate()
-                            .text_xs()
-                            .text_color(theme.muted_foreground)
-                            .child(metadata),
-                    )
-                }),
+                .child(
+                    div()
+                        .w_full()
+                        .truncate()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child(metadata),
+                ),
         ))
         .into_any_element()
 }
 
 pub(super) fn sidebar_workspace_title(workspace: &luban_domain::Workspace) -> String {
-    workspace.workspace_name.clone()
+    workspace.branch_name.clone()
 }
 
-pub(super) fn sidebar_main_workspace_metadata(
-    workspace: &luban_domain::Workspace,
-) -> Option<String> {
-    if workspace.branch_name == workspace.workspace_name {
-        None
-    } else {
-        Some(workspace.branch_name.clone())
+pub(super) fn sidebar_workspace_metadata(workspace: &luban_domain::Workspace) -> String {
+    let age = format_relative_age(workspace.last_activity_at);
+    match age {
+        Some(age) => format!("{} · {}", workspace.workspace_name, age),
+        None => workspace.workspace_name.clone(),
     }
 }

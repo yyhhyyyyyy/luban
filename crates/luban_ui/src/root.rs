@@ -3454,7 +3454,7 @@ mod tests {
     }
 
     #[test]
-    fn sidebar_workspace_title_uses_workspace_name() {
+    fn sidebar_workspace_title_uses_branch_name() {
         let mut state = AppState::new();
         state.apply(Action::AddProject {
             path: PathBuf::from("/tmp/repo"),
@@ -3474,11 +3474,14 @@ mod tests {
             .find(|w| w.status == WorkspaceStatus::Active && w.workspace_name == "w1")
             .expect("missing workspace w1");
 
-        assert_eq!(sidebar::sidebar_workspace_title(workspace), "w1".to_owned());
+        assert_eq!(
+            sidebar::sidebar_workspace_title(workspace),
+            "repo/w1".to_owned()
+        );
     }
 
     #[test]
-    fn sidebar_main_workspace_metadata_is_hidden_when_it_matches_title() {
+    fn sidebar_workspace_metadata_uses_workspace_name() {
         let mut state = AppState::new();
         state.apply(Action::AddProject {
             path: PathBuf::from("/tmp/repo"),
@@ -3490,7 +3493,10 @@ mod tests {
             .find(|w| w.status == WorkspaceStatus::Active && w.worktree_path == project.path)
             .expect("missing main workspace");
 
-        assert_eq!(sidebar::sidebar_main_workspace_metadata(workspace), None);
+        assert_eq!(
+            sidebar::sidebar_workspace_metadata(workspace),
+            "main".to_owned()
+        );
     }
 
     #[test]
