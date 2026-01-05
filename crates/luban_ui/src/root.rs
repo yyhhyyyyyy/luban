@@ -902,27 +902,27 @@ impl gpui::Render for LubanRootView {
         let foreground = theme.foreground;
         let transparent = theme.transparent;
         let muted = theme.muted;
-        let sidebar_width = self.sidebar_width(window);
-        let right_pane_width = self.right_pane_width(window, sidebar_width);
+        let is_dashboard = self.state.main_pane == MainPane::Dashboard;
+        let sidebar_width = if is_dashboard {
+            px(0.0)
+        } else {
+            self.sidebar_width(window)
+        };
+        let right_pane_width = if is_dashboard {
+            px(0.0)
+        } else {
+            self.right_pane_width(window, sidebar_width)
+        };
         let should_render_right_pane = self.terminal_enabled
+            && !is_dashboard
             && self.state.right_pane == RightPane::Terminal
             && right_pane_width > px(0.0);
         let view_handle = cx.entity().downgrade();
 
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .bg(background)
-            .text_color(foreground)
-            .child(render_titlebar(
-                cx,
-                &self.state,
-                sidebar_width,
-                right_pane_width,
-                self.terminal_enabled,
-            ))
-            .child(min_height_zero(
+        let content = if is_dashboard {
+            min_height_zero(div().flex_1().flex().child(self.render_main(window, cx)))
+        } else {
+            min_height_zero(
                 div()
                     .flex_1()
                     .flex()
@@ -1079,7 +1079,23 @@ impl gpui::Render for LubanRootView {
                         s.child(resizer)
                             .child(self.render_right_pane(right_pane_width, window, cx))
                     }),
+            )
+        };
+
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .bg(background)
+            .text_color(foreground)
+            .child(render_titlebar(
+                cx,
+                &self.state,
+                sidebar_width,
+                right_pane_width,
+                self.terminal_enabled,
             ))
+            .child(content)
     }
 }
 
@@ -1440,114 +1456,127 @@ fn render_titlebar(
             })
     });
 
+    let view_handle = cx.entity().downgrade();
     let add_project_button = {
-        let view_handle = cx.entity().downgrade();
-        Button::new("add-project")
-            .ghost()
-            .compact()
-            .icon(Icon::new(IconName::Plus).text_color(theme.muted_foreground))
-            .tooltip("Add project")
-            .on_click(move |_, _window, app| {
-                let view_handle = view_handle.clone();
-                let options = gpui::PathPromptOptions {
-                    files: false,
-                    directories: true,
-                    multiple: false,
-                    prompt: Some("Add Project".into()),
-                };
+        let view_handle = view_handle.clone();
+        move || {
+            let view_handle = view_handle.clone();
+            Button::new("add-project")
+                .ghost()
+                .compact()
+                .icon(Icon::new(IconName::Plus).text_color(theme.muted_foreground))
+                .tooltip("Add project")
+                .on_click(move |_, _window, app| {
+                    let view_handle = view_handle.clone();
+                    let options = gpui::PathPromptOptions {
+                        files: false,
+                        directories: true,
+                        multiple: false,
+                        prompt: Some("Add Project".into()),
+                    };
 
-                let receiver = app.prompt_for_paths(options);
-                app.spawn(move |cx: &mut gpui::AsyncApp| {
-                    let mut async_cx = cx.clone();
-                    async move {
-                        let Ok(result) = receiver.await else {
-                            return;
-                        };
-                        let Ok(Some(mut paths)) = result else {
-                            return;
-                        };
-                        let Some(path) = paths.pop() else {
-                            return;
-                        };
+                    let receiver = app.prompt_for_paths(options);
+                    app.spawn(move |cx: &mut gpui::AsyncApp| {
+                        let mut async_cx = cx.clone();
+                        async move {
+                            let Ok(result) = receiver.await else {
+                                return;
+                            };
+                            let Ok(Some(mut paths)) = result else {
+                                return;
+                            };
+                            let Some(path) = paths.pop() else {
+                                return;
+                            };
 
-                        let _ = view_handle.update(
-                            &mut async_cx,
-                            |view: &mut LubanRootView, view_cx: &mut Context<LubanRootView>| {
-                                view.dispatch(Action::AddProject { path }, view_cx);
-                            },
-                        );
-                    }
+                            let _ = view_handle.update(
+                                &mut async_cx,
+                                |view: &mut LubanRootView, view_cx: &mut Context<LubanRootView>| {
+                                    view.dispatch(Action::AddProject { path }, view_cx);
+                                },
+                            );
+                        }
+                    })
+                    .detach();
                 })
-                .detach();
-            })
+        }
     };
 
     let is_dashboard_selected = state.main_pane == MainPane::Dashboard;
 
-    let sidebar_titlebar = div()
-        .w(sidebar_width)
-        .h(titlebar_height)
-        .flex_shrink_0()
-        .flex()
-        .items_center()
-        .bg(theme.sidebar)
-        .text_color(theme.sidebar_foreground)
-        .border_r_1()
-        .border_color(theme.sidebar_border)
-        .border_b_1()
-        .border_color(theme.sidebar_border)
-        .debug_selector(|| "titlebar-sidebar".to_owned())
-        .child(
-            div()
-                .h_full()
-                .mx_3()
-                .w_full()
-                .flex()
-                .items_center()
-                .child(div().flex_1())
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .debug_selector(|| "titlebar-dashboard-title".to_owned())
-                        .cursor_pointer()
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _, _, cx| {
-                                this.dispatch(Action::OpenDashboard, cx);
-                            }),
-                        )
-                        .child(
-                            Icon::new(IconName::GalleryVerticalEnd)
-                                .with_size(Size::Small)
-                                .text_color(if is_dashboard_selected {
-                                    theme.sidebar_primary
-                                } else {
-                                    theme.muted_foreground
+    let sidebar_titlebar = if is_dashboard_selected || sidebar_width <= px(0.0) {
+        div()
+            .w(px(0.0))
+            .h(titlebar_height)
+            .hidden()
+            .into_any_element()
+    } else {
+        div()
+            .w(sidebar_width)
+            .h(titlebar_height)
+            .flex_shrink_0()
+            .flex()
+            .items_center()
+            .bg(theme.sidebar)
+            .text_color(theme.sidebar_foreground)
+            .border_r_1()
+            .border_color(theme.sidebar_border)
+            .border_b_1()
+            .border_color(theme.sidebar_border)
+            .debug_selector(|| "titlebar-sidebar".to_owned())
+            .child(
+                div()
+                    .h_full()
+                    .mx_3()
+                    .w_full()
+                    .flex()
+                    .items_center()
+                    .child(div().flex_1())
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .debug_selector(|| "titlebar-dashboard-title".to_owned())
+                            .cursor_pointer()
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _, _, cx| {
+                                    this.dispatch(Action::OpenDashboard, cx);
                                 }),
-                        )
-                        .child(
-                            div()
-                                .text_sm()
-                                .font_semibold()
-                                .text_color(if is_dashboard_selected {
-                                    theme.sidebar_primary
-                                } else {
-                                    theme.muted_foreground
-                                })
-                                .child("Dashboard"),
-                        ),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .flex()
-                        .justify_end()
-                        .debug_selector(|| "add-project".to_owned())
-                        .child(add_project_button),
-                ),
-        );
+                            )
+                            .child(
+                                Icon::new(IconName::GalleryVerticalEnd)
+                                    .with_size(Size::Small)
+                                    .text_color(if is_dashboard_selected {
+                                        theme.sidebar_primary
+                                    } else {
+                                        theme.muted_foreground
+                                    }),
+                            )
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_semibold()
+                                    .text_color(if is_dashboard_selected {
+                                        theme.sidebar_primary
+                                    } else {
+                                        theme.muted_foreground
+                                    })
+                                    .child("Dashboard"),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .flex()
+                            .justify_end()
+                            .debug_selector(|| "add-project".to_owned())
+                            .child(add_project_button()),
+                    ),
+            )
+            .into_any_element()
+    };
 
     let branch_indicator = div()
         .flex()
@@ -1561,6 +1590,25 @@ fn render_titlebar(
                 .child("⎇"),
         )
         .child(div().text_sm().child(branch_label));
+
+    let dashboard_indicator = div()
+        .flex()
+        .items_center()
+        .gap_2()
+        .debug_selector(|| "titlebar-dashboard-title".to_owned())
+        .cursor_pointer()
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, _, _, cx| {
+                this.dispatch(Action::OpenDashboard, cx);
+            }),
+        )
+        .child(
+            Icon::new(IconName::GalleryVerticalEnd)
+                .with_size(Size::Small)
+                .text_color(theme.muted_foreground),
+        )
+        .child(div().text_sm().font_semibold().child("Dashboard"));
 
     let titlebar_zoom_area = div()
         .flex_1()
@@ -1576,26 +1624,66 @@ fn render_titlebar(
         })
         .child(branch_indicator);
 
-    let main_titlebar = div()
-        .flex_1()
-        .h(titlebar_height)
-        .px_4()
-        .flex()
-        .items_center()
-        .justify_between()
-        .border_b_1()
-        .border_color(theme.title_bar_border)
-        .bg(theme.title_bar)
-        .debug_selector(|| "titlebar-main".to_owned())
-        .child(min_width_zero(titlebar_zoom_area))
-        .when_some(open_in_zed_button, |s, button| {
-            s.child(
+    let main_titlebar = if is_dashboard_selected {
+        let control_width = px(44.0);
+        div()
+            .flex_1()
+            .h(titlebar_height)
+            .px_4()
+            .flex()
+            .items_center()
+            .border_b_1()
+            .border_color(theme.title_bar_border)
+            .bg(theme.title_bar)
+            .debug_selector(|| "titlebar-main".to_owned())
+            .on_mouse_down(MouseButton::Left, move |event, window, _| {
+                if event.click_count != 2 {
+                    return;
+                }
+                handle_titlebar_double_click(window);
+            })
+            .child(div().w(control_width).flex_shrink_0())
+            .child(
                 div()
-                    .debug_selector(|| "titlebar-open-in-zed".to_owned())
-                    .child(button)
-                    .flex_shrink_0(),
+                    .flex_1()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(dashboard_indicator),
             )
-        });
+            .child(
+                div()
+                    .w(control_width)
+                    .flex_shrink_0()
+                    .flex()
+                    .justify_end()
+                    .debug_selector(|| "add-project".to_owned())
+                    .child(add_project_button()),
+            )
+            .into_any_element()
+    } else {
+        div()
+            .flex_1()
+            .h(titlebar_height)
+            .px_4()
+            .flex()
+            .items_center()
+            .justify_between()
+            .border_b_1()
+            .border_color(theme.title_bar_border)
+            .bg(theme.title_bar)
+            .debug_selector(|| "titlebar-main".to_owned())
+            .child(min_width_zero(titlebar_zoom_area))
+            .when_some(open_in_zed_button, |s, button| {
+                s.child(
+                    div()
+                        .debug_selector(|| "titlebar-open-in-zed".to_owned())
+                        .child(button)
+                        .flex_shrink_0(),
+                )
+            })
+            .into_any_element()
+    };
 
     let terminal_titlebar = {
         let title = ide_workspace_id.and_then(|workspace_id| {
@@ -2312,10 +2400,8 @@ impl LubanRootView {
                     .relative()
                     .debug_selector(|| "dashboard-board".to_owned())
                     .p_4()
-                    .gap_3()
-                    .flex()
                     .overflow_x_scrollbar()
-                    .children(columns),
+                    .child(div().flex().flex_row().gap_3().children(columns)),
             ))
             .into_any_element()
         };
@@ -3021,8 +3107,9 @@ fn render_dashboard_column(
     );
 
     div()
-        .flex_1()
-        .min_w(px(180.0))
+        .w(px(260.0))
+        .h_full()
+        .flex_shrink_0()
         .flex()
         .flex_col()
         .rounded_lg()
@@ -6209,7 +6296,7 @@ mod tests {
     }
 
     #[gpui::test]
-    async fn sidebar_dashboard_title_is_centered_and_add_button_aligns_with_project_actions(
+    async fn dashboard_uses_full_window_and_renders_horizontal_columns(
         cx: &mut gpui::TestAppContext,
     ) {
         cx.update(gpui_component::init);
@@ -6221,66 +6308,80 @@ mod tests {
             path: PathBuf::from("/tmp/repo"),
         });
         let project_id = state.projects[0].id;
-        state.apply(Action::ToggleProjectExpanded { project_id });
         state.apply(Action::WorkspaceCreated {
             project_id,
             workspace_name: "w1".to_owned(),
             branch_name: "repo/w1".to_owned(),
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/w1"),
         });
-        let workspace_id = workspace_id_by_name(&state, "w1");
-        state.apply(Action::OpenWorkspace { workspace_id });
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "w2".to_owned(),
+            branch_name: "repo/w2".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/w2"),
+        });
+        state.apply(Action::OpenDashboard);
 
         let (_view, window_cx) =
             cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
-        window_cx.simulate_resize(size(px(420.0), px(360.0)));
+        window_cx.simulate_resize(size(px(1200.0), px(720.0)));
         window_cx.run_until_parked();
         window_cx.refresh().unwrap();
 
-        let header = window_cx
-            .debug_bounds("titlebar-sidebar")
-            .expect("missing sidebar titlebar");
+        assert!(
+            window_cx.debug_bounds("sidebar").is_none(),
+            "dashboard should not render the sidebar"
+        );
+        assert!(
+            window_cx.debug_bounds("sidebar-resizer").is_none(),
+            "dashboard should not render the sidebar resizer"
+        );
+
+        let titlebar = window_cx
+            .debug_bounds("titlebar-main")
+            .expect("missing main titlebar");
         let title = window_cx
             .debug_bounds("titlebar-dashboard-title")
-            .expect("missing sidebar dashboard title");
-        let center_dx = (title.center().x - header.center().x).abs();
+            .expect("missing dashboard title");
+        let center_dx = (title.center().x - titlebar.center().x).abs();
         assert!(
             center_dx <= px(2.0),
-            "dashboard title should be centered: title={:?} header={:?}",
+            "dashboard title should be centered: title={:?} titlebar={:?}",
             title,
-            header
+            titlebar
         );
 
-        let project_header = window_cx
-            .debug_bounds("project-header-0")
-            .expect("missing project header");
-        window_cx.simulate_mouse_move(project_header.center(), None, Modifiers::none());
-        window_cx.refresh().unwrap();
-
-        let add_project = window_cx
-            .debug_bounds("add-project")
-            .expect("missing add project button");
-        let project_settings = window_cx
-            .debug_bounds("project-settings-0")
-            .expect("missing project settings button");
-
-        let right_dx = (add_project.right() - project_settings.right()).abs();
         assert!(
-            right_dx <= px(2.0),
-            "add project button should align with project actions: add={:?} settings={:?}",
-            add_project,
-            project_settings
+            window_cx.debug_bounds("add-project").is_some(),
+            "dashboard should render add project button"
         );
 
-        let terminal_titlebar = window_cx
-            .debug_bounds("titlebar-terminal")
-            .expect("missing terminal titlebar");
-        let dy = (title.center().y - terminal_titlebar.center().y).abs();
+        let start = window_cx
+            .debug_bounds("dashboard-column-start")
+            .expect("missing start column");
+        let running = window_cx
+            .debug_bounds("dashboard-column-running")
+            .expect("missing running column");
         assert!(
-            dy <= px(2.0),
-            "dashboard title should share the titlebar row with terminal: dashboard={:?} terminal={:?}",
-            title,
-            terminal_titlebar
+            start.center().x < running.center().x,
+            "dashboard columns should lay out horizontally: start={:?} running={:?}",
+            start,
+            running
+        );
+
+        let w1 = window_cx
+            .debug_bounds("dashboard-card-0-w1")
+            .expect("missing w1 card");
+        let w2 = window_cx
+            .debug_bounds("dashboard-card-0-w2")
+            .expect("missing w2 card");
+        let dx = (w1.center().x - w2.center().x).abs();
+        let dy = (w1.center().y - w2.center().y).abs();
+        assert!(
+            dx <= px(2.0) && dy > px(8.0),
+            "dashboard cards should stack vertically within a column: w1={:?} w2={:?}",
+            w1,
+            w2
         );
     }
 
