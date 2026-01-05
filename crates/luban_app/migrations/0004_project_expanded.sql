@@ -1,0 +1,4 @@
+PRAGMA foreign_keys = ON;
+
+ALTER TABLE projects ADD COLUMN expanded INTEGER NOT NULL DEFAULT 0;
+

@@ -330,6 +330,7 @@ pub struct PersistedProject {
     pub name: String,
     pub path: PathBuf,
     pub slug: String,
+    pub expanded: bool,
     pub workspaces: Vec<PersistedWorkspace>,
 }
 
@@ -576,7 +577,7 @@ impl AppState {
                 if let Some(project) = self.projects.iter_mut().find(|p| p.id == project_id) {
                     project.expanded = !project.expanded;
                 }
-                Vec::new()
+                vec![Effect::SaveAppState]
             }
             Action::OpenProjectSettings { project_id } => {
                 self.main_pane = MainPane::ProjectSettings(project_id);
@@ -999,7 +1000,7 @@ impl AppState {
                         name: p.name,
                         path: p.path,
                         slug: p.slug,
-                        expanded: false,
+                        expanded: p.expanded,
                         create_workspace_status: OperationStatus::Idle,
                         workspaces: p
                             .workspaces
@@ -1068,6 +1069,7 @@ impl AppState {
                     name: p.name.clone(),
                     path: p.path.clone(),
                     slug: p.slug.clone(),
+                    expanded: p.expanded,
                     workspaces: p
                         .workspaces
                         .iter()
@@ -1488,6 +1490,28 @@ mod tests {
             },
         });
         assert_eq!(state.sidebar_width, Some(360));
+    }
+
+    #[test]
+    fn project_expanded_is_persisted() {
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+
+        let effects = state.apply(Action::ToggleProjectExpanded { project_id });
+        assert_eq!(effects.len(), 1);
+        assert!(matches!(effects[0], Effect::SaveAppState));
+        assert!(state.projects[0].expanded);
+
+        let persisted = state.to_persisted();
+        assert_eq!(persisted.projects.len(), 1);
+        assert!(persisted.projects[0].expanded);
+
+        let mut loaded = AppState::new();
+        loaded.apply(Action::AppStateLoaded { persisted });
+        assert!(loaded.projects[0].expanded);
     }
 
     #[test]

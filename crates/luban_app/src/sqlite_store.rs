@@ -4,7 +4,7 @@ use rusqlite::{Connection, OptionalExtension as _, params, params_from_iter};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
-const LATEST_SCHEMA_VERSION: u32 = 3;
+const LATEST_SCHEMA_VERSION: u32 = 4;
 
 const MIGRATIONS: &[(u32, &str)] = &[
     (
@@ -26,6 +26,13 @@ const MIGRATIONS: &[(u32, &str)] = &[
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/migrations/0003_app_settings.sql"
+        )),
+    ),
+    (
+        4,
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/migrations/0004_project_expanded.sql"
         )),
     ),
 ];
@@ -326,22 +333,24 @@ impl SqliteDatabase {
         {
             let mut stmt = self
                 .conn
-                .prepare("SELECT id, slug, name, path FROM projects ORDER BY id ASC")?;
+                .prepare("SELECT id, slug, name, path, expanded FROM projects ORDER BY id ASC")?;
             let rows = stmt.query_map([], |row| {
                 Ok((
                     row.get::<_, i64>(0)? as u64,
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
                     row.get::<_, String>(3)?,
+                    row.get::<_, i64>(4)?,
                 ))
             })?;
             for row in rows {
-                let (id, slug, name, path) = row?;
+                let (id, slug, name, path, expanded) = row?;
                 projects.push(luban_domain::PersistedProject {
                     id,
                     slug,
                     name,
                     path: PathBuf::from(path),
+                    expanded: expanded != 0,
                     workspaces: Vec::new(),
                 });
             }
@@ -426,18 +435,20 @@ impl SqliteDatabase {
         for project in &snapshot.projects {
             let path = project.path.to_string_lossy().into_owned();
             tx.execute(
-                "INSERT INTO projects (id, slug, name, path, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, COALESCE((SELECT created_at FROM projects WHERE id = ?1), ?5), ?5)
+                "INSERT INTO projects (id, slug, name, path, expanded, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, COALESCE((SELECT created_at FROM projects WHERE id = ?1), ?6), ?6)
                  ON CONFLICT(id) DO UPDATE SET
                    slug = excluded.slug,
                    name = excluded.name,
                    path = excluded.path,
+                   expanded = excluded.expanded,
                    updated_at = excluded.updated_at",
                 params![
                     project.id as i64,
                     project.slug,
                     project.name,
                     path,
+                    if project.expanded { 1i64 } else { 0i64 },
                     now,
                 ],
             )?;
@@ -793,6 +804,7 @@ mod tests {
                 slug: "my-project".to_owned(),
                 name: "My Project".to_owned(),
                 path: PathBuf::from("/tmp/my-project"),
+                expanded: true,
                 workspaces: vec![PersistedWorkspace {
                     id: 10,
                     workspace_name: "alpha".to_owned(),
@@ -822,6 +834,7 @@ mod tests {
                 slug: "p".to_owned(),
                 name: "P".to_owned(),
                 path: PathBuf::from("/tmp/p"),
+                expanded: false,
                 workspaces: vec![PersistedWorkspace {
                     id: 2,
                     workspace_name: "w".to_owned(),
@@ -871,6 +884,7 @@ mod tests {
                 slug: "p".to_owned(),
                 name: "P".to_owned(),
                 path: PathBuf::from("/tmp/p"),
+                expanded: false,
                 workspaces: vec![PersistedWorkspace {
                     id: 2,
                     workspace_name: "w".to_owned(),
