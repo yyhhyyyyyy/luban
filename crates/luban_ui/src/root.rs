@@ -1877,16 +1877,17 @@ impl LubanRootView {
                     .flex_shrink_0()
                     .px_4()
                     .pb_4()
-                    .child(
-                        div()
-                            .w_full()
-                            .max_w(px(900.0))
-                            .mx_auto()
-                            .p_2()
-                            .rounded_lg()
-                            .bg(theme.background)
-                            .border_1()
-                            .border_color(theme.border)
+	                    .child(
+	                        div()
+	                            .w_full()
+	                            .max_w(px(900.0))
+	                            .mx_auto()
+	                            .debug_selector(|| "chat-composer-surface".to_owned())
+	                            .p_1()
+	                            .rounded_lg()
+	                            .bg(theme.background)
+	                            .border_1()
+	                            .border_color(theme.border)
                             .child(
                                 div()
                                     .w_full()
@@ -1901,13 +1902,14 @@ impl LubanRootView {
                                             .flex_col()
                                             .gap_2()
                                             .child(
-                                                div()
-                                                    .w_full()
-                                                    .child(
-                                                        Input::new(&input_state)
-                                                            .appearance(false)
-                                                            .with_size(Size::Large),
-                                                    ),
+	                                                div()
+	                                                    .w_full()
+	                                                    .child(
+	                                                        Input::new(&input_state)
+	                                                            .px_3()
+	                                                            .appearance(false)
+	                                                            .with_size(Size::Large),
+	                                                    ),
                                             )
                                             .child({
                                                 let view_handle = view_handle.clone();
@@ -2115,13 +2117,14 @@ impl LubanRootView {
                                                         )
                                                     });
 
-                                                div()
-                                                    .w_full()
-                                                    .flex()
-                                                    .items_center()
-                                                    .justify_between()
-                                                    .child(
-                                                        div()
+	                                                div()
+	                                                    .w_full()
+	                                                    .flex()
+	                                                    .px_3()
+	                                                    .items_center()
+	                                                    .justify_between()
+	                                                    .child(
+	                                                        div()
                                                             .flex()
                                                             .items_center()
                                                             .gap_2()
@@ -5000,6 +5003,32 @@ mod tests {
         window_cx
             .debug_bounds("chat-thinking-effort-selector")
             .expect("missing chat thinking effort selector");
+
+        let surface_bounds = window_cx
+            .debug_bounds("chat-composer-surface")
+            .expect("missing chat composer surface");
+        let model_bounds = window_cx
+            .debug_bounds("chat-model-selector")
+            .expect("missing chat model selector");
+        let send_bounds = window_cx
+            .debug_bounds("chat-send-message")
+            .expect("missing chat composer send button");
+
+        let left_inset = model_bounds.left() - surface_bounds.left();
+        let right_inset = surface_bounds.right() - send_bounds.right();
+        assert!(
+            left_inset >= px(14.0) && left_inset <= px(22.0),
+            "unexpected chat composer inset: left={left_inset:?} surface={surface_bounds:?} model={model_bounds:?}",
+        );
+        let inset_diff = if left_inset > right_inset {
+            left_inset - right_inset
+        } else {
+            right_inset - left_inset
+        };
+        assert!(
+            inset_diff <= px(4.0),
+            "expected symmetric insets: left={left_inset:?} right={right_inset:?} diff={inset_diff:?}",
+        );
     }
 
     #[gpui::test]
@@ -5606,6 +5635,32 @@ mod tests {
         assert!(
             window_cx.debug_bounds("workspace-chat-composer").is_some(),
             "expected the preview panel to render an editable chat composer"
+        );
+
+        let surface_bounds = window_cx
+            .debug_bounds("chat-composer-surface")
+            .expect("missing preview chat composer surface");
+        let model_bounds = window_cx
+            .debug_bounds("chat-model-selector")
+            .expect("missing preview chat model selector");
+        let send_bounds = window_cx
+            .debug_bounds("chat-send-message")
+            .expect("missing preview chat composer send button");
+
+        let left_inset = model_bounds.left() - surface_bounds.left();
+        let right_inset = surface_bounds.right() - send_bounds.right();
+        let inset_diff = if left_inset > right_inset {
+            left_inset - right_inset
+        } else {
+            right_inset - left_inset
+        };
+        assert!(
+            left_inset >= px(14.0) && left_inset <= px(22.0),
+            "unexpected preview chat composer inset: left={left_inset:?} surface={surface_bounds:?} model={model_bounds:?}",
+        );
+        assert!(
+            inset_diff <= px(4.0),
+            "expected symmetric preview insets: left={left_inset:?} right={right_inset:?} diff={inset_diff:?}",
         );
 
         let open_bounds = window_cx

@@ -754,20 +754,21 @@ impl LubanRootView {
                 })
             })
             .w_full()
-            .flex_shrink_0()
-            .px_4()
-            .pb_4()
-            .child(
-                div()
-                    .w_full()
-                    .max_w(px(900.0))
-                    .mx_auto()
-                    .p_2()
-                    .rounded_lg()
-                    .bg(theme.background)
-                    .border_1()
-                    .border_color(theme.border)
-                    .child(
+                .flex_shrink_0()
+                .px_4()
+                .pb_4()
+                .child(
+                    div()
+                        .w_full()
+                        .max_w(px(900.0))
+                        .mx_auto()
+                        .debug_selector(|| "chat-composer-surface".to_owned())
+                        .p_1()
+                        .rounded_lg()
+                        .bg(theme.background)
+                        .border_1()
+                        .border_color(theme.border)
+                        .child(
                         div()
                             .w_full()
                             .flex()
@@ -783,6 +784,7 @@ impl LubanRootView {
                                     .child(
                                         div().w_full().child(
                                             Input::new(&input_state)
+                                                .px_3()
                                                 .appearance(false)
                                                 .with_size(Size::Large),
                                         ),
@@ -1000,6 +1002,7 @@ impl LubanRootView {
                                         div()
                                             .w_full()
                                             .flex()
+                                            .px_3()
                                             .items_center()
                                             .justify_between()
                                             .child(
