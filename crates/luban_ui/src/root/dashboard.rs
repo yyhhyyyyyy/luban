@@ -87,6 +87,7 @@ impl LubanRootView {
                         .cursor_pointer()
                         .bg(preview_overlay_tint)
                         .debug_selector(|| "dashboard-preview-backdrop".to_owned())
+                        .id("dashboard-preview-backdrop")
                         .on_mouse_down(MouseButton::Left, move |_, _, app| {
                             let _ = close_handle.update(app, |view, cx| {
                                 view.dispatch(Action::DashboardPreviewClosed, cx);
@@ -103,6 +104,19 @@ impl LubanRootView {
                         .debug_selector(|| "dashboard-preview-resizer".to_owned())
                         .bg(transparent)
                         .hover(move |s| s.bg(hover))
+                        .on_prepaint({
+                            let view_handle = view_handle.clone();
+                            move |_bounds, _window, app| {
+                                let _ = view_handle.update(app, |_view, cx| {
+                                    #[cfg(test)]
+                                    _view.record_inspector_bounds(
+                                        "dashboard-preview-resizer",
+                                        _bounds,
+                                    );
+                                    cx.notify();
+                                });
+                            }
+                        })
                         .on_drag(DashboardPreviewResizeDrag, {
                             let view_handle = view_handle.clone();
                             move |_, _offset, window, app| {
@@ -165,7 +179,21 @@ impl LubanRootView {
                         .bg(preview_panel_bg)
                         .border_l_1()
                         .border_color(preview_panel_border)
+                        .id("dashboard-preview-panel")
                         .debug_selector(|| "dashboard-preview-panel".to_owned())
+                        .on_prepaint({
+                            let view_handle = view_handle.clone();
+                            move |_bounds, _window, app| {
+                                let _ = view_handle.update(app, |_view, cx| {
+                                    #[cfg(test)]
+                                    _view.record_inspector_bounds(
+                                        "dashboard-preview-panel",
+                                        _bounds,
+                                    );
+                                    cx.notify();
+                                });
+                            }
+                        })
                         .child(panel),
                 )
                 .into_any_element()

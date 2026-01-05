@@ -147,6 +147,8 @@ pub struct LubanRootView {
     last_workspace_before_dashboard: Option<WorkspaceId>,
     success_toast_message: Option<String>,
     success_toast_generation: u64,
+    #[cfg(test)]
+    inspector_bounds: HashMap<&'static str, gpui::Bounds<Pixels>>,
     _subscriptions: Vec<gpui::Subscription>,
 }
 
@@ -194,6 +196,8 @@ impl LubanRootView {
             last_workspace_before_dashboard: None,
             success_toast_message: None,
             success_toast_generation: 0,
+            #[cfg(test)]
+            inspector_bounds: HashMap::new(),
             _subscriptions: Vec::new(),
         };
 
@@ -252,6 +256,8 @@ impl LubanRootView {
             last_workspace_before_dashboard: None,
             success_toast_message: None,
             success_toast_generation: 0,
+            #[cfg(test)]
+            inspector_bounds: HashMap::new(),
             _subscriptions: Vec::new(),
         }
     }
@@ -259,6 +265,16 @@ impl LubanRootView {
     #[cfg(test)]
     pub fn debug_state(&self) -> &AppState {
         &self.state
+    }
+
+    #[cfg(test)]
+    pub fn debug_inspector_bounds(&self, key: &'static str) -> Option<gpui::Bounds<Pixels>> {
+        self.inspector_bounds.get(key).copied()
+    }
+
+    #[cfg(test)]
+    fn record_inspector_bounds(&mut self, key: &'static str, bounds: gpui::Bounds<Pixels>) {
+        self.inspector_bounds.insert(key, bounds);
     }
 
     #[cfg(test)]
@@ -5628,7 +5644,7 @@ mod tests {
         });
         state.apply(Action::OpenDashboard);
 
-        let (_view, window_cx) =
+        let (view, window_cx) =
             cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
         window_cx.simulate_resize(size(px(1200.0), px(720.0)));
         window_cx.run_until_parked();
@@ -5640,11 +5656,15 @@ mod tests {
         window_cx.simulate_click(card_bounds.center(), Modifiers::none());
         window_cx.refresh().unwrap();
 
-        let panel_before = window_cx
-            .debug_bounds("dashboard-preview-panel")
+        let panel_before = view
+            .read_with(window_cx, |v, _| {
+                v.debug_inspector_bounds("dashboard-preview-panel")
+            })
             .expect("missing preview panel");
-        let resizer_bounds = window_cx
-            .debug_bounds("dashboard-preview-resizer")
+        let resizer_bounds = view
+            .read_with(window_cx, |v, _| {
+                v.debug_inspector_bounds("dashboard-preview-resizer")
+            })
             .expect("missing preview resizer");
 
         let start = resizer_bounds.center();
@@ -5660,8 +5680,10 @@ mod tests {
             window_cx.refresh().unwrap();
         }
 
-        let panel_after = window_cx
-            .debug_bounds("dashboard-preview-panel")
+        let panel_after = view
+            .read_with(window_cx, |v, _| {
+                v.debug_inspector_bounds("dashboard-preview-panel")
+            })
             .expect("missing preview panel after resize");
         assert!(
             panel_after.size.width > panel_before.size.width + px(40.0),
