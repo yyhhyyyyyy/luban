@@ -99,14 +99,17 @@ impl LubanRootView {
     }
 }
 
-fn stage_indicator_color(stage: DashboardStage, theme: &gpui_component::Theme) -> gpui::Hsla {
-    match stage {
-        DashboardStage::Start => theme.muted_foreground,
-        DashboardStage::Running => theme.primary,
-        DashboardStage::Pending => theme.warning_foreground,
-        DashboardStage::Reviewing => theme.info_foreground,
-        DashboardStage::Finished => theme.success_foreground,
-    }
+fn stage_indicator_icon(stage: DashboardStage, theme: &gpui_component::Theme) -> Icon {
+    let icon = match stage {
+        DashboardStage::Start => Icon::new(Icon::empty().path("icons/circle-dot.svg")),
+        DashboardStage::Running => Icon::new(Icon::empty().path("icons/play.svg")),
+        DashboardStage::Pending => Icon::new(Icon::empty().path("icons/message-square-more.svg")),
+        DashboardStage::Reviewing => Icon::new(IconName::Eye),
+        DashboardStage::Finished => Icon::new(Icon::empty().path("icons/book-check.svg")),
+    };
+
+    icon.with_size(Size::Small)
+        .text_color(theme.muted_foreground)
 }
 
 fn render_dashboard_column(
@@ -116,13 +119,7 @@ fn render_dashboard_column(
     theme: &gpui_component::Theme,
     preview_open: bool,
 ) -> AnyElement {
-    let indicator = div()
-        .w(px(10.0))
-        .h(px(10.0))
-        .rounded_full()
-        .border_1()
-        .border_color(theme.border)
-        .bg(stage_indicator_color(stage, theme));
+    let indicator = stage_indicator_icon(stage, theme);
 
     let header = div()
         .h(px(44.0))
@@ -156,7 +153,7 @@ fn render_dashboard_column(
             .p_3()
             .flex()
             .flex_col()
-            .gap_3()
+            .gap_4()
             .children(
                 cards
                     .into_iter()
