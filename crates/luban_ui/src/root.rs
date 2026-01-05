@@ -1,3 +1,4 @@
+use gpui::point;
 use gpui::prelude::*;
 use gpui::{
     AnyElement, Context, CursorStyle, ElementId, IntoElement, MouseButton, Pixels, PromptButton,
@@ -224,7 +225,22 @@ impl LubanRootView {
         self.last_terminal_grid_size
     }
 
+    #[cfg(test)]
+    pub fn debug_chat_scroll_offset_y10(&self) -> i32 {
+        quantize_pixels_y10(self.chat_scroll_handle.offset().y)
+    }
+
+    #[cfg(test)]
+    pub fn debug_chat_scroll_max_offset_y10(&self) -> i32 {
+        quantize_pixels_y10(self.chat_scroll_handle.max_offset().height)
+    }
+
     fn dispatch(&mut self, action: Action, cx: &mut Context<Self>) {
+        let previous_workspace_for_scroll = match self.state.main_pane {
+            MainPane::Workspace(workspace_id) => Some(workspace_id),
+            _ => None,
+        };
+
         match &action {
             Action::OpenDashboard => {
                 if let MainPane::Workspace(workspace_id) = self.state.main_pane {
@@ -281,7 +297,20 @@ impl LubanRootView {
                 .and_then(|c| latest_agent_turn_id(&c.entries))
         });
 
-        let effects = self.state.apply(action);
+        let mut effects = self.state.apply(action);
+        let next_workspace_for_scroll = match self.state.main_pane {
+            MainPane::Workspace(workspace_id) => Some(workspace_id),
+            _ => None,
+        };
+        if previous_workspace_for_scroll != next_workspace_for_scroll
+            && let Some(workspace_id) = previous_workspace_for_scroll
+        {
+            let offset_y10 = quantize_pixels_y10(self.chat_scroll_handle.offset().y);
+            effects.extend(self.state.apply(Action::WorkspaceChatScrollSaved {
+                workspace_id,
+                offset_y10,
+            }));
+        }
         cx.notify();
 
         if let Some(workspace_id) = start_timer_workspace {
@@ -1265,6 +1294,15 @@ impl LubanRootView {
                 let is_running = run_status == OperationStatus::Running;
                 let workspace_changed = self.last_chat_workspace_id != Some(workspace_id);
                 if workspace_changed {
+                    let offset_y10 = self
+                        .state
+                        .workspace_chat_scroll_y10
+                        .get(&workspace_id)
+                        .copied()
+                        .unwrap_or(0);
+                    self.chat_scroll_handle
+                        .set_offset(point(px(0.0), px(offset_y10 as f32 / 10.0)));
+
                     let saved_draft = conversation.map(|c| c.draft.clone()).unwrap_or_default();
                     let current_value = input_state.read(cx).value().to_owned();
                     let should_move_cursor = !saved_draft.is_empty();
@@ -1937,6 +1975,10 @@ fn min_width_zero<E: gpui::Styled>(mut element: E) -> E {
 fn min_height_zero<E: gpui::Styled>(mut element: E) -> E {
     element.style().min_size.height = Some(px(0.0).into());
     element
+}
+
+fn quantize_pixels_y10(pixels: Pixels) -> i32 {
+    (f32::from(pixels) * 10.0).round() as i32
 }
 
 mod debug_layout {
@@ -3238,6 +3280,7 @@ mod tests {
                 projects: Vec::new(),
                 sidebar_width: None,
                 terminal_pane_width: None,
+                workspace_chat_scroll_y10: HashMap::new(),
             })
         }
 
@@ -4552,6 +4595,107 @@ mod tests {
             main_bounds
         );
         assert!(send_bounds.bottom() <= px(720.0) + px(1.0));
+    }
+
+    #[gpui::test]
+    async fn chat_scroll_position_is_saved_and_restored(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "abandon-about".to_owned(),
+            branch_name: "luban/abandon-about".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+        });
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
+        state.main_pane = MainPane::Workspace(workspace_id);
+
+        let long_markdownish = std::iter::repeat_n(
+            "- A very long bullet line that should wrap and force the history to overflow and scroll.\n",
+            40,
+        )
+        .collect::<String>();
+
+        let mut entries = Vec::new();
+        for i in 0..24 {
+            entries.push(ConversationEntry::UserMessage {
+                text: format!("message {i} {long_markdownish}"),
+            });
+            entries.push(ConversationEntry::TurnDuration { duration_ms: 1000 });
+        }
+
+        state.apply(Action::ConversationLoaded {
+            workspace_id,
+            snapshot: ConversationSnapshot {
+                thread_id: Some("thread-1".to_owned()),
+                entries,
+            },
+        });
+
+        let (view, window_cx) =
+            cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+        window_cx.simulate_resize(size(px(900.0), px(320.0)));
+        for _ in 0..3 {
+            window_cx.run_until_parked();
+            window_cx.refresh().unwrap();
+        }
+
+        let max_y10 = view.read_with(window_cx, |v, _| v.debug_chat_scroll_max_offset_y10());
+        assert!(max_y10 > 0, "expected a scrollable chat history");
+
+        let desired_offset_y10 = -((max_y10 / 2).max(10));
+        window_cx.update(|_, app| {
+            view.update(app, |view, cx| {
+                view.chat_scroll_handle
+                    .set_offset(point(px(0.0), px(desired_offset_y10 as f32 / 10.0)));
+                cx.notify();
+            });
+        });
+        for _ in 0..3 {
+            window_cx.run_until_parked();
+            window_cx.refresh().unwrap();
+        }
+
+        let current_offset_y10 = view.read_with(window_cx, |v, _| v.debug_chat_scroll_offset_y10());
+        assert!(current_offset_y10 < 0, "expected a non-zero scroll offset");
+
+        window_cx.update(|_, app| {
+            view.update(app, |view, cx| {
+                view.dispatch(Action::OpenDashboard, cx);
+            });
+        });
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        let saved_offset_y10 = view.read_with(window_cx, |v, _| {
+            v.debug_state()
+                .workspace_chat_scroll_y10
+                .get(&workspace_id)
+                .copied()
+        });
+        assert_eq!(saved_offset_y10, Some(current_offset_y10));
+
+        window_cx.update(|_, app| {
+            view.update(app, |view, cx| {
+                view.chat_scroll_handle.set_offset(point(px(0.0), px(0.0)));
+                view.dispatch(Action::OpenWorkspace { workspace_id }, cx);
+            });
+        });
+        for _ in 0..3 {
+            window_cx.run_until_parked();
+            window_cx.refresh().unwrap();
+        }
+
+        let restored_offset_y10 =
+            view.read_with(window_cx, |v, _| v.debug_chat_scroll_offset_y10());
+        assert_eq!(restored_offset_y10, current_offset_y10);
     }
 
     #[gpui::test]
@@ -6044,6 +6188,7 @@ mod tests {
                 projects: Vec::new(),
                 sidebar_width: None,
                 terminal_pane_width: None,
+                workspace_chat_scroll_y10: HashMap::new(),
             })
         }
 

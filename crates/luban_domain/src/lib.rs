@@ -315,6 +315,7 @@ pub struct AppState {
     pub conversations: HashMap<WorkspaceId, WorkspaceConversation>,
     pub dashboard_preview_workspace_id: Option<WorkspaceId>,
     pub last_error: Option<String>,
+    pub workspace_chat_scroll_y10: HashMap<WorkspaceId, i32>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -322,6 +323,7 @@ pub struct PersistedAppState {
     pub projects: Vec<PersistedProject>,
     pub sidebar_width: Option<u16>,
     pub terminal_pane_width: Option<u16>,
+    pub workspace_chat_scroll_y10: HashMap<u64, i32>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -442,6 +444,10 @@ pub enum Action {
     SidebarWidthChanged {
         width: u16,
     },
+    WorkspaceChatScrollSaved {
+        workspace_id: WorkspaceId,
+        offset_y10: i32,
+    },
 
     AppStateLoaded {
         persisted: PersistedAppState,
@@ -502,6 +508,7 @@ impl AppState {
             conversations: HashMap::new(),
             dashboard_preview_workspace_id: None,
             last_error: None,
+            workspace_chat_scroll_y10: HashMap::new(),
         }
     }
 
@@ -986,6 +993,17 @@ impl AppState {
                 self.sidebar_width = Some(width);
                 vec![Effect::SaveAppState]
             }
+            Action::WorkspaceChatScrollSaved {
+                workspace_id,
+                offset_y10,
+            } => {
+                if self.workspace_chat_scroll_y10.get(&workspace_id).copied() == Some(offset_y10) {
+                    return Vec::new();
+                }
+                self.workspace_chat_scroll_y10
+                    .insert(workspace_id, offset_y10);
+                vec![Effect::SaveAppState]
+            }
 
             Action::AppStateLoaded { persisted } => {
                 if !self.projects.is_empty() {
@@ -1021,6 +1039,11 @@ impl AppState {
                     .collect();
                 self.sidebar_width = persisted.sidebar_width;
                 self.terminal_pane_width = persisted.terminal_pane_width;
+                self.workspace_chat_scroll_y10 = persisted
+                    .workspace_chat_scroll_y10
+                    .into_iter()
+                    .map(|(id, offset)| (WorkspaceId(id), offset))
+                    .collect();
 
                 let max_project_id = self.projects.iter().map(|p| p.id.0).max().unwrap_or(0);
                 let max_workspace_id = self
@@ -1090,6 +1113,11 @@ impl AppState {
                 .collect(),
             sidebar_width: self.sidebar_width,
             terminal_pane_width: self.terminal_pane_width,
+            workspace_chat_scroll_y10: self
+                .workspace_chat_scroll_y10
+                .iter()
+                .map(|(id, offset_y10)| (id.0, *offset_y10))
+                .collect(),
         }
     }
 
@@ -1465,6 +1493,7 @@ mod tests {
                 projects: Vec::new(),
                 sidebar_width: None,
                 terminal_pane_width: Some(480),
+                workspace_chat_scroll_y10: HashMap::new(),
             },
         });
         assert_eq!(state.terminal_pane_width, Some(480));
@@ -1487,9 +1516,40 @@ mod tests {
                 projects: Vec::new(),
                 sidebar_width: Some(360),
                 terminal_pane_width: None,
+                workspace_chat_scroll_y10: HashMap::new(),
             },
         });
         assert_eq!(state.sidebar_width, Some(360));
+    }
+
+    #[test]
+    fn workspace_chat_scroll_is_persisted() {
+        let mut state = AppState::new();
+        let workspace_id = WorkspaceId(42);
+
+        let effects = state.apply(Action::WorkspaceChatScrollSaved {
+            workspace_id,
+            offset_y10: -1234,
+        });
+        assert_eq!(
+            state.workspace_chat_scroll_y10.get(&workspace_id).copied(),
+            Some(-1234)
+        );
+        assert_eq!(effects.len(), 1);
+        assert!(matches!(effects[0], Effect::SaveAppState));
+
+        let persisted = state.to_persisted();
+        assert_eq!(
+            persisted.workspace_chat_scroll_y10.get(&42).copied(),
+            Some(-1234)
+        );
+
+        let mut loaded = AppState::new();
+        loaded.apply(Action::AppStateLoaded { persisted });
+        assert_eq!(
+            loaded.workspace_chat_scroll_y10.get(&workspace_id).copied(),
+            Some(-1234)
+        );
     }
 
     #[test]

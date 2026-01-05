@@ -1,10 +1,12 @@
 use anyhow::{Context as _, anyhow};
 use luban_domain::{ConversationEntry, ConversationSnapshot, PersistedAppState, WorkspaceStatus};
 use rusqlite::{Connection, OptionalExtension as _, params, params_from_iter};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
 const LATEST_SCHEMA_VERSION: u32 = 4;
+const WORKSPACE_CHAT_SCROLL_PREFIX: &str = "workspace_chat_scroll_y10_";
 
 const MIGRATIONS: &[(u32, &str)] = &[
     (
@@ -421,10 +423,32 @@ impl SqliteDatabase {
             .context("failed to load terminal pane width")?
             .and_then(|value| u16::try_from(value).ok());
 
+        let mut workspace_chat_scroll_y10 = HashMap::new();
+        let mut stmt = self.conn.prepare(
+            "SELECT key, value FROM app_settings WHERE key LIKE 'workspace_chat_scroll_y10_%'",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        for row in rows {
+            let (key, value) = row?;
+            let Some(workspace_id) = key.strip_prefix(WORKSPACE_CHAT_SCROLL_PREFIX) else {
+                continue;
+            };
+            let Ok(workspace_id) = workspace_id.parse::<u64>() else {
+                continue;
+            };
+            let Some(offset_y10) = i32::try_from(value).ok() else {
+                continue;
+            };
+            workspace_chat_scroll_y10.insert(workspace_id, offset_y10);
+        }
+
         Ok(PersistedAppState {
             projects,
             sidebar_width,
             terminal_pane_width,
+            workspace_chat_scroll_y10,
         })
     }
 
@@ -534,6 +558,22 @@ impl SqliteDatabase {
             tx.execute(
                 "DELETE FROM app_settings WHERE key = 'terminal_pane_width'",
                 [],
+            )?;
+        }
+
+        tx.execute(
+            "DELETE FROM app_settings WHERE key LIKE 'workspace_chat_scroll_y10_%'",
+            [],
+        )?;
+        for (workspace_id, offset_y10) in &snapshot.workspace_chat_scroll_y10 {
+            let key = format!("{WORKSPACE_CHAT_SCROLL_PREFIX}{workspace_id}");
+            tx.execute(
+                "INSERT INTO app_settings (key, value, created_at, updated_at)
+                 VALUES (?1, ?2, COALESCE((SELECT created_at FROM app_settings WHERE key = ?1), ?3), ?3)
+                 ON CONFLICT(key) DO UPDATE SET
+                   value = excluded.value,
+                   updated_at = excluded.updated_at",
+                params![key, *offset_y10 as i64, now],
             )?;
         }
 
@@ -816,6 +856,7 @@ mod tests {
             }],
             sidebar_width: Some(280),
             terminal_pane_width: Some(360),
+            workspace_chat_scroll_y10: HashMap::from([(10, -1234)]),
         };
 
         db.save_app_state(&snapshot).unwrap();
@@ -846,6 +887,7 @@ mod tests {
             }],
             sidebar_width: None,
             terminal_pane_width: None,
+            workspace_chat_scroll_y10: HashMap::new(),
         };
         db.save_app_state(&snapshot).unwrap();
 
@@ -896,6 +938,7 @@ mod tests {
             }],
             sidebar_width: None,
             terminal_pane_width: None,
+            workspace_chat_scroll_y10: HashMap::new(),
         };
         db.save_app_state(&snapshot).unwrap();
 
