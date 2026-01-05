@@ -7,6 +7,7 @@ use std::sync::mpsc;
 
 const LATEST_SCHEMA_VERSION: u32 = 4;
 const WORKSPACE_CHAT_SCROLL_PREFIX: &str = "workspace_chat_scroll_y10_";
+const LAST_OPEN_WORKSPACE_ID_KEY: &str = "last_open_workspace_id";
 
 const MIGRATIONS: &[(u32, &str)] = &[
     (
@@ -423,6 +424,17 @@ impl SqliteDatabase {
             .context("failed to load terminal pane width")?
             .and_then(|value| u16::try_from(value).ok());
 
+        let last_open_workspace_id = self
+            .conn
+            .query_row(
+                "SELECT value FROM app_settings WHERE key = ?1",
+                params![LAST_OPEN_WORKSPACE_ID_KEY],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .context("failed to load last open workspace id")?
+            .and_then(|value| u64::try_from(value).ok());
+
         let mut workspace_chat_scroll_y10 = HashMap::new();
         let mut stmt = self.conn.prepare(
             "SELECT key, value FROM app_settings WHERE key LIKE 'workspace_chat_scroll_y10_%'",
@@ -448,6 +460,7 @@ impl SqliteDatabase {
             projects,
             sidebar_width,
             terminal_pane_width,
+            last_open_workspace_id,
             workspace_chat_scroll_y10,
         })
     }
@@ -558,6 +571,22 @@ impl SqliteDatabase {
             tx.execute(
                 "DELETE FROM app_settings WHERE key = 'terminal_pane_width'",
                 [],
+            )?;
+        }
+
+        if let Some(value) = snapshot.last_open_workspace_id {
+            tx.execute(
+                "INSERT INTO app_settings (key, value, created_at, updated_at)
+                 VALUES (?1, ?2, COALESCE((SELECT created_at FROM app_settings WHERE key = ?1), ?3), ?3)
+                 ON CONFLICT(key) DO UPDATE SET
+                   value = excluded.value,
+                   updated_at = excluded.updated_at",
+                params![LAST_OPEN_WORKSPACE_ID_KEY, value as i64, now],
+            )?;
+        } else {
+            tx.execute(
+                "DELETE FROM app_settings WHERE key = ?1",
+                params![LAST_OPEN_WORKSPACE_ID_KEY],
             )?;
         }
 
@@ -856,6 +885,7 @@ mod tests {
             }],
             sidebar_width: Some(280),
             terminal_pane_width: Some(360),
+            last_open_workspace_id: Some(10),
             workspace_chat_scroll_y10: HashMap::from([(10, -1234)]),
         };
 
@@ -887,6 +917,7 @@ mod tests {
             }],
             sidebar_width: None,
             terminal_pane_width: None,
+            last_open_workspace_id: None,
             workspace_chat_scroll_y10: HashMap::new(),
         };
         db.save_app_state(&snapshot).unwrap();
@@ -938,6 +969,7 @@ mod tests {
             }],
             sidebar_width: None,
             terminal_pane_width: None,
+            last_open_workspace_id: None,
             workspace_chat_scroll_y10: HashMap::new(),
         };
         db.save_app_state(&snapshot).unwrap();

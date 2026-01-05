@@ -3384,6 +3384,7 @@ mod tests {
                 projects: Vec::new(),
                 sidebar_width: None,
                 terminal_pane_width: None,
+                last_open_workspace_id: None,
                 workspace_chat_scroll_y10: HashMap::new(),
             })
         }
@@ -6454,6 +6455,7 @@ mod tests {
                 projects: Vec::new(),
                 sidebar_width: None,
                 terminal_pane_width: None,
+                last_open_workspace_id: None,
                 workspace_chat_scroll_y10: HashMap::new(),
             })
         }

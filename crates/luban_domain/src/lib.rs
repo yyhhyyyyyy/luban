@@ -314,6 +314,7 @@ pub struct AppState {
     pub terminal_pane_width: Option<u16>,
     pub conversations: HashMap<WorkspaceId, WorkspaceConversation>,
     pub dashboard_preview_workspace_id: Option<WorkspaceId>,
+    pub last_open_workspace_id: Option<WorkspaceId>,
     pub last_error: Option<String>,
     pub workspace_chat_scroll_y10: HashMap<WorkspaceId, i32>,
 }
@@ -323,6 +324,7 @@ pub struct PersistedAppState {
     pub projects: Vec<PersistedProject>,
     pub sidebar_width: Option<u16>,
     pub terminal_pane_width: Option<u16>,
+    pub last_open_workspace_id: Option<u64>,
     pub workspace_chat_scroll_y10: HashMap<u64, i32>,
 }
 
@@ -507,6 +509,7 @@ impl AppState {
             terminal_pane_width: None,
             conversations: HashMap::new(),
             dashboard_preview_workspace_id: None,
+            last_open_workspace_id: None,
             last_error: None,
             workspace_chat_scroll_y10: HashMap::new(),
         }
@@ -646,7 +649,11 @@ impl AppState {
                 self.main_pane = MainPane::Workspace(workspace_id);
                 self.right_pane = RightPane::Terminal;
                 self.dashboard_preview_workspace_id = None;
-                vec![Effect::LoadConversation { workspace_id }]
+                self.last_open_workspace_id = Some(workspace_id);
+                vec![
+                    Effect::SaveAppState,
+                    Effect::LoadConversation { workspace_id },
+                ]
             }
             Action::OpenWorkspaceInIde { workspace_id } => {
                 if self.workspace(workspace_id).is_none() {
@@ -690,6 +697,9 @@ impl AppState {
                     let workspace = &mut self.projects[project_idx].workspaces[workspace_idx];
                     workspace.archive_status = OperationStatus::Idle;
                     workspace.status = WorkspaceStatus::Archived;
+                }
+                if self.last_open_workspace_id == Some(workspace_id) {
+                    self.last_open_workspace_id = None;
                 }
                 if matches!(self.main_pane, MainPane::Workspace(id) if id == workspace_id) {
                     self.main_pane = MainPane::None;
@@ -1039,6 +1049,7 @@ impl AppState {
                     .collect();
                 self.sidebar_width = persisted.sidebar_width;
                 self.terminal_pane_width = persisted.terminal_pane_width;
+                self.last_open_workspace_id = persisted.last_open_workspace_id.map(WorkspaceId);
                 self.workspace_chat_scroll_y10 = persisted
                     .workspace_chat_scroll_y10
                     .into_iter()
@@ -1057,13 +1068,29 @@ impl AppState {
                 self.next_project_id = max_project_id + 1;
                 self.next_workspace_id = max_workspace_id + 1;
                 self.main_pane = MainPane::None;
+                self.right_pane = RightPane::None;
+                self.dashboard_preview_workspace_id = None;
 
                 let upgraded = self.ensure_main_workspaces();
-                if upgraded {
+                let mut effects = if upgraded {
                     vec![Effect::SaveAppState]
                 } else {
                     Vec::new()
+                };
+
+                let restored_workspace_id = self.last_open_workspace_id.and_then(|workspace_id| {
+                    self.workspace(workspace_id)
+                        .filter(|w| w.status == WorkspaceStatus::Active)
+                        .map(|_| workspace_id)
+                });
+
+                if let Some(workspace_id) = restored_workspace_id {
+                    self.main_pane = MainPane::Workspace(workspace_id);
+                    self.right_pane = RightPane::Terminal;
+                    effects.push(Effect::LoadConversation { workspace_id });
                 }
+
+                effects
             }
             Action::AppStateLoadFailed { message } => {
                 self.last_error = Some(message);
@@ -1113,6 +1140,7 @@ impl AppState {
                 .collect(),
             sidebar_width: self.sidebar_width,
             terminal_pane_width: self.terminal_pane_width,
+            last_open_workspace_id: self.last_open_workspace_id.map(|id| id.0),
             workspace_chat_scroll_y10: self
                 .workspace_chat_scroll_y10
                 .iter()
@@ -1493,6 +1521,7 @@ mod tests {
                 projects: Vec::new(),
                 sidebar_width: None,
                 terminal_pane_width: Some(480),
+                last_open_workspace_id: None,
                 workspace_chat_scroll_y10: HashMap::new(),
             },
         });
@@ -1516,6 +1545,7 @@ mod tests {
                 projects: Vec::new(),
                 sidebar_width: Some(360),
                 terminal_pane_width: None,
+                last_open_workspace_id: None,
                 workspace_chat_scroll_y10: HashMap::new(),
             },
         });
@@ -1735,8 +1765,45 @@ mod tests {
         let workspace_id = first_non_main_workspace_id(&state);
 
         let effects = state.apply(Action::OpenWorkspace { workspace_id });
+        assert_eq!(effects.len(), 2);
+        assert!(matches!(effects[0], Effect::SaveAppState));
+        assert!(matches!(effects[1], Effect::LoadConversation { .. }));
+    }
+
+    #[test]
+    fn app_state_restores_last_open_workspace() {
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "abandon-about".to_owned(),
+            branch_name: "luban/abandon-about".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+        });
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
+        state.apply(Action::OpenWorkspace { workspace_id });
+
+        let persisted = state.to_persisted();
+        assert_eq!(persisted.last_open_workspace_id, Some(workspace_id.0));
+
+        let mut loaded = AppState::new();
+        let effects = loaded.apply(Action::AppStateLoaded { persisted });
+
+        assert!(
+            matches!(loaded.main_pane, MainPane::Workspace(id) if id == workspace_id),
+            "expected main pane to restore workspace"
+        );
+        assert_eq!(loaded.right_pane, RightPane::Terminal);
         assert_eq!(effects.len(), 1);
-        assert!(matches!(effects[0], Effect::LoadConversation { .. }));
+        assert!(matches!(
+            effects[0],
+            Effect::LoadConversation {
+                workspace_id: id
+            } if id == workspace_id
+        ));
     }
 
     #[test]
