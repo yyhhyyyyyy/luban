@@ -147,18 +147,13 @@ fn render_dashboard_column(
         );
 
     let body = min_height_zero(
-        div()
-            .flex_1()
-            .overflow_y_scrollbar()
-            .p_3()
-            .flex()
-            .flex_col()
-            .gap_4()
-            .children(
+        div().flex_1().overflow_y_scrollbar().child(
+            div().p_3().flex().flex_col().gap_4().children(
                 cards
                     .into_iter()
                     .map(|card| render_dashboard_card(card, view_handle, theme, preview_open)),
             ),
+        ),
     );
 
     div()
@@ -168,7 +163,9 @@ fn render_dashboard_column(
         .flex()
         .flex_col()
         .rounded_xl()
-        .bg(theme.secondary)
+        .bg(theme.muted)
+        .border_1()
+        .border_color(theme.border)
         .debug_selector(move || format!("dashboard-column-{}", stage.debug_id()))
         .child(div().px_3().pt_3().child(header))
         .child(body)

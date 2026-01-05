@@ -5533,6 +5533,72 @@ mod tests {
     }
 
     #[gpui::test]
+    async fn dashboard_columns_show_inset_and_card_spacing(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::ToggleProjectExpanded { project_id });
+        for name in ["w1", "w2", "w3"] {
+            state.apply(Action::WorkspaceCreated {
+                project_id,
+                workspace_name: name.to_owned(),
+                branch_name: format!("repo/{name}"),
+                worktree_path: PathBuf::from(format!("/tmp/luban/worktrees/repo/{name}")),
+            });
+        }
+        state.apply(Action::OpenDashboard);
+
+        let (_view, window_cx) =
+            cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+        window_cx.simulate_resize(size(px(1200.0), px(720.0)));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        let column_bounds = window_cx
+            .debug_bounds("dashboard-column-start")
+            .expect("missing dashboard start column");
+
+        let mut card_bounds = [
+            window_cx
+                .debug_bounds("dashboard-card-0-w1")
+                .expect("missing dashboard card for w1"),
+            window_cx
+                .debug_bounds("dashboard-card-0-w2")
+                .expect("missing dashboard card for w2"),
+            window_cx
+                .debug_bounds("dashboard-card-0-w3")
+                .expect("missing dashboard card for w3"),
+        ];
+        card_bounds.sort_by(|a, b| a.top().partial_cmp(&b.top()).unwrap());
+
+        let first = card_bounds[0];
+        assert!(
+            first.left() >= column_bounds.left() + px(6.0),
+            "expected card inset within column: card={first:?} column={column_bounds:?}",
+        );
+        assert!(
+            first.right() <= column_bounds.right() - px(6.0),
+            "expected card inset within column: card={first:?} column={column_bounds:?}",
+        );
+
+        for window in card_bounds.windows(2) {
+            let prev = window[0];
+            let next = window[1];
+            let gap = next.top() - prev.bottom();
+            assert!(
+                gap >= px(6.0),
+                "expected visible gap between dashboard cards: prev={prev:?} next={next:?} gap={gap:?}",
+            );
+        }
+    }
+
+    #[gpui::test]
     async fn dashboard_preview_closes_when_clicking_outside(cx: &mut gpui::TestAppContext) {
         cx.update(gpui_component::init);
 
