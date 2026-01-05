@@ -6,8 +6,12 @@ use std::{
 
 mod adapters;
 pub use adapters::{
-    CreatedWorkspace, ProjectWorkspaceService, PullRequestInfo, PullRequestState,
+    ContextImage, CreatedWorkspace, ProjectWorkspaceService, PullRequestInfo, PullRequestState,
     RunAgentTurnRequest,
+};
+mod context_tokens;
+pub use context_tokens::{
+    ContextToken, ContextTokenKind, extract_context_image_paths_in_order, find_context_tokens,
 };
 mod agent_settings;
 pub use agent_settings::{

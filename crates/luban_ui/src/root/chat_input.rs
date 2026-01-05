@@ -57,6 +57,15 @@ impl LubanRootView {
                     let Some(workspace_id) = workspace_id else {
                         return;
                     };
+                    if this
+                        .pending_context_imports
+                        .get(&workspace_id)
+                        .copied()
+                        .unwrap_or(0)
+                        > 0
+                    {
+                        return;
+                    }
                     input_state.update(cx, |state, cx| state.set_value("", window, cx));
                     this.dispatch(Action::SendAgentMessage { workspace_id, text }, cx);
                 }

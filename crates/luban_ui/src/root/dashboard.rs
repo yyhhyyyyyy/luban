@@ -413,7 +413,7 @@ impl LubanRootView {
             let current_value = input_state.read(cx).value().to_owned();
             let should_move_cursor = !saved_draft.is_empty();
             if current_value != saved_draft.as_str() || should_move_cursor {
-                input_state.update(cx, move |state, cx| {
+                input_state.update(cx, |state, cx| {
                     if current_value != saved_draft.as_str() {
                         state.set_value(&saved_draft, window, cx);
                     }
@@ -428,10 +428,23 @@ impl LubanRootView {
             }
         }
 
+        apply_pending_context_replacements_for_input(
+            &mut self.pending_context_replacements,
+            workspace_id,
+            &input_state,
+            window,
+            cx,
+        );
+
         let theme = cx.theme();
 
         let draft = input_state.read(cx).value().trim().to_owned();
-        let send_disabled = draft.is_empty();
+        let pending_context_imports = self
+            .pending_context_imports
+            .get(&workspace_id)
+            .copied()
+            .unwrap_or(0);
+        let send_disabled = draft.is_empty() || pending_context_imports > 0;
         let running_elapsed = if is_running {
             self.running_turn_started_at
                 .get(&workspace_id)
@@ -763,6 +776,8 @@ impl LubanRootView {
         };
 
         let debug_layout_enabled = self.debug_layout_enabled;
+        let pending_drop_paths: std::rc::Rc<std::cell::RefCell<Option<Vec<std::path::PathBuf>>>> =
+            std::rc::Rc::new(std::cell::RefCell::new(None));
         let composer = div()
             .debug_selector(|| "workspace-chat-composer".to_owned())
             .when(debug_layout_enabled, |s| {
@@ -780,6 +795,107 @@ impl LubanRootView {
                         .max_w(px(900.0))
                         .mx_auto()
                         .debug_selector(|| "chat-composer-surface".to_owned())
+                        .capture_action({
+                            let view_handle = view_handle.clone();
+                            let input_state = input_state.clone();
+                            move |_: &gpui_component::input::Paste,
+                                  window: &mut Window,
+                                  app: &mut gpui::App| {
+                                let Some(clipboard) = app.read_from_clipboard() else {
+                                    return;
+                                };
+
+                                let (inline_text, imports) =
+                                    context_import_plan_from_clipboard(&clipboard);
+                                if imports.is_empty() {
+                                    return;
+                                }
+
+                                app.stop_propagation();
+
+                                let inline_text_for_insert = inline_text.clone();
+                                input_state.update(app, |state, cx| {
+                                    if let Some(text) = inline_text_for_insert && !text.is_empty()
+                                    {
+                                        state.replace(text, window, cx);
+                                    }
+
+                                    for (placeholder, _) in &imports {
+                                        state.insert("\n", window, cx);
+                                        state.insert(placeholder.clone(), window, cx);
+                                        state.insert("\n", window, cx);
+                                    }
+                                });
+
+                                for (placeholder, spec) in imports {
+                                    let placeholder = placeholder.clone();
+                                    let _ = view_handle.update(app, move |view, cx| {
+                                        view.enqueue_context_import(workspace_id, placeholder, spec, cx);
+                                    });
+                                }
+                            }
+                        })
+                        .on_drop({
+                            let view_handle = view_handle.clone();
+                            let input_state = input_state.clone();
+                            let pending_drop_paths = pending_drop_paths.clone();
+                            move |event: &gpui::FileDropEvent,
+                                  window: &mut Window,
+                                  app: &mut gpui::App| {
+                                match event {
+                                    gpui::FileDropEvent::Entered { paths, .. } => {
+                                        *pending_drop_paths.borrow_mut() = Some(
+                                            paths.paths()
+                                                .iter()
+                                                .map(|p| p.to_path_buf())
+                                                .collect(),
+                                        );
+                                    }
+                                    gpui::FileDropEvent::Exited => {
+                                        pending_drop_paths.borrow_mut().take();
+                                    }
+                                    gpui::FileDropEvent::Submit { .. } => {
+                                        let Some(paths) = pending_drop_paths.borrow_mut().take() else {
+                                            return;
+                                        };
+
+                                        let mut imports = Vec::new();
+                                        for path in paths {
+                                            if !is_text_like_extension(&path) {
+                                                continue;
+                                            }
+                                            let placeholder = context_token(
+                                                "text",
+                                                &pending_context_value(next_pending_context_id()),
+                                            );
+                                            imports.push((
+                                                placeholder,
+                                                ContextImportSpec::File { source_path: path },
+                                            ));
+                                        }
+
+                                        if imports.is_empty() {
+                                            return;
+                                        }
+
+                                        input_state.update(app, |state, cx| {
+                                            for (placeholder, _) in &imports {
+                                                state.insert("\n", window, cx);
+                                                state.insert(placeholder.clone(), window, cx);
+                                                state.insert("\n", window, cx);
+                                            }
+                                        });
+
+                                        for (placeholder, spec) in imports {
+                                            let _ = view_handle.update(app, move |view, cx| {
+                                                view.enqueue_context_import(workspace_id, placeholder, spec, cx);
+                                            });
+                                        }
+                                    }
+                                    gpui::FileDropEvent::Pending { .. } => {}
+                                }
+                            }
+                        })
                         .p_1()
                         .rounded_lg()
                         .bg(theme.background)
