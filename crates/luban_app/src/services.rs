@@ -20,6 +20,7 @@ use std::{
 use crate::sqlite_store::SqliteStore;
 
 const SIDECAR_EVENT_PREFIX: &str = "__LUBAN_EVENT__ ";
+const CODEX_BIN_ENV: &str = "LUBAN_CODEX_BIN";
 
 fn contains_attempt_fraction(text: &str) -> bool {
     let mut chars = text.chars().peekable();
@@ -226,7 +227,6 @@ fn parse_sidecar_stdout_line(line: &str) -> anyhow::Result<SidecarStdoutLine> {
 pub struct GitWorkspaceService {
     worktrees_root: PathBuf,
     conversations_root: PathBuf,
-    codex_sidecar_dir: PathBuf,
     sqlite: SqliteStore,
 }
 
@@ -242,17 +242,11 @@ impl GitWorkspaceService {
         let worktrees_root = luban_root.join("worktrees");
         let conversations_root = luban_root.join("conversations");
         let sqlite_path = luban_root.join("luban.db");
-        let codex_sidecar_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("..")
-            .join("tools")
-            .join("codex_sidecar");
         let sqlite = SqliteStore::new(sqlite_path).context("failed to init sqlite store")?;
 
         Ok(Arc::new(Self {
             worktrees_root,
             conversations_root,
-            codex_sidecar_dir,
             sqlite,
         }))
     }
@@ -368,54 +362,10 @@ impl GitWorkspaceService {
             .as_secs()
     }
 
-    fn sidecar_bundled_script_path(&self) -> PathBuf {
-        self.codex_sidecar_dir.join("dist").join("run.mjs")
-    }
-
-    fn sidecar_vendor_codex_path(&self) -> anyhow::Result<PathBuf> {
-        let target_triple = match (std::env::consts::OS, std::env::consts::ARCH) {
-            ("macos", "aarch64") => "aarch64-apple-darwin",
-            ("macos", "x86_64") => "x86_64-apple-darwin",
-            ("linux", "aarch64") => "aarch64-unknown-linux-musl",
-            ("linux", "x86_64") => "x86_64-unknown-linux-musl",
-            ("windows", "aarch64") => "aarch64-pc-windows-msvc",
-            ("windows", "x86_64") => "x86_64-pc-windows-msvc",
-            (os, arch) => {
-                return Err(anyhow!(
-                    "unsupported Codex sidecar platform: {} ({})",
-                    os,
-                    arch
-                ));
-            }
-        };
-
-        let binary_name = if cfg!(windows) { "codex.exe" } else { "codex" };
-        Ok(self
-            .codex_sidecar_dir
-            .join("vendor")
-            .join(target_triple)
-            .join("codex")
-            .join(binary_name))
-    }
-
-    fn ensure_sidecar_installed(&self) -> anyhow::Result<()> {
-        let bundled = self.sidecar_bundled_script_path();
-        if bundled.is_file() {
-            let codex = self.sidecar_vendor_codex_path()?;
-            if codex.is_file() {
-                return Ok(());
-            }
-
-            return Err(anyhow!(
-                "missing Codex sidecar binary: run 'just sidecar-install' to vendor {}",
-                codex.display()
-            ));
-        }
-
-        Err(anyhow!(
-            "missing Codex sidecar bundle: run 'just sidecar-build' to generate {}",
-            bundled.display()
-        ))
+    fn codex_executable(&self) -> PathBuf {
+        std::env::var_os(CODEX_BIN_ENV)
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("codex"))
     }
 
     fn read_conversation_meta_legacy(
@@ -555,54 +505,65 @@ impl GitWorkspaceService {
             .load_conversation(project_slug.clone(), workspace_name.clone())
     }
 
-    fn run_codex_turn_streamed_via_sidecar(
+    fn run_codex_turn_streamed_via_cli(
         &self,
-        params: SidecarTurnParams,
+        params: CodexTurnParams,
         cancel: Arc<AtomicBool>,
         mut on_event: impl FnMut(CodexThreadEvent) -> anyhow::Result<()>,
     ) -> anyhow::Result<()> {
-        self.ensure_sidecar_installed()?;
-
-        let script = self.sidecar_bundled_script_path();
-        let SidecarTurnParams {
+        let codex = self.codex_executable();
+        let CodexTurnParams {
             thread_id,
             worktree_path,
             prompt,
             model,
             model_reasoning_effort,
         } = params;
-        let request = SidecarTurnRequest {
-            thread_id,
-            working_directory: worktree_path
-                .as_path()
-                .to_str()
-                .ok_or_else(|| anyhow!("invalid worktree path"))?
-                .to_owned(),
-            prompt,
-            model,
-            model_reasoning_effort,
-            sandbox_mode: "danger-full-access".to_owned(),
-            approval_policy: "never".to_owned(),
-            network_access_enabled: true,
-            web_search_enabled: true,
-            skip_git_repo_check: false,
-        };
 
-        let mut child = Command::new("node")
-            .arg(&script)
-            .current_dir(&self.codex_sidecar_dir)
+        let mut command = Command::new(&codex);
+        command
+            .arg("--sandbox")
+            .arg("danger-full-access")
+            .arg("--ask-for-approval")
+            .arg("never")
+            .arg("--search")
+            .arg("exec")
+            .arg("--json")
+            .arg("-C")
+            .arg(&worktree_path);
+
+        if let Some(model) = model {
+            command.arg("--model").arg(model);
+        }
+        let _ = model_reasoning_effort;
+
+        if let Some(thread_id) = thread_id {
+            command.arg("resume").arg(thread_id).arg("-");
+        } else {
+            command.arg("-");
+        }
+
+        let mut child = command
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()
-            .with_context(|| format!("failed to spawn node for {}", script.display()))?;
+            .map_err(|err| {
+                if err.kind() == std::io::ErrorKind::NotFound {
+                    anyhow!(
+                        "missing codex executable ({}): install Codex CLI and ensure it is available on PATH",
+                        codex.display()
+                    )
+                } else {
+                    anyhow!(err).context("failed to spawn codex")
+                }
+            })?;
 
-        let input = serde_json::to_vec(&request).context("failed to serialize request")?;
         child
             .stdin
             .as_mut()
             .ok_or_else(|| anyhow!("missing stdin"))?
-            .write_all(&input)
+            .write_all(prompt.as_bytes())
             .context("failed to write stdin")?;
         drop(child.stdin.take());
 
@@ -676,7 +637,7 @@ impl GitWorkspaceService {
                     if cancel.load(Ordering::SeqCst) {
                         break;
                     }
-                    return Err(err).context("failed to parse codex sidecar stdout");
+                    return Err(err).context("failed to parse codex stdout");
                 }
             }
         }
@@ -701,7 +662,7 @@ impl GitWorkspaceService {
                 format!("\nstdout (non-protocol):\n{}\n", stdout_noise.join("\n"))
             };
             return Err(anyhow!(
-                "codex sidecar failed ({}):\nstderr:\n{}{}",
+                "codex failed ({}):\nstderr:\n{}{}",
                 status,
                 stderr_text.trim(),
                 sidecar_noise
@@ -715,6 +676,8 @@ impl GitWorkspaceService {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn run_git(repo_path: &Path, args: &[&str]) -> std::process::Output {
         Command::new("git")
@@ -746,117 +709,51 @@ mod tests {
     }
 
     #[test]
-    fn ensure_sidecar_installed_accepts_bundled_script() {
+    fn codex_runner_reports_missing_executable() {
+        let _guard = ENV_LOCK.lock().expect("env lock should work");
+
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("time should be valid")
             .as_nanos();
         let base_dir = std::env::temp_dir().join(format!(
-            "luban-sidecar-bundle-check-{}-{}",
+            "luban-missing-codex-check-{}-{}",
             std::process::id(),
             unique
         ));
-
         std::fs::create_dir_all(&base_dir).expect("temp dir should be created");
 
-        let sidecar_dir = base_dir.join("sidecar");
-        let dist_dir = sidecar_dir.join("dist");
-        std::fs::create_dir_all(&dist_dir).expect("dist dir should be created");
-
-        let bundled_script = dist_dir.join("run.mjs");
-        std::fs::write(&bundled_script, b"// stub\n").expect("write should succeed");
+        let missing_codex = base_dir.join("missing-codex-bin");
+        unsafe {
+            std::env::set_var(CODEX_BIN_ENV, missing_codex.as_os_str());
+        }
 
         let sqlite = SqliteStore::new(base_dir.join("luban.db")).expect("sqlite init should work");
         let service = GitWorkspaceService {
             worktrees_root: base_dir.join("worktrees"),
             conversations_root: base_dir.join("conversations"),
-            codex_sidecar_dir: sidecar_dir,
-            sqlite,
-        };
-
-        let codex_path = service
-            .sidecar_vendor_codex_path()
-            .expect("test host should be supported");
-        std::fs::create_dir_all(codex_path.parent().expect("missing codex parent"))
-            .expect("vendor directory should be created");
-        std::fs::write(&codex_path, b"").expect("write should succeed");
-
-        service
-            .ensure_sidecar_installed()
-            .expect("bundled sidecar should be accepted");
-
-        drop(service);
-        let _ = std::fs::remove_dir_all(&base_dir);
-    }
-
-    #[test]
-    fn ensure_sidecar_installed_rejects_node_modules_without_bundle() {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("time should be valid")
-            .as_nanos();
-        let base_dir = std::env::temp_dir().join(format!(
-            "luban-sidecar-node-modules-only-check-{}-{}",
-            std::process::id(),
-            unique
-        ));
-
-        std::fs::create_dir_all(&base_dir).expect("temp dir should be created");
-
-        let sidecar_dir = base_dir.join("sidecar");
-        let node_modules = sidecar_dir.join("node_modules");
-        std::fs::create_dir_all(&node_modules).expect("node_modules dir should be created");
-
-        let sqlite = SqliteStore::new(base_dir.join("luban.db")).expect("sqlite init should work");
-        let service = GitWorkspaceService {
-            worktrees_root: base_dir.join("worktrees"),
-            conversations_root: base_dir.join("conversations"),
-            codex_sidecar_dir: sidecar_dir,
             sqlite,
         };
 
         let err = service
-            .ensure_sidecar_installed()
-            .expect_err("node_modules should not be accepted without bundled script");
-        assert!(err.to_string().contains("missing Codex sidecar bundle"));
+            .run_codex_turn_streamed_via_cli(
+                CodexTurnParams {
+                    thread_id: None,
+                    worktree_path: base_dir.clone(),
+                    prompt: "Hi".to_owned(),
+                    model: None,
+                    model_reasoning_effort: None,
+                },
+                Arc::new(AtomicBool::new(false)),
+                |_event| Ok(()),
+            )
+            .expect_err("missing codex executable should fail");
 
-        drop(service);
-        let _ = std::fs::remove_dir_all(&base_dir);
-    }
+        unsafe {
+            std::env::remove_var(CODEX_BIN_ENV);
+        }
 
-    #[test]
-    fn ensure_sidecar_installed_rejects_bundle_without_vendor_binary() {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("time should be valid")
-            .as_nanos();
-        let base_dir = std::env::temp_dir().join(format!(
-            "luban-sidecar-missing-vendor-check-{}-{}",
-            std::process::id(),
-            unique
-        ));
-
-        std::fs::create_dir_all(&base_dir).expect("temp dir should be created");
-
-        let sidecar_dir = base_dir.join("sidecar");
-        let dist_dir = sidecar_dir.join("dist");
-        std::fs::create_dir_all(&dist_dir).expect("dist dir should be created");
-
-        let bundled_script = dist_dir.join("run.mjs");
-        std::fs::write(&bundled_script, b"// stub\n").expect("write should succeed");
-
-        let sqlite = SqliteStore::new(base_dir.join("luban.db")).expect("sqlite init should work");
-        let service = GitWorkspaceService {
-            worktrees_root: base_dir.join("worktrees"),
-            conversations_root: base_dir.join("conversations"),
-            codex_sidecar_dir: sidecar_dir,
-            sqlite,
-        };
-
-        let err = service
-            .ensure_sidecar_installed()
-            .expect_err("bundled sidecar should not be accepted without vendor binary");
-        assert!(err.to_string().contains("missing Codex sidecar binary"));
+        assert!(err.to_string().contains("missing codex executable"));
 
         drop(service);
         let _ = std::fs::remove_dir_all(&base_dir);
@@ -974,7 +871,6 @@ mod tests {
         let service = GitWorkspaceService {
             worktrees_root: base_dir.join("worktrees"),
             conversations_root: base_dir.join("conversations"),
-            codex_sidecar_dir: base_dir.join("sidecar"),
             sqlite,
         };
 
@@ -1197,8 +1093,8 @@ impl ProjectWorkspaceService for GitWorkspaceService {
             let mut transient_error_seq: u64 = 0;
             let duration_appended_for_events = duration_appended.clone();
 
-            self.run_codex_turn_streamed_via_sidecar(
-                SidecarTurnParams {
+            self.run_codex_turn_streamed_via_cli(
+                CodexTurnParams {
                     thread_id: resolved_thread_id,
                     worktree_path: worktree_path.clone(),
                     prompt: prompt.clone(),
@@ -1448,23 +1344,8 @@ struct ConversationMeta {
     updated_at: u64,
 }
 
-#[derive(Clone, Debug, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SidecarTurnRequest {
-    thread_id: Option<String>,
-    working_directory: String,
-    prompt: String,
-    model: Option<String>,
-    model_reasoning_effort: Option<String>,
-    sandbox_mode: String,
-    approval_policy: String,
-    network_access_enabled: bool,
-    web_search_enabled: bool,
-    skip_git_repo_check: bool,
-}
-
 #[derive(Clone, Debug)]
-struct SidecarTurnParams {
+struct CodexTurnParams {
     thread_id: Option<String>,
     worktree_path: PathBuf,
     prompt: String,
