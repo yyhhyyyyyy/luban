@@ -1505,6 +1505,48 @@ fn render_titlebar(
             })
     });
 
+    let add_project_button = {
+        let view_handle = cx.entity().downgrade();
+        Button::new("add-project")
+            .ghost()
+            .compact()
+            .icon(Icon::new(IconName::Plus).text_color(theme.muted_foreground))
+            .tooltip("Add project")
+            .on_click(move |_, _window, app| {
+                let view_handle = view_handle.clone();
+                let options = gpui::PathPromptOptions {
+                    files: false,
+                    directories: true,
+                    multiple: false,
+                    prompt: Some("Add Project".into()),
+                };
+
+                let receiver = app.prompt_for_paths(options);
+                app.spawn(move |cx: &mut gpui::AsyncApp| {
+                    let mut async_cx = cx.clone();
+                    async move {
+                        let Ok(result) = receiver.await else {
+                            return;
+                        };
+                        let Ok(Some(mut paths)) = result else {
+                            return;
+                        };
+                        let Some(path) = paths.pop() else {
+                            return;
+                        };
+
+                        let _ = view_handle.update(
+                            &mut async_cx,
+                            |view: &mut LubanRootView, view_cx: &mut Context<LubanRootView>| {
+                                view.dispatch(Action::AddProject { path }, view_cx);
+                            },
+                        );
+                    }
+                })
+                .detach();
+            })
+    };
+
     let sidebar_titlebar = div()
         .w(sidebar_width)
         .h(titlebar_height)
@@ -1516,7 +1558,44 @@ fn render_titlebar(
         .border_r_1()
         .border_color(theme.sidebar_border)
         .border_b_1()
-        .border_color(theme.sidebar_border);
+        .border_color(theme.sidebar_border)
+        .debug_selector(|| "titlebar-sidebar".to_owned())
+        .child(
+            div()
+                .h_full()
+                .mx_3()
+                .w_full()
+                .flex()
+                .items_center()
+                .child(div().flex_1())
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .debug_selector(|| "titlebar-dashboard-title".to_owned())
+                        .child(
+                            Icon::new(IconName::GalleryVerticalEnd)
+                                .with_size(Size::Small)
+                                .text_color(theme.muted_foreground),
+                        )
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_semibold()
+                                .text_color(theme.muted_foreground)
+                                .child("Dashboard"),
+                        ),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .flex()
+                        .justify_end()
+                        .debug_selector(|| "add-project".to_owned())
+                        .child(add_project_button),
+                ),
+        );
 
     let branch_indicator = div()
         .flex()
@@ -1655,48 +1734,8 @@ fn render_sidebar(
     debug_scrollbar_enabled: bool,
 ) -> impl IntoElement {
     let theme = cx.theme();
-    let view_handle = cx.entity().downgrade();
     let projects_scroll_handle = projects_scroll_handle.clone();
     let debug_scroll_handle = projects_scroll_handle.clone();
-
-    let add_project_button = Button::new("add-project")
-        .ghost()
-        .compact()
-        .icon(Icon::new(IconName::Plus).text_color(theme.muted_foreground))
-        .tooltip("Add project")
-        .on_click(move |_, _window, app| {
-            let view_handle = view_handle.clone();
-            let options = gpui::PathPromptOptions {
-                files: false,
-                directories: true,
-                multiple: false,
-                prompt: Some("Add Project".into()),
-            };
-
-            let receiver = app.prompt_for_paths(options);
-            app.spawn(move |cx: &mut gpui::AsyncApp| {
-                let mut async_cx = cx.clone();
-                async move {
-                    let Ok(result) = receiver.await else {
-                        return;
-                    };
-                    let Ok(Some(mut paths)) = result else {
-                        return;
-                    };
-                    let Some(path) = paths.pop() else {
-                        return;
-                    };
-
-                    let _ = view_handle.update(
-                        &mut async_cx,
-                        |view: &mut LubanRootView, view_cx: &mut Context<LubanRootView>| {
-                            view.dispatch(Action::AddProject { path }, view_cx);
-                        },
-                    );
-                }
-            })
-            .detach();
-        });
 
     div()
         .w(sidebar_width)
@@ -1709,48 +1748,6 @@ fn render_sidebar(
         .text_color(theme.sidebar_foreground)
         .border_r_1()
         .border_color(theme.sidebar_border)
-        .child(
-            div()
-                .h(px(44.0))
-                .border_b_1()
-                .border_color(theme.sidebar_border)
-                .debug_selector(|| "sidebar-dashboard-header".to_owned())
-                .child(
-                    div()
-                        .h_full()
-                        .mx_3()
-                        .flex()
-                        .items_center()
-                        .child(div().flex_1())
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap_2()
-                                .debug_selector(|| "sidebar-dashboard-title".to_owned())
-                                .child(
-                                    Icon::new(IconName::GalleryVerticalEnd)
-                                        .with_size(Size::Small)
-                                        .text_color(theme.muted_foreground),
-                                )
-                                .child(
-                                    div()
-                                        .text_sm()
-                                        .font_semibold()
-                                        .text_color(theme.muted_foreground)
-                                        .child("Dashboard"),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .flex_1()
-                                .flex()
-                                .justify_end()
-                                .debug_selector(|| "add-project".to_owned())
-                                .child(add_project_button),
-                        ),
-                ),
-        )
         .child(
             div()
                 .flex_1()
@@ -5898,6 +5895,14 @@ mod tests {
         });
         let project_id = state.projects[0].id;
         state.apply(Action::ToggleProjectExpanded { project_id });
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "w1".to_owned(),
+            branch_name: "repo/w1".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/w1"),
+        });
+        let workspace_id = workspace_id_by_name(&state, "w1");
+        state.apply(Action::OpenWorkspace { workspace_id });
 
         let (_view, window_cx) =
             cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
@@ -5906,10 +5911,10 @@ mod tests {
         window_cx.refresh().unwrap();
 
         let header = window_cx
-            .debug_bounds("sidebar-dashboard-header")
-            .expect("missing sidebar header");
+            .debug_bounds("titlebar-sidebar")
+            .expect("missing sidebar titlebar");
         let title = window_cx
-            .debug_bounds("sidebar-dashboard-title")
+            .debug_bounds("titlebar-dashboard-title")
             .expect("missing sidebar dashboard title");
         let center_dx = (title.center().x - header.center().x).abs();
         assert!(
@@ -5938,6 +5943,17 @@ mod tests {
             "add project button should align with project actions: add={:?} settings={:?}",
             add_project,
             project_settings
+        );
+
+        let terminal_titlebar = window_cx
+            .debug_bounds("titlebar-terminal")
+            .expect("missing terminal titlebar");
+        let dy = (title.center().y - terminal_titlebar.center().y).abs();
+        assert!(
+            dy <= px(2.0),
+            "dashboard title should share the titlebar row with terminal: dashboard={:?} terminal={:?}",
+            title,
+            terminal_titlebar
         );
     }
 
