@@ -150,6 +150,7 @@ fn render_project(
     let header = div()
         .mx_3()
         .mt_2()
+        .mb_2()
         .h(px(28.0))
         .flex()
         .items_center()

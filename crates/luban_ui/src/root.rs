@@ -5508,6 +5508,38 @@ mod tests {
     }
 
     #[gpui::test]
+    async fn project_header_has_extra_spacing_before_main_workspace(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::ToggleProjectExpanded { project_id });
+
+        let (_view, window_cx) =
+            cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+        window_cx.simulate_resize(size(px(900.0), px(240.0)));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        let header = window_cx
+            .debug_bounds("project-header-0")
+            .expect("missing project header");
+        let main_row = window_cx
+            .debug_bounds("workspace-main-row-0")
+            .expect("missing main workspace row");
+        let gap = main_row.top() - header.bottom();
+        assert!(
+            gap >= px(4.0),
+            "expected extra spacing between project header and main row: gap={gap:?} header={header:?} main={main_row:?}"
+        );
+    }
+
+    #[gpui::test]
     async fn sidebar_can_be_resized_by_dragging_divider(cx: &mut gpui::TestAppContext) {
         cx.update(gpui_component::init);
 
