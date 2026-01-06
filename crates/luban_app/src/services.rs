@@ -8,8 +8,7 @@ use luban_domain::{
 use rand::{Rng as _, rngs::OsRng};
 use std::{
     collections::HashSet,
-    io::{BufRead as _, BufReader, Read as _, Write as _},
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::Command,
     sync::Arc,
     sync::atomic::{AtomicBool, Ordering},
@@ -19,6 +18,8 @@ use std::{
 use crate::sqlite_store::SqliteStore;
 
 mod codex_cli;
+mod context_blobs;
+mod conversations;
 mod git;
 use codex_cli::CodexTurnParams;
 
@@ -213,319 +214,10 @@ impl GitWorkspaceService {
         path
     }
 
-    fn conversation_dir(&self, project_slug: &str, workspace_name: &str) -> PathBuf {
-        let mut path = self.conversations_root.clone();
-        path.push(project_slug);
-        path.push(workspace_name);
-        path
-    }
-
-    fn conversation_meta_path(&self, project_slug: &str, workspace_name: &str) -> PathBuf {
-        self.conversation_dir(project_slug, workspace_name)
-            .join("conversation.json")
-    }
-
-    fn conversation_events_path(&self, project_slug: &str, workspace_name: &str) -> PathBuf {
-        self.conversation_dir(project_slug, workspace_name)
-            .join("events.jsonl")
-    }
-
-    fn context_root_dir(&self, project_slug: &str, workspace_name: &str) -> PathBuf {
-        self.conversation_dir(project_slug, workspace_name)
-            .join("context")
-    }
-
-    fn context_blobs_dir(&self, project_slug: &str, workspace_name: &str) -> PathBuf {
-        self.context_root_dir(project_slug, workspace_name)
-            .join("blobs")
-    }
-
-    fn context_tmp_dir(&self, project_slug: &str, workspace_name: &str) -> PathBuf {
-        self.context_root_dir(project_slug, workspace_name)
-            .join("tmp")
-    }
-
-    fn normalize_extension(ext: &str) -> anyhow::Result<String> {
-        let trimmed = ext.trim().trim_start_matches('.').to_ascii_lowercase();
-        if trimmed.is_empty() {
-            return Err(anyhow!("missing extension"));
-        }
-        if trimmed.len() > 16 {
-            return Err(anyhow!("extension too long"));
-        }
-        if !trimmed
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
-        {
-            return Err(anyhow!("invalid extension"));
-        }
-        Ok(trimmed)
-    }
-
-    fn store_context_bytes(
-        &self,
-        project_slug: &str,
-        workspace_name: &str,
-        bytes: &[u8],
-        extension: &str,
-    ) -> anyhow::Result<PathBuf> {
-        let extension = Self::normalize_extension(extension)?;
-        let blobs_dir = self.context_blobs_dir(project_slug, workspace_name);
-        std::fs::create_dir_all(&blobs_dir)
-            .with_context(|| format!("failed to create {}", blobs_dir.display()))?;
-
-        let hash = blake3::hash(bytes).to_hex().to_string();
-        let dest = blobs_dir.join(format!("{hash}.{extension}"));
-        if dest.exists() {
-            return Ok(dest);
-        }
-
-        let tmp_dir = self.context_tmp_dir(project_slug, workspace_name);
-        std::fs::create_dir_all(&tmp_dir)
-            .with_context(|| format!("failed to create {}", tmp_dir.display()))?;
-        let tmp = tmp_dir.join(format!("import-{}", rand::random::<u64>()));
-
-        {
-            let mut f = std::fs::File::create(&tmp)
-                .with_context(|| format!("failed to create {}", tmp.display()))?;
-            f.write_all(bytes)
-                .with_context(|| format!("failed to write {}", tmp.display()))?;
-            f.sync_all()
-                .with_context(|| format!("failed to sync {}", tmp.display()))?;
-        }
-
-        if dest.exists() {
-            let _ = std::fs::remove_file(&tmp);
-            return Ok(dest);
-        }
-
-        std::fs::rename(&tmp, &dest).with_context(|| {
-            format!(
-                "failed to move context blob {} -> {}",
-                tmp.display(),
-                dest.display()
-            )
-        })?;
-        Ok(dest)
-    }
-
-    fn store_context_file_internal(
-        &self,
-        project_slug: &str,
-        workspace_name: &str,
-        source_path: &Path,
-    ) -> anyhow::Result<PathBuf> {
-        let extension = source_path
-            .extension()
-            .and_then(|s| s.to_str())
-            .unwrap_or("txt");
-        let extension = Self::normalize_extension(extension)?;
-
-        let blobs_dir = self.context_blobs_dir(project_slug, workspace_name);
-        std::fs::create_dir_all(&blobs_dir)
-            .with_context(|| format!("failed to create {}", blobs_dir.display()))?;
-
-        let tmp_dir = self.context_tmp_dir(project_slug, workspace_name);
-        std::fs::create_dir_all(&tmp_dir)
-            .with_context(|| format!("failed to create {}", tmp_dir.display()))?;
-        let tmp = tmp_dir.join(format!("import-{}", rand::random::<u64>()));
-
-        let mut src = std::fs::File::open(source_path)
-            .with_context(|| format!("failed to open {}", source_path.display()))?;
-        let mut dst = std::fs::File::create(&tmp)
-            .with_context(|| format!("failed to create {}", tmp.display()))?;
-
-        let mut hasher = blake3::Hasher::new();
-        let mut buf = [0u8; 64 * 1024];
-        loop {
-            let n = src.read(&mut buf).context("failed to read source file")?;
-            if n == 0 {
-                break;
-            }
-            hasher.update(&buf[..n]);
-            dst.write_all(&buf[..n])
-                .context("failed to write tmp file")?;
-        }
-        dst.sync_all()
-            .with_context(|| format!("failed to sync {}", tmp.display()))?;
-
-        let hash = hasher.finalize().to_hex().to_string();
-        let dest = blobs_dir.join(format!("{hash}.{extension}"));
-        if dest.exists() {
-            let _ = std::fs::remove_file(&tmp);
-            return Ok(dest);
-        }
-
-        std::fs::rename(&tmp, &dest).with_context(|| {
-            format!(
-                "failed to move context blob {} -> {}",
-                tmp.display(),
-                dest.display()
-            )
-        })?;
-        Ok(dest)
-    }
-
-    fn now_unix_seconds() -> u64 {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs()
-    }
-
     fn codex_executable(&self) -> PathBuf {
         std::env::var_os(CODEX_BIN_ENV)
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("codex"))
-    }
-
-    fn read_conversation_meta_legacy(
-        &self,
-        project_slug: &str,
-        workspace_name: &str,
-    ) -> anyhow::Result<ConversationMeta> {
-        let path = self.conversation_meta_path(project_slug, workspace_name);
-        let content =
-            std::fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
-        serde_json::from_slice(&content).context("failed to parse conversation meta")
-    }
-
-    fn load_conversation_legacy(
-        &self,
-        project_slug: &str,
-        workspace_name: &str,
-    ) -> anyhow::Result<Option<ConversationSnapshot>> {
-        let meta_path = self.conversation_meta_path(project_slug, workspace_name);
-        let events_path = self.conversation_events_path(project_slug, workspace_name);
-        if !meta_path.exists() && !events_path.exists() {
-            return Ok(None);
-        }
-
-        let meta = if meta_path.exists() {
-            self.read_conversation_meta_legacy(project_slug, workspace_name)?
-        } else {
-            ConversationMeta {
-                version: 1,
-                thread_id: None,
-                created_at: Self::now_unix_seconds(),
-                updated_at: Self::now_unix_seconds(),
-            }
-        };
-
-        if !events_path.exists() {
-            return Ok(Some(ConversationSnapshot {
-                thread_id: meta.thread_id,
-                entries: Vec::new(),
-            }));
-        }
-
-        let file = std::fs::File::open(&events_path)
-            .with_context(|| format!("failed to open {}", events_path.display()))?;
-        let reader = BufReader::new(file);
-
-        let mut entries = Vec::new();
-        for line in reader.lines() {
-            let line = line.context("failed to read line")?;
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            let entry: ConversationEntry =
-                serde_json::from_str(trimmed).context("failed to parse entry")?;
-            if matches!(entry, ConversationEntry::TurnUsage { .. }) {
-                continue;
-            }
-            let is_duplicate = match (&entry, entries.last()) {
-                (
-                    ConversationEntry::CodexItem { item },
-                    Some(ConversationEntry::CodexItem { item: prev }),
-                ) => codex_item_id(item) == codex_item_id(prev),
-                _ => false,
-            };
-            if !is_duplicate {
-                entries.push(entry);
-            }
-        }
-
-        Ok(Some(ConversationSnapshot {
-            thread_id: meta.thread_id,
-            entries,
-        }))
-    }
-
-    fn load_app_state_internal(&self) -> anyhow::Result<PersistedAppState> {
-        self.sqlite.load_app_state()
-    }
-
-    fn save_app_state_internal(&self, snapshot: PersistedAppState) -> anyhow::Result<()> {
-        self.sqlite.save_app_state(snapshot)
-    }
-
-    fn ensure_conversation_internal(
-        &self,
-        project_slug: String,
-        workspace_name: String,
-        thread_id: u64,
-    ) -> anyhow::Result<()> {
-        self.sqlite
-            .ensure_conversation(project_slug, workspace_name, thread_id)
-    }
-
-    fn load_conversation_internal(
-        &self,
-        project_slug: String,
-        workspace_name: String,
-        thread_id: u64,
-    ) -> anyhow::Result<ConversationSnapshot> {
-        let snapshot = self.sqlite.load_conversation(
-            project_slug.clone(),
-            workspace_name.clone(),
-            thread_id,
-        )?;
-
-        if !snapshot.entries.is_empty() || snapshot.thread_id.is_some() {
-            return Ok(snapshot);
-        }
-
-        if thread_id != 1 {
-            return Ok(snapshot);
-        }
-
-        let Some(legacy) = self.load_conversation_legacy(&project_slug, &workspace_name)? else {
-            return Ok(snapshot);
-        };
-
-        if legacy.entries.is_empty() && legacy.thread_id.is_none() {
-            return Ok(snapshot);
-        }
-
-        if let Some(thread_id) = legacy.thread_id.as_deref() {
-            let existing_thread_id = self.sqlite.get_conversation_thread_id(
-                project_slug.clone(),
-                workspace_name.clone(),
-                1,
-            )?;
-            if existing_thread_id.is_none() {
-                self.sqlite.set_conversation_thread_id(
-                    project_slug.clone(),
-                    workspace_name.clone(),
-                    1,
-                    thread_id.to_owned(),
-                )?;
-            }
-        }
-
-        if !legacy.entries.is_empty() {
-            self.sqlite.append_conversation_entries(
-                project_slug.clone(),
-                workspace_name.clone(),
-                1,
-                legacy.entries,
-            )?;
-        }
-
-        self.sqlite
-            .load_conversation(project_slug.clone(), workspace_name.clone(), 1)
     }
 
     fn run_codex_turn_streamed_via_cli(
@@ -536,186 +228,6 @@ impl GitWorkspaceService {
     ) -> anyhow::Result<()> {
         let codex = self.codex_executable();
         codex_cli::run_codex_turn_streamed_via_cli(&codex, params, cancel, on_event)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    fn run_git(repo_path: &Path, args: &[&str]) -> std::process::Output {
-        Command::new("git")
-            .args(args)
-            .current_dir(repo_path)
-            .output()
-            .expect("git should spawn")
-    }
-
-    fn assert_git_success(repo_path: &Path, args: &[&str]) {
-        let output = run_git(repo_path, args);
-        if !output.status.success() {
-            panic!(
-                "git failed ({:?}):\nstdout:\n{}\nstderr:\n{}",
-                args,
-                String::from_utf8_lossy(&output.stdout).trim(),
-                String::from_utf8_lossy(&output.stderr).trim()
-            );
-        }
-    }
-
-    #[test]
-    fn transient_reconnect_notice_detection_is_stable() {
-        assert!(is_transient_reconnect_notice("reconnecting ...1/5"));
-        assert!(is_transient_reconnect_notice("Reconnecting (12/100)"));
-        assert!(!is_transient_reconnect_notice("retry/reconnect"));
-        assert!(!is_transient_reconnect_notice("connection failed"));
-        assert!(!is_transient_reconnect_notice("reconnecting soon"));
-    }
-
-    #[test]
-    fn codex_runner_reports_missing_executable() {
-        let _guard = ENV_LOCK.lock().expect("env lock should work");
-
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("time should be valid")
-            .as_nanos();
-        let base_dir = std::env::temp_dir().join(format!(
-            "luban-missing-codex-check-{}-{}",
-            std::process::id(),
-            unique
-        ));
-        std::fs::create_dir_all(&base_dir).expect("temp dir should be created");
-
-        let missing_codex = base_dir.join("missing-codex-bin");
-        unsafe {
-            std::env::set_var(CODEX_BIN_ENV, missing_codex.as_os_str());
-        }
-
-        let sqlite = SqliteStore::new(base_dir.join("luban.db")).expect("sqlite init should work");
-        let service = GitWorkspaceService {
-            worktrees_root: base_dir.join("worktrees"),
-            conversations_root: base_dir.join("conversations"),
-            sqlite,
-        };
-
-        let err = service
-            .run_codex_turn_streamed_via_cli(
-                CodexTurnParams {
-                    thread_id: None,
-                    worktree_path: base_dir.clone(),
-                    prompt: "Hi".to_owned(),
-                    image_paths: Vec::new(),
-                    model: None,
-                    model_reasoning_effort: None,
-                },
-                Arc::new(AtomicBool::new(false)),
-                |_event| Ok(()),
-            )
-            .expect_err("missing codex executable should fail");
-
-        unsafe {
-            std::env::remove_var(CODEX_BIN_ENV);
-        }
-
-        assert!(err.to_string().contains("missing codex executable"));
-
-        drop(service);
-        let _ = std::fs::remove_dir_all(&base_dir);
-    }
-
-    #[test]
-    fn codex_item_ids_are_scoped_per_turn() {
-        let item = CodexThreadItem::AgentMessage {
-            id: "item_0".to_owned(),
-            text: "Hi".to_owned(),
-        };
-        let a = qualify_codex_item("turn-a", item.clone());
-        let b = qualify_codex_item("turn-b", item);
-        assert_eq!(codex_item_id(&a), "turn-a/item_0");
-        assert_eq!(codex_item_id(&b), "turn-b/item_0");
-        let a2 = qualify_codex_item("turn-a", a);
-        assert_eq!(codex_item_id(&a2), "turn-a/item_0");
-    }
-
-    #[test]
-    fn worktree_remove_force_allows_dirty_worktree() {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("time should be valid")
-            .as_nanos();
-        let base_dir = std::env::temp_dir().join(format!(
-            "luban-worktree-remove-force-{}-{}",
-            std::process::id(),
-            unique
-        ));
-
-        std::fs::create_dir_all(&base_dir).expect("temp dir should be created");
-
-        let repo_path = base_dir.join("repo");
-        std::fs::create_dir_all(&repo_path).expect("repo dir should be created");
-
-        assert_git_success(&repo_path, &["init"]);
-        assert_git_success(&repo_path, &["config", "user.name", "Test User"]);
-        assert_git_success(&repo_path, &["config", "user.email", "test@example.com"]);
-
-        let tracked_file = repo_path.join("tracked.txt");
-        std::fs::write(&tracked_file, "hello\n").expect("write should succeed");
-        assert_git_success(&repo_path, &["add", "."]);
-        assert_git_success(&repo_path, &["commit", "-m", "init"]);
-
-        let worktree_path = base_dir.join("worktree");
-        let branch_name = format!("luban-test-branch-{unique}");
-        assert_git_success(
-            &repo_path,
-            &[
-                "worktree",
-                "add",
-                "-b",
-                &branch_name,
-                worktree_path
-                    .to_str()
-                    .expect("worktree path should be utf-8"),
-            ],
-        );
-
-        let dirty_file = worktree_path.join("tracked.txt");
-        std::fs::write(&dirty_file, "hello\ndirty\n").expect("write should succeed");
-
-        let no_force = run_git(
-            &repo_path,
-            &[
-                "worktree",
-                "remove",
-                worktree_path
-                    .to_str()
-                    .expect("worktree path should be utf-8"),
-            ],
-        );
-        assert!(
-            !no_force.status.success(),
-            "worktree remove without --force should fail for dirty worktree"
-        );
-
-        let sqlite = SqliteStore::new(base_dir.join("luban.db")).expect("sqlite init should work");
-        let service = GitWorkspaceService {
-            worktrees_root: base_dir.join("worktrees"),
-            conversations_root: base_dir.join("conversations"),
-            sqlite,
-        };
-
-        ProjectWorkspaceService::archive_workspace(
-            &service,
-            repo_path.clone(),
-            worktree_path.clone(),
-        )
-        .expect("archive_workspace should remove dirty worktree with --force");
-        assert!(!worktree_path.exists(), "worktree path should be removed");
-
-        drop(service);
-        let _ = std::fs::remove_dir_all(&base_dir);
     }
 }
 
@@ -1241,10 +753,183 @@ impl ProjectWorkspaceService for GitWorkspaceService {
     }
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-struct ConversationMeta {
-    version: u32,
-    thread_id: Option<String>,
-    created_at: u64,
-    updated_at: u64,
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn run_git(repo_path: &Path, args: &[&str]) -> std::process::Output {
+        Command::new("git")
+            .args(args)
+            .current_dir(repo_path)
+            .output()
+            .expect("git should spawn")
+    }
+
+    fn assert_git_success(repo_path: &Path, args: &[&str]) {
+        let output = run_git(repo_path, args);
+        if !output.status.success() {
+            panic!(
+                "git failed ({:?}):\nstdout:\n{}\nstderr:\n{}",
+                args,
+                String::from_utf8_lossy(&output.stdout).trim(),
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+    }
+
+    #[test]
+    fn transient_reconnect_notice_detection_is_stable() {
+        assert!(is_transient_reconnect_notice("reconnecting ...1/5"));
+        assert!(is_transient_reconnect_notice("Reconnecting (12/100)"));
+        assert!(!is_transient_reconnect_notice("retry/reconnect"));
+        assert!(!is_transient_reconnect_notice("connection failed"));
+        assert!(!is_transient_reconnect_notice("reconnecting soon"));
+    }
+
+    #[test]
+    fn codex_runner_reports_missing_executable() {
+        let _guard = ENV_LOCK.lock().expect("env lock should work");
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be valid")
+            .as_nanos();
+        let base_dir = std::env::temp_dir().join(format!(
+            "luban-missing-codex-check-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&base_dir).expect("temp dir should be created");
+
+        let missing_codex = base_dir.join("missing-codex-bin");
+        unsafe {
+            std::env::set_var(CODEX_BIN_ENV, missing_codex.as_os_str());
+        }
+
+        let sqlite = SqliteStore::new(base_dir.join("luban.db")).expect("sqlite init should work");
+        let service = GitWorkspaceService {
+            worktrees_root: base_dir.join("worktrees"),
+            conversations_root: base_dir.join("conversations"),
+            sqlite,
+        };
+
+        let err = service
+            .run_codex_turn_streamed_via_cli(
+                CodexTurnParams {
+                    thread_id: None,
+                    worktree_path: base_dir.clone(),
+                    prompt: "Hi".to_owned(),
+                    image_paths: Vec::new(),
+                    model: None,
+                    model_reasoning_effort: None,
+                },
+                Arc::new(AtomicBool::new(false)),
+                |_event| Ok(()),
+            )
+            .expect_err("missing codex executable should fail");
+
+        unsafe {
+            std::env::remove_var(CODEX_BIN_ENV);
+        }
+
+        assert!(err.to_string().contains("missing codex executable"));
+
+        drop(service);
+        let _ = std::fs::remove_dir_all(&base_dir);
+    }
+
+    #[test]
+    fn codex_item_ids_are_scoped_per_turn() {
+        let item = CodexThreadItem::AgentMessage {
+            id: "item_0".to_owned(),
+            text: "Hi".to_owned(),
+        };
+        let a = qualify_codex_item("turn-a", item.clone());
+        let b = qualify_codex_item("turn-b", item);
+        assert_eq!(codex_item_id(&a), "turn-a/item_0");
+        assert_eq!(codex_item_id(&b), "turn-b/item_0");
+        let a2 = qualify_codex_item("turn-a", a);
+        assert_eq!(codex_item_id(&a2), "turn-a/item_0");
+    }
+
+    #[test]
+    fn worktree_remove_force_allows_dirty_worktree() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be valid")
+            .as_nanos();
+        let base_dir = std::env::temp_dir().join(format!(
+            "luban-worktree-remove-force-{}-{}",
+            std::process::id(),
+            unique
+        ));
+
+        std::fs::create_dir_all(&base_dir).expect("temp dir should be created");
+
+        let repo_path = base_dir.join("repo");
+        std::fs::create_dir_all(&repo_path).expect("repo dir should be created");
+
+        assert_git_success(&repo_path, &["init"]);
+        assert_git_success(&repo_path, &["config", "user.name", "Test User"]);
+        assert_git_success(&repo_path, &["config", "user.email", "test@example.com"]);
+
+        let tracked_file = repo_path.join("tracked.txt");
+        std::fs::write(&tracked_file, "hello\n").expect("write should succeed");
+        assert_git_success(&repo_path, &["add", "."]);
+        assert_git_success(&repo_path, &["commit", "-m", "init"]);
+
+        let worktree_path = base_dir.join("worktree");
+        let branch_name = format!("luban-test-branch-{unique}");
+        assert_git_success(
+            &repo_path,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                &branch_name,
+                worktree_path
+                    .to_str()
+                    .expect("worktree path should be utf-8"),
+            ],
+        );
+
+        let dirty_file = worktree_path.join("tracked.txt");
+        std::fs::write(&dirty_file, "hello\ndirty\n").expect("write should succeed");
+
+        let no_force = run_git(
+            &repo_path,
+            &[
+                "worktree",
+                "remove",
+                worktree_path
+                    .to_str()
+                    .expect("worktree path should be utf-8"),
+            ],
+        );
+        assert!(
+            !no_force.status.success(),
+            "worktree remove without --force should fail for dirty worktree"
+        );
+
+        let sqlite = SqliteStore::new(base_dir.join("luban.db")).expect("sqlite init should work");
+        let service = GitWorkspaceService {
+            worktrees_root: base_dir.join("worktrees"),
+            conversations_root: base_dir.join("conversations"),
+            sqlite,
+        };
+
+        ProjectWorkspaceService::archive_workspace(
+            &service,
+            repo_path.clone(),
+            worktree_path.clone(),
+        )
+        .expect("archive_workspace should remove dirty worktree with --force");
+        assert!(!worktree_path.exists(), "worktree path should be removed");
+
+        drop(service);
+        let _ = std::fs::remove_dir_all(&base_dir);
+    }
 }
