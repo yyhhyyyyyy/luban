@@ -1010,7 +1010,7 @@ impl LubanRootView {
                                     .flex_col()
                                     .gap_2()
                                     .when_some(
-                                        chat_composer_attachments_row(
+                                        attachments::chat_composer_attachments_row(
                                             workspace_id,
                                             thread_id,
                                             &draft_attachments,
