@@ -1772,20 +1772,23 @@ impl LubanRootView {
             return div().hidden().into_any_element();
         };
 
-        let mut known_threads = self
-            .state
-            .conversations
-            .keys()
-            .filter_map(|(wid, tid)| (*wid == workspace_id).then_some(*tid))
-            .collect::<Vec<_>>();
-        known_threads.sort_by_key(|id| id.as_u64());
-        known_threads.dedup();
-
         let open_tabs = tabs.open_tabs.clone();
+        let archived_tabs = tabs.archived_tabs.clone();
         let allow_close = open_tabs.len() > 1;
 
         let view_handle_for_overflow = view_handle.clone();
-        let overflow_entries = known_threads
+        let open_entries = open_tabs
+            .iter()
+            .map(|thread_id| {
+                let title = self
+                    .state
+                    .workspace_thread_conversation(workspace_id, *thread_id)
+                    .map(|c| c.title.clone())
+                    .unwrap_or_else(|| format!("Thread {}", thread_id.as_u64()));
+                (*thread_id, title)
+            })
+            .collect::<Vec<_>>();
+        let archived_entries = archived_tabs
             .iter()
             .map(|thread_id| {
                 let title = self
@@ -1811,52 +1814,232 @@ impl LubanRootView {
             .content(move |_popover_state, _window, cx| {
                 let theme = cx.theme();
                 let popover_handle = cx.entity();
-                let items = overflow_entries.iter().map(|(thread_id, title)| {
-                    let selected = *thread_id == active_thread_id;
-                    let view_handle = view_handle_for_overflow.clone();
-                    let thread_id = *thread_id;
-                    let popover_handle = popover_handle.clone();
+                let scroll_handle = gpui::ScrollHandle::new();
+                let scroll_handle_overlay = scroll_handle.clone();
 
-                    div()
-                        .h(px(32.0))
-                        .w_full()
-                        .px_2()
-                        .rounded_md()
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .cursor_pointer()
-                        .hover(move |s| s.bg(theme.list_hover))
-                        .on_mouse_down(MouseButton::Left, move |_, window, app| {
-                            let _ = view_handle.update(app, |view, cx| {
-                                view.dispatch(
-                                    Action::ActivateWorkspaceThread {
-                                        workspace_id,
-                                        thread_id,
-                                    },
-                                    cx,
-                                );
-                            });
-                            popover_handle.update(app, |state, cx| state.dismiss(window, cx));
-                        })
-                        .child(div().truncate().child(title.clone()))
-                        .when(selected, |s| {
-                            s.child(
-                                Icon::new(IconName::Check)
-                                    .with_size(Size::Small)
-                                    .text_color(theme.muted_foreground),
-                            )
-                        })
-                        .into_any_element()
-                });
+                let active_header = div()
+                    .debug_selector(|| "workspace-thread-tabs-menu-active-section".to_owned())
+                    .px_2()
+                    .pt_2()
+                    .pb_1()
+                    .text_xs()
+                    .font_semibold()
+                    .text_color(theme.muted_foreground)
+                    .child("Active");
+
+                let archived_header = div()
+                    .debug_selector(|| "workspace-thread-tabs-menu-archived-section".to_owned())
+                    .px_2()
+                    .pt_3()
+                    .pb_1()
+                    .text_xs()
+                    .font_semibold()
+                    .text_color(theme.muted_foreground)
+                    .child("Archived");
+
+                let active_items =
+                    open_entries
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, (thread_id, title))| {
+                            let selected = *thread_id == active_thread_id;
+                            let view_handle = view_handle_for_overflow.clone();
+                            let thread_id = *thread_id;
+                            let popover_handle_for_row = popover_handle.clone();
+                            let popover_handle_for_archive = popover_handle.clone();
+                            let row_id = format!("workspace-thread-tabs-menu-active-{idx}");
+                            let archive_id =
+                                format!("workspace-thread-tabs-menu-active-archive-{idx}");
+                            let view_handle_archive = view_handle_for_overflow.clone();
+
+                            div()
+                                .h(px(32.0))
+                                .w_full()
+                                .px_2()
+                                .rounded_md()
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .cursor_pointer()
+                                .debug_selector(move || row_id.clone())
+                                .hover(move |s| s.bg(theme.list_hover))
+                                .on_mouse_down(MouseButton::Left, move |_, window, app| {
+                                    let _ = view_handle.update(app, |view, cx| {
+                                        view.dispatch(
+                                            Action::ActivateWorkspaceThread {
+                                                workspace_id,
+                                                thread_id,
+                                            },
+                                            cx,
+                                        );
+                                    });
+                                    popover_handle_for_row
+                                        .update(app, |state, cx| state.dismiss(window, cx));
+                                })
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w(px(0.0))
+                                        .truncate()
+                                        .child(title.clone()),
+                                )
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_1()
+                                        .child(
+                                            Button::new(archive_id.clone())
+                                                .ghost()
+                                                .compact()
+                                                .with_size(Size::Small)
+                                                .disabled(!allow_close)
+                                                .icon(Icon::new(IconName::Close))
+                                                .tooltip("Archive tab")
+                                                .on_click(move |_, window, app| {
+                                                    if !allow_close {
+                                                        return;
+                                                    }
+                                                    let _ = view_handle_archive.update(
+                                                        app,
+                                                        |view, cx| {
+                                                            view.dispatch(
+                                                                Action::CloseWorkspaceThreadTab {
+                                                                    workspace_id,
+                                                                    thread_id,
+                                                                },
+                                                                cx,
+                                                            );
+                                                        },
+                                                    );
+                                                    popover_handle_for_archive.update(
+                                                        app,
+                                                        |state, cx| {
+                                                            state.dismiss(window, cx);
+                                                        },
+                                                    );
+                                                })
+                                                .into_any_element(),
+                                        )
+                                        .when(selected, |s| {
+                                            s.child(
+                                                Icon::new(IconName::Check)
+                                                    .with_size(Size::Small)
+                                                    .text_color(theme.muted_foreground),
+                                            )
+                                        }),
+                                )
+                                .into_any_element()
+                        });
+
+                let archived_items =
+                    archived_entries
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, (thread_id, title))| {
+                            let view_handle = view_handle_for_overflow.clone();
+                            let thread_id = *thread_id;
+                            let popover_handle_for_row = popover_handle.clone();
+                            let popover_handle_for_restore = popover_handle.clone();
+                            let row_id = format!("workspace-thread-tabs-menu-archived-{idx}");
+                            let restore_id =
+                                format!("workspace-thread-tabs-menu-archived-restore-{idx}");
+                            let view_handle_restore = view_handle_for_overflow.clone();
+
+                            div()
+                                .h(px(32.0))
+                                .w_full()
+                                .px_2()
+                                .rounded_md()
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .cursor_pointer()
+                                .debug_selector(move || row_id.clone())
+                                .hover(move |s| s.bg(theme.list_hover))
+                                .on_mouse_down(MouseButton::Left, move |_, window, app| {
+                                    let _ = view_handle.update(app, |view, cx| {
+                                        view.dispatch(
+                                            Action::RestoreWorkspaceThreadTab {
+                                                workspace_id,
+                                                thread_id,
+                                            },
+                                            cx,
+                                        );
+                                    });
+                                    popover_handle_for_row
+                                        .update(app, |state, cx| state.dismiss(window, cx));
+                                })
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w(px(0.0))
+                                        .truncate()
+                                        .child(title.clone()),
+                                )
+                                .child(
+                                    Button::new(restore_id.clone())
+                                        .ghost()
+                                        .compact()
+                                        .with_size(Size::Small)
+                                        .icon(Icon::new(IconName::Redo2))
+                                        .tooltip("Restore tab")
+                                        .on_click(move |_, window, app| {
+                                            let _ = view_handle_restore.update(app, |view, cx| {
+                                                view.dispatch(
+                                                    Action::RestoreWorkspaceThreadTab {
+                                                        workspace_id,
+                                                        thread_id,
+                                                    },
+                                                    cx,
+                                                );
+                                            });
+                                            popover_handle_for_restore.update(app, |state, cx| {
+                                                state.dismiss(window, cx);
+                                            });
+                                        })
+                                        .into_any_element(),
+                                )
+                                .into_any_element()
+                        });
 
                 div()
-                    .w(px(280.0))
-                    .p_2()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .children(items)
+                    .w(px(320.0))
+                    .max_h(px(360.0))
+                    .pt_1()
+                    .pb_2()
+                    .relative()
+                    .child(
+                        div()
+                            .id("workspace-thread-tabs-menu-scroll")
+                            .debug_selector(|| "workspace-thread-tabs-menu-scroll".to_owned())
+                            .overflow_y_scroll()
+                            .track_scroll(&scroll_handle)
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_1()
+                                    .child(active_header)
+                                    .children(active_items)
+                                    .child(archived_header)
+                                    .children(archived_items),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .right_0()
+                            .bottom_0()
+                            .debug_selector(|| "workspace-thread-tabs-menu-scrollbar".to_owned())
+                            .child(
+                                Scrollbar::vertical(&scroll_handle_overlay)
+                                    .id("workspace-thread-tabs-menu-scrollbar")
+                                    .scrollbar_show(ScrollbarShow::Always),
+                            ),
+                    )
                     .into_any_element()
             });
 
@@ -5178,6 +5361,7 @@ mod tests {
                 last_open_workspace_id: None,
                 workspace_active_thread_id: HashMap::new(),
                 workspace_open_tabs: HashMap::new(),
+                workspace_archived_tabs: HashMap::new(),
                 workspace_next_thread_id: HashMap::new(),
                 workspace_chat_scroll_y10: HashMap::new(),
             })
@@ -5767,6 +5951,95 @@ mod tests {
             "missing thread menu trigger"
         );
         assert!(window_cx.debug_bounds("workspace-thread-tab-new").is_some());
+    }
+
+    #[gpui::test]
+    async fn workspace_thread_tabs_menu_separates_active_and_archived(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "abandon-about".to_owned(),
+            branch_name: "luban/abandon-about".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+        });
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
+        state.apply(Action::OpenWorkspace { workspace_id });
+
+        let mut thread_ids = vec![state.active_thread_id(workspace_id).unwrap()];
+        for _ in 0..3 {
+            state.apply(Action::CreateWorkspaceThread { workspace_id });
+            thread_ids.push(state.active_thread_id(workspace_id).unwrap());
+        }
+
+        let archived_thread = thread_ids[1];
+        state.apply(Action::CloseWorkspaceThreadTab {
+            workspace_id,
+            thread_id: archived_thread,
+        });
+
+        let (view, window_cx) =
+            cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+        window_cx.simulate_resize(size(px(900.0), px(320.0)));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        let trigger = window_cx
+            .debug_bounds("workspace-thread-tabs-menu-trigger")
+            .expect("missing thread menu trigger");
+        window_cx.simulate_click(trigger.center(), Modifiers::none());
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        assert!(
+            window_cx
+                .debug_bounds("workspace-thread-tabs-menu-active-section")
+                .is_some(),
+            "expected an active section header in the thread menu"
+        );
+        assert!(
+            window_cx
+                .debug_bounds("workspace-thread-tabs-menu-archived-section")
+                .is_some(),
+            "expected an archived section header in the thread menu"
+        );
+        assert!(
+            window_cx
+                .debug_bounds("workspace-thread-tabs-menu-archived-0")
+                .is_some(),
+            "expected archived entries to be listed in the thread menu"
+        );
+
+        let archived_row = window_cx
+            .debug_bounds("workspace-thread-tabs-menu-archived-0")
+            .expect("missing archived row");
+        window_cx.simulate_click(archived_row.center(), Modifiers::none());
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        let tabs = view.read_with(window_cx, |v, _| {
+            v.debug_state()
+                .workspace_tabs(workspace_id)
+                .expect("missing tabs")
+                .clone()
+        });
+        assert!(
+            tabs.open_tabs.contains(&archived_thread),
+            "expected archived tab to be restored into open tabs"
+        );
+        assert!(
+            !tabs.archived_tabs.contains(&archived_thread),
+            "expected restored tab to be removed from archived tabs"
+        );
     }
 
     #[gpui::test]
@@ -9225,6 +9498,7 @@ mod tests {
                 last_open_workspace_id: None,
                 workspace_active_thread_id: HashMap::new(),
                 workspace_open_tabs: HashMap::new(),
+                workspace_archived_tabs: HashMap::new(),
                 workspace_next_thread_id: HashMap::new(),
                 workspace_chat_scroll_y10: HashMap::new(),
             })

@@ -12,6 +12,7 @@ const LATEST_SCHEMA_VERSION: u32 = 5;
 const WORKSPACE_CHAT_SCROLL_PREFIX: &str = "workspace_chat_scroll_y10_";
 const WORKSPACE_ACTIVE_THREAD_PREFIX: &str = "workspace_active_thread_id_";
 const WORKSPACE_OPEN_TAB_PREFIX: &str = "workspace_open_tab_";
+const WORKSPACE_ARCHIVED_TAB_PREFIX: &str = "workspace_archived_tab_";
 const WORKSPACE_NEXT_THREAD_ID_PREFIX: &str = "workspace_next_thread_id_";
 const LAST_OPEN_WORKSPACE_ID_KEY: &str = "last_open_workspace_id";
 
@@ -70,7 +71,7 @@ enum DbCommand {
         reply: mpsc::Sender<anyhow::Result<PersistedAppState>>,
     },
     SaveAppState {
-        snapshot: PersistedAppState,
+        snapshot: Box<PersistedAppState>,
         reply: mpsc::Sender<anyhow::Result<()>>,
     },
     EnsureConversation {
@@ -241,7 +242,7 @@ impl SqliteStore {
         let (reply_tx, reply_rx) = mpsc::channel();
         self.tx
             .send(DbCommand::SaveAppState {
-                snapshot,
+                snapshot: Box::new(snapshot),
                 reply: reply_tx,
             })
             .context("sqlite worker is not running")?;
@@ -600,6 +601,51 @@ impl SqliteDatabase {
             }
         }
 
+        let mut workspace_archived_tabs_indexed: HashMap<u64, Vec<(u32, u64)>> = HashMap::new();
+        let mut stmt = self.conn.prepare(
+            "SELECT key, value FROM app_settings WHERE key LIKE 'workspace_archived_tab_%'",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        for row in rows {
+            let (key, value) = row?;
+            let Some(rest) = key.strip_prefix(WORKSPACE_ARCHIVED_TAB_PREFIX) else {
+                continue;
+            };
+            let mut parts = rest.split('_');
+            let Some(index_str) = parts.next() else {
+                continue;
+            };
+            let Some(workspace_id_str) = parts.next() else {
+                continue;
+            };
+            if parts.next().is_some() {
+                continue;
+            }
+            let Ok(index) = index_str.parse::<u32>() else {
+                continue;
+            };
+            let Ok(workspace_id) = workspace_id_str.parse::<u64>() else {
+                continue;
+            };
+            let Some(thread_id) = u64::try_from(value).ok() else {
+                continue;
+            };
+            workspace_archived_tabs_indexed
+                .entry(workspace_id)
+                .or_default()
+                .push((index, thread_id));
+        }
+        let mut workspace_archived_tabs: HashMap<u64, Vec<u64>> = HashMap::new();
+        for (workspace_id, mut tabs) in workspace_archived_tabs_indexed {
+            tabs.sort_by_key(|(index, _)| *index);
+            let ids = tabs.into_iter().map(|(_, id)| id).collect::<Vec<_>>();
+            if !ids.is_empty() {
+                workspace_archived_tabs.insert(workspace_id, ids);
+            }
+        }
+
         let mut workspace_chat_scroll_y10 = HashMap::new();
         let mut stmt = self.conn.prepare(
             "SELECT key, value FROM app_settings WHERE key LIKE 'workspace_chat_scroll_y10_%'",
@@ -642,6 +688,7 @@ impl SqliteDatabase {
             last_open_workspace_id,
             workspace_active_thread_id,
             workspace_open_tabs,
+            workspace_archived_tabs,
             workspace_next_thread_id,
             workspace_chat_scroll_y10,
         })
@@ -795,6 +842,24 @@ impl SqliteDatabase {
         for (workspace_id, tabs) in &snapshot.workspace_open_tabs {
             for (idx, thread_id) in tabs.iter().copied().enumerate() {
                 let key = format!("{WORKSPACE_OPEN_TAB_PREFIX}{idx}_{workspace_id}");
+                tx.execute(
+                    "INSERT INTO app_settings (key, value, created_at, updated_at)
+                     VALUES (?1, ?2, COALESCE((SELECT created_at FROM app_settings WHERE key = ?1), ?3), ?3)
+                     ON CONFLICT(key) DO UPDATE SET
+                       value = excluded.value,
+                       updated_at = excluded.updated_at",
+                    params![key, thread_id as i64, now],
+                )?;
+            }
+        }
+
+        tx.execute(
+            "DELETE FROM app_settings WHERE key LIKE 'workspace_archived_tab_%'",
+            [],
+        )?;
+        for (workspace_id, tabs) in &snapshot.workspace_archived_tabs {
+            for (idx, thread_id) in tabs.iter().copied().enumerate() {
+                let key = format!("{WORKSPACE_ARCHIVED_TAB_PREFIX}{idx}_{workspace_id}");
                 tx.execute(
                     "INSERT INTO app_settings (key, value, created_at, updated_at)
                      VALUES (?1, ?2, COALESCE((SELECT created_at FROM app_settings WHERE key = ?1), ?3), ?3)
@@ -1223,6 +1288,7 @@ mod tests {
             last_open_workspace_id: Some(10),
             workspace_active_thread_id: HashMap::from([(10, 1)]),
             workspace_open_tabs: HashMap::from([(10, vec![1, 2, 3])]),
+            workspace_archived_tabs: HashMap::from([(10, vec![9, 8])]),
             workspace_next_thread_id: HashMap::from([(10, 4)]),
             workspace_chat_scroll_y10: HashMap::from([((10, 1), -1234)]),
         };
@@ -1258,6 +1324,7 @@ mod tests {
             last_open_workspace_id: None,
             workspace_active_thread_id: HashMap::new(),
             workspace_open_tabs: HashMap::new(),
+            workspace_archived_tabs: HashMap::new(),
             workspace_next_thread_id: HashMap::new(),
             workspace_chat_scroll_y10: HashMap::new(),
         };
@@ -1313,6 +1380,7 @@ mod tests {
             last_open_workspace_id: None,
             workspace_active_thread_id: HashMap::new(),
             workspace_open_tabs: HashMap::new(),
+            workspace_archived_tabs: HashMap::new(),
             workspace_next_thread_id: HashMap::new(),
             workspace_chat_scroll_y10: HashMap::new(),
         };

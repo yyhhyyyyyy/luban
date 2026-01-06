@@ -318,6 +318,7 @@ pub struct WorkspaceConversation {
 #[derive(Clone, Debug)]
 pub struct WorkspaceTabs {
     pub open_tabs: Vec<WorkspaceThreadId>,
+    pub archived_tabs: Vec<WorkspaceThreadId>,
     pub active_tab: WorkspaceThreadId,
     pub next_thread_id: u64,
 }
@@ -326,6 +327,7 @@ impl WorkspaceTabs {
     pub fn new_with_initial(thread_id: WorkspaceThreadId) -> Self {
         Self {
             open_tabs: vec![thread_id],
+            archived_tabs: Vec::new(),
             active_tab: thread_id,
             next_thread_id: thread_id.0 + 1,
         }
@@ -333,12 +335,13 @@ impl WorkspaceTabs {
 
     pub fn activate(&mut self, thread_id: WorkspaceThreadId) {
         self.active_tab = thread_id;
+        self.archived_tabs.retain(|id| *id != thread_id);
         if !self.open_tabs.contains(&thread_id) {
             self.open_tabs.push(thread_id);
         }
     }
 
-    pub fn close_tab(&mut self, thread_id: WorkspaceThreadId) {
+    pub fn archive_tab(&mut self, thread_id: WorkspaceThreadId) {
         let mut active_fallback: Option<WorkspaceThreadId> = None;
         if self.active_tab == thread_id
             && let Some(idx) = self.open_tabs.iter().position(|id| *id == thread_id)
@@ -350,8 +353,22 @@ impl WorkspaceTabs {
             }
         }
         self.open_tabs.retain(|id| *id != thread_id);
+        if !self.archived_tabs.contains(&thread_id) {
+            self.archived_tabs.push(thread_id);
+        }
         if let Some(next) = active_fallback.or_else(|| self.open_tabs.first().copied()) {
             self.active_tab = next;
+        }
+    }
+
+    pub fn restore_tab(&mut self, thread_id: WorkspaceThreadId, activate: bool) {
+        let was_archived = self.archived_tabs.contains(&thread_id);
+        self.archived_tabs.retain(|id| *id != thread_id);
+        if was_archived && !self.open_tabs.contains(&thread_id) {
+            self.open_tabs.push(thread_id);
+        }
+        if activate {
+            self.active_tab = thread_id;
         }
     }
 
@@ -487,6 +504,7 @@ pub struct PersistedAppState {
     pub last_open_workspace_id: Option<u64>,
     pub workspace_active_thread_id: HashMap<u64, u64>,
     pub workspace_open_tabs: HashMap<u64, Vec<u64>>,
+    pub workspace_archived_tabs: HashMap<u64, Vec<u64>>,
     pub workspace_next_thread_id: HashMap<u64, u64>,
     pub workspace_chat_scroll_y10: HashMap<(u64, u64), i32>,
 }
@@ -653,6 +671,10 @@ pub enum Action {
         thread_id: WorkspaceThreadId,
     },
     CloseWorkspaceThreadTab {
+        workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
+    },
+    RestoreWorkspaceThreadTab {
         workspace_id: WorkspaceId,
         thread_id: WorkspaceThreadId,
     },
@@ -1368,13 +1390,32 @@ impl AppState {
                 thread_id,
             } => {
                 let tabs = self.ensure_workspace_tabs_mut(workspace_id);
+                if tabs.open_tabs.len() <= 1 {
+                    return Vec::new();
+                }
                 let previous_active = tabs.active_tab;
-                tabs.close_tab(thread_id);
+                tabs.archive_tab(thread_id);
                 let mut effects = vec![Effect::SaveAppState];
                 if tabs.active_tab != previous_active {
                     effects.push(Effect::LoadConversation {
                         workspace_id,
                         thread_id: tabs.active_tab,
+                    });
+                }
+                effects
+            }
+            Action::RestoreWorkspaceThreadTab {
+                workspace_id,
+                thread_id,
+            } => {
+                let tabs = self.ensure_workspace_tabs_mut(workspace_id);
+                let previous_active = tabs.active_tab;
+                tabs.restore_tab(thread_id, true);
+                let mut effects = vec![Effect::SaveAppState];
+                if tabs.active_tab != previous_active {
+                    effects.push(Effect::LoadConversation {
+                        workspace_id,
+                        thread_id,
                     });
                 }
                 effects
@@ -1509,12 +1550,22 @@ impl AppState {
                         .into_iter()
                         .map(WorkspaceThreadId)
                         .collect::<Vec<_>>();
+                    let mut archived_tabs = persisted
+                        .workspace_archived_tabs
+                        .get(&workspace_id.0)
+                        .cloned()
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(WorkspaceThreadId)
+                        .collect::<Vec<_>>();
+                    archived_tabs.retain(|id| !open_tabs.contains(id));
                     if open_tabs.is_empty() {
                         open_tabs.push(active);
                     }
                     if !open_tabs.contains(&active) {
                         open_tabs.push(active);
                     }
+                    archived_tabs.retain(|id| *id != active);
 
                     let next_thread_id = persisted
                         .workspace_next_thread_id
@@ -1526,6 +1577,7 @@ impl AppState {
                         workspace_id,
                         WorkspaceTabs {
                             open_tabs: open_tabs.clone(),
+                            archived_tabs,
                             active_tab: active,
                             next_thread_id,
                         },
@@ -1656,6 +1708,16 @@ impl AppState {
                     (
                         workspace_id.0,
                         tabs.open_tabs.iter().map(|id| id.0).collect(),
+                    )
+                })
+                .collect(),
+            workspace_archived_tabs: self
+                .workspace_tabs
+                .iter()
+                .map(|(workspace_id, tabs)| {
+                    (
+                        workspace_id.0,
+                        tabs.archived_tabs.iter().map(|id| id.0).collect(),
                     )
                 })
                 .collect(),
@@ -2135,6 +2197,7 @@ mod tests {
                 last_open_workspace_id: None,
                 workspace_active_thread_id: HashMap::new(),
                 workspace_open_tabs: HashMap::new(),
+                workspace_archived_tabs: HashMap::new(),
                 workspace_next_thread_id: HashMap::new(),
                 workspace_chat_scroll_y10: HashMap::new(),
             },
@@ -2162,6 +2225,7 @@ mod tests {
                 last_open_workspace_id: None,
                 workspace_active_thread_id: HashMap::new(),
                 workspace_open_tabs: HashMap::new(),
+                workspace_archived_tabs: HashMap::new(),
                 workspace_next_thread_id: HashMap::new(),
                 workspace_chat_scroll_y10: HashMap::new(),
             },
@@ -2259,11 +2323,34 @@ mod tests {
             workspace_id,
             thread_id: closed_thread,
         });
+        let tabs = state.workspace_tabs(workspace_id).unwrap();
+        assert!(
+            !tabs.open_tabs.contains(&closed_thread),
+            "closing a tab should archive it"
+        );
+        assert!(
+            tabs.archived_tabs.contains(&closed_thread),
+            "archived tabs should retain the closed thread id"
+        );
         assert!(
             state
                 .workspace_thread_conversation(workspace_id, closed_thread)
                 .is_some(),
-            "closing a tab should not delete the conversation"
+            "archiving a tab should not delete the conversation"
+        );
+
+        state.apply(Action::RestoreWorkspaceThreadTab {
+            workspace_id,
+            thread_id: closed_thread,
+        });
+        let tabs = state.workspace_tabs(workspace_id).unwrap();
+        assert!(
+            tabs.open_tabs.contains(&closed_thread),
+            "restoring a tab should re-open it"
+        );
+        assert!(
+            !tabs.archived_tabs.contains(&closed_thread),
+            "restoring a tab should remove it from the archive list"
         );
     }
 
