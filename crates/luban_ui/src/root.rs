@@ -1886,32 +1886,34 @@ impl LubanRootView {
             let button_id = format!("workspace-thread-tab-{idx}");
             let close_id = format!("workspace-thread-tab-close-{idx}");
 
+            let status_dot = div()
+                .w(px(8.0))
+                .h(px(8.0))
+                .rounded_full()
+                .bg(theme.accent)
+                .when(!dirty, |s| s.invisible());
+
             div()
                 .id(button_id.clone())
                 .debug_selector(move || button_id.clone())
-                .h(px(28.0))
+                .h(px(36.0))
                 .flex_1()
                 .min_w(px(56.0))
-                .px_2()
-                .rounded_md()
+                .px_3()
                 .flex()
                 .items_center()
                 .gap_2()
+                .group("")
                 .cursor_pointer()
+                .border_r_1()
+                .border_color(theme.border)
                 .bg(if is_active {
-                    theme.secondary
+                    theme.background
                 } else {
-                    theme.transparent
+                    theme.muted
                 })
-                .text_color(if is_active {
-                    theme.foreground
-                } else {
-                    theme.muted_foreground
-                })
-                .hover({
-                    let hover_bg = theme.secondary_hover;
-                    move |s| s.bg(hover_bg)
-                })
+                .hover(move |s| s.bg(theme.secondary_hover))
+                .when(is_active, |s| s.border_b_1().border_color(theme.background))
                 .on_prepaint(move |bounds, _window, app| {
                     let _ = view_handle_bounds.update(app, |view, _cx| {
                         view.workspace_thread_tab_bounds
@@ -1952,43 +1954,50 @@ impl LubanRootView {
                         );
                     });
                 })
-                .child(
-                    Icon::new(Icon::empty().path("icons/message-square.svg"))
-                        .with_size(Size::Small)
-                        .text_color(theme.muted_foreground),
-                )
+                .child(status_dot)
                 .when(running, |s| {
                     s.child(Spinner::new().with_size(Size::XSmall).into_any_element())
                 })
-                .when(!running && dirty, |s| {
-                    s.child(
-                        div()
-                            .w(px(6.0))
-                            .h(px(6.0))
-                            .rounded_full()
-                            .bg(theme.muted_foreground),
-                    )
-                })
-                .child(div().flex_1().min_w(px(0.0)).truncate().child(title))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .truncate()
+                        .text_color(if is_active {
+                            theme.foreground
+                        } else {
+                            theme.muted_foreground
+                        })
+                        .when(is_active, |s| s.font_semibold())
+                        .child(title),
+                )
                 .when(allow_close, |s| {
                     s.child(
-                        Button::new(close_id.clone())
-                            .ghost()
-                            .compact()
-                            .with_size(Size::Small)
-                            .icon(Icon::new(IconName::Close))
-                            .on_click(move |_, _, app| {
-                                let _ = view_handle_close.update(app, |view, cx| {
-                                    view.dispatch(
-                                        Action::CloseWorkspaceThreadTab {
-                                            workspace_id,
-                                            thread_id,
-                                        },
-                                        cx,
-                                    );
-                                });
-                            })
-                            .into_any_element(),
+                        div()
+                            .w(px(24.0))
+                            .h(px(24.0))
+                            .invisible()
+                            .when(is_active, |s| s.visible())
+                            .group_hover("", |s| s.visible())
+                            .child(
+                                Button::new(close_id.clone())
+                                    .ghost()
+                                    .compact()
+                                    .with_size(Size::Small)
+                                    .icon(Icon::new(IconName::Close))
+                                    .on_click(move |_, _, app| {
+                                        let _ = view_handle_close.update(app, |view, cx| {
+                                            view.dispatch(
+                                                Action::CloseWorkspaceThreadTab {
+                                                    workspace_id,
+                                                    thread_id,
+                                                },
+                                                cx,
+                                            );
+                                        });
+                                    })
+                                    .into_any_element(),
+                            ),
                     )
                 })
                 .into_any_element()
@@ -2012,13 +2021,13 @@ impl LubanRootView {
             .debug_selector(|| "workspace-thread-tabs".to_owned())
             .h(px(36.0))
             .w_full()
-            .px_4()
+            .px_0()
             .flex()
             .items_center()
-            .gap_1()
+            .gap_0()
             .border_b_1()
             .border_color(theme.border)
-            .bg(theme.background)
+            .bg(theme.muted)
             .on_mouse_up(MouseButton::Left, {
                 let view_handle = view_handle.clone();
                 move |_, _window, app| {
@@ -2040,10 +2049,17 @@ impl LubanRootView {
                     .flex_1()
                     .min_w(px(0.0))
                     .overflow_x_hidden()
-                    .child(div().flex().items_center().gap_1().children(tab_children)),
+                    .child(div().flex().items_center().children(tab_children)),
             )
-            .child(new_tab)
-            .child(overflow)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .px_2()
+                    .child(new_tab)
+                    .child(overflow),
+            )
             .into_any_element()
     }
 }
