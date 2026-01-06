@@ -3783,12 +3783,13 @@ fn render_conversation_entry(
     match entry {
         luban_domain::ConversationEntry::UserMessage { text } => {
             let is_short_single_line = text.lines().nth(1).is_none() && text.chars().count() <= 80;
+            let bubble_max_w = chat_column_width
+                .map(|w| (w - px(48.0)).min(px(680.0)).max(px(0.0)))
+                .unwrap_or(px(680.0));
             let wrap_width = if is_short_single_line {
                 None
             } else {
-                chat_column_width
-                    .map(|w| w.min(px(680.0)))
-                    .map(|w| (w - px(32.0)).max(px(0.0)))
+                Some((bubble_max_w - px(32.0)).max(px(0.0)))
             };
             let message = user_message_view_with_context_tokens(
                 entry_index,
@@ -3799,7 +3800,7 @@ fn render_conversation_entry(
             );
             let bubble = min_width_zero(
                 div()
-                    .max_w(px(680.0))
+                    .max_w(bubble_max_w)
                     .overflow_x_hidden()
                     .p_2()
                     .rounded_md()
@@ -6920,6 +6921,63 @@ mod tests {
         );
         assert!(narrow_bubble.right() <= narrow_column.right() + px(2.0));
         assert!(narrow_bubble.right() >= narrow_column.right() - px(8.0));
+    }
+
+    #[gpui::test]
+    async fn long_user_message_bubble_keeps_right_gutter(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "abandon-about".to_owned(),
+            branch_name: "luban/abandon-about".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+        });
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
+        state.main_pane = MainPane::Workspace(workspace_id);
+
+        let long_text = std::iter::repeat_n("word", 800)
+            .collect::<Vec<_>>()
+            .join(" ");
+        state.apply(Action::ConversationLoaded {
+            workspace_id,
+            thread_id: default_thread_id(),
+            snapshot: ConversationSnapshot {
+                thread_id: Some("thread-1".to_owned()),
+                entries: vec![ConversationEntry::UserMessage { text: long_text }],
+            },
+        });
+
+        let (_view, window_cx) =
+            cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+
+        window_cx.simulate_resize(size(px(760.0), px(800.0)));
+        for _ in 0..3 {
+            window_cx.run_until_parked();
+            window_cx.refresh().unwrap();
+        }
+
+        let column = window_cx
+            .debug_bounds("workspace-chat-column")
+            .expect("missing debug bounds for workspace-chat-column");
+        let bubble = window_cx
+            .debug_bounds("conversation-user-bubble-0")
+            .expect("missing debug bounds for conversation-user-bubble-0");
+
+        let gutter = bubble.left() - column.left();
+        assert!(
+            gutter >= px(24.0),
+            "expected long user bubble to leave a left gutter (avoid full-width drift): gutter={gutter:?} column={column:?} bubble={bubble:?}"
+        );
+        assert!(bubble.right() <= column.right() + px(2.0));
+        assert!(bubble.right() >= column.right() - px(8.0));
     }
 
     #[gpui::test]
