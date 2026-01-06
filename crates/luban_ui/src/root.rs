@@ -20,8 +20,9 @@ use luban_domain::{
     Action, AgentRunConfig, AppState, CodexThreadEvent, CodexThreadItem, DashboardCardModel,
     DashboardPreviewModel, DashboardStage, Effect, MainPane, OperationStatus, ProjectId,
     ProjectWorkspaceService, PullRequestInfo, RightPane, RunAgentTurnRequest, ThinkingEffort,
-    WorkspaceId, WorkspaceStatus, agent_model_label, agent_models, dashboard_cards,
-    dashboard_preview, default_agent_model_id, default_thinking_effort, thinking_effort_supported,
+    WorkspaceId, WorkspaceStatus, WorkspaceThreadId, agent_model_label, agent_models,
+    dashboard_cards, dashboard_preview, default_agent_model_id, default_thinking_effort,
+    thinking_effort_supported,
 };
 use std::{
     cell::RefCell,
@@ -54,6 +55,8 @@ const MAX_INLINE_PASTE_CHARS: usize = 8_000;
 const MAX_INLINE_PASTE_LINES: usize = 200;
 const CHAT_ATTACHMENT_THUMBNAIL_SIZE: f32 = 72.0;
 const CHAT_ATTACHMENT_FILE_WIDTH: f32 = CHAT_ATTACHMENT_THUMBNAIL_SIZE * 2.0;
+
+type WorkspaceThreadKey = (WorkspaceId, WorkspaceThreadId);
 
 static PENDING_CONTEXT_TOKEN_ID: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(1);
@@ -283,6 +286,7 @@ fn context_import_plan_from_clipboard(
 
 fn chat_composer_attachments_row(
     workspace_id: WorkspaceId,
+    thread_id: WorkspaceThreadId,
     attachments: &[luban_domain::DraftAttachment],
     view_handle: &gpui::WeakEntity<LubanRootView>,
     theme: &gpui_component::Theme,
@@ -317,7 +321,11 @@ fn chat_composer_attachments_row(
                     .on_mouse_down(MouseButton::Left, move |_, _, app| {
                         let _ = view_handle.update(app, |view, cx| {
                             view.dispatch(
-                                Action::ChatDraftAttachmentRemoved { workspace_id, id },
+                                Action::ChatDraftAttachmentRemoved {
+                                    workspace_id,
+                                    thread_id,
+                                    id,
+                                },
                                 cx,
                             );
                         });
@@ -614,8 +622,8 @@ pub struct LubanRootView {
     last_dashboard_preview_width: Pixels,
     #[cfg(test)]
     last_terminal_grid_size: Option<(u16, u16)>,
-    workspace_terminals: HashMap<WorkspaceId, WorkspaceTerminal>,
-    workspace_terminal_errors: HashMap<WorkspaceId, String>,
+    workspace_terminals: HashMap<WorkspaceThreadKey, WorkspaceTerminal>,
+    workspace_terminal_errors: HashMap<WorkspaceThreadKey, String>,
     gh_authorized: Option<bool>,
     gh_auth_check_inflight: bool,
     gh_last_auth_check_at: Option<Instant>,
@@ -625,21 +633,21 @@ pub struct LubanRootView {
     expanded_agent_items: HashSet<String>,
     expanded_agent_turns: HashSet<String>,
     chat_column_width: Option<Pixels>,
-    running_turn_started_at: HashMap<WorkspaceId, Instant>,
-    running_turn_tickers: HashSet<WorkspaceId>,
-    pending_turn_durations: HashMap<WorkspaceId, Duration>,
-    running_turn_user_message_count: HashMap<WorkspaceId, usize>,
-    running_turn_summary_order: HashMap<WorkspaceId, Vec<String>>,
-    turn_generation: HashMap<WorkspaceId, u64>,
-    turn_cancel_flags: HashMap<WorkspaceId, Arc<AtomicBool>>,
+    running_turn_started_at: HashMap<WorkspaceThreadKey, Instant>,
+    running_turn_tickers: HashSet<WorkspaceThreadKey>,
+    pending_turn_durations: HashMap<WorkspaceThreadKey, Duration>,
+    running_turn_user_message_count: HashMap<WorkspaceThreadKey, usize>,
+    running_turn_summary_order: HashMap<WorkspaceThreadKey, Vec<String>>,
+    turn_generation: HashMap<WorkspaceThreadKey, u64>,
+    turn_cancel_flags: HashMap<WorkspaceThreadKey, Arc<AtomicBool>>,
     chat_scroll_handle: gpui::ScrollHandle,
     projects_scroll_handle: gpui::ScrollHandle,
-    last_chat_workspace_id: Option<WorkspaceId>,
+    last_chat_workspace_id: Option<WorkspaceThreadKey>,
     last_chat_item_count: usize,
     last_workspace_before_dashboard: Option<WorkspaceId>,
     success_toast_message: Option<String>,
     success_toast_generation: u64,
-    pending_context_imports: HashMap<WorkspaceId, usize>,
+    pending_context_imports: HashMap<WorkspaceThreadKey, usize>,
     #[cfg(test)]
     inspector_bounds: HashMap<&'static str, gpui::Bounds<Pixels>>,
     #[cfg(test)]
@@ -763,6 +771,36 @@ impl LubanRootView {
         }
     }
 
+    fn default_thread_id() -> WorkspaceThreadId {
+        WorkspaceThreadId::from_u64(1)
+    }
+
+    fn active_thread_id_for_workspace(&self, workspace_id: WorkspaceId) -> WorkspaceThreadId {
+        self.state
+            .active_thread_id(workspace_id)
+            .unwrap_or_else(Self::default_thread_id)
+    }
+
+    fn active_thread_key_for_workspace(&self, workspace_id: WorkspaceId) -> WorkspaceThreadKey {
+        (
+            workspace_id,
+            self.active_thread_id_for_workspace(workspace_id),
+        )
+    }
+
+    fn current_chat_workspace_id(&self) -> Option<WorkspaceId> {
+        match self.state.main_pane {
+            MainPane::Workspace(workspace_id) => Some(workspace_id),
+            MainPane::Dashboard => self.state.dashboard_preview_workspace_id,
+            _ => None,
+        }
+    }
+
+    fn current_chat_key(&self) -> Option<WorkspaceThreadKey> {
+        let workspace_id = self.current_chat_workspace_id()?;
+        Some(self.active_thread_key_for_workspace(workspace_id))
+    }
+
     #[cfg(test)]
     pub fn debug_state(&self) -> &AppState {
         &self.state
@@ -799,8 +837,10 @@ impl LubanRootView {
     }
 
     fn dispatch(&mut self, action: Action, cx: &mut Context<Self>) {
-        let previous_workspace_for_scroll = match self.state.main_pane {
-            MainPane::Workspace(workspace_id) => Some(workspace_id),
+        let previous_chat_key_for_scroll = match self.state.main_pane {
+            MainPane::Workspace(workspace_id) => {
+                Some(self.active_thread_key_for_workspace(workspace_id))
+            }
             _ => None,
         };
 
@@ -821,8 +861,8 @@ impl LubanRootView {
             Action::OpenDashboard => {
                 if let MainPane::Workspace(workspace_id) = self.state.main_pane {
                     self.last_workspace_before_dashboard = Some(workspace_id);
-                } else if self.last_chat_workspace_id.is_some() {
-                    self.last_workspace_before_dashboard = self.last_chat_workspace_id;
+                } else if let Some((workspace_id, _)) = self.last_chat_workspace_id {
+                    self.last_workspace_before_dashboard = Some(workspace_id);
                 }
             }
             Action::OpenWorkspace { workspace_id } => {
@@ -832,9 +872,18 @@ impl LubanRootView {
         }
 
         if let Action::WorkspaceArchived { workspace_id } = &action {
-            self.workspace_terminal_errors.remove(workspace_id);
-            if let Some(mut terminal) = self.workspace_terminals.remove(workspace_id) {
-                terminal.kill();
+            self.workspace_terminal_errors
+                .retain(|(wid, _), _| *wid != *workspace_id);
+            let keys = self
+                .workspace_terminals
+                .keys()
+                .copied()
+                .filter(|(wid, _)| *wid == *workspace_id)
+                .collect::<Vec<_>>();
+            for key in keys {
+                if let Some(mut terminal) = self.workspace_terminals.remove(&key) {
+                    terminal.kill();
+                }
             }
             self.workspace_pull_request_numbers.remove(workspace_id);
             self.workspace_pull_request_inflight.remove(workspace_id);
@@ -843,47 +892,62 @@ impl LubanRootView {
             }
         }
 
-        let start_timer_workspace = match &action {
-            Action::SendAgentMessage { workspace_id, .. } => Some(*workspace_id),
+        let start_timer_key = match &action {
+            Action::SendAgentMessage {
+                workspace_id,
+                thread_id,
+                ..
+            } => Some((*workspace_id, *thread_id)),
             _ => None,
         };
-        let stop_timer_workspace = match &action {
+        let stop_timer_key = match &action {
             Action::AgentEventReceived {
                 workspace_id,
+                thread_id,
                 event:
                     CodexThreadEvent::TurnCompleted { .. }
                     | CodexThreadEvent::TurnFailed { .. }
                     | CodexThreadEvent::Error { .. },
             }
-            | Action::AgentTurnFinished { workspace_id } => Some(*workspace_id),
-            Action::CancelAgentTurn { workspace_id } => Some(*workspace_id),
+            | Action::AgentTurnFinished {
+                workspace_id,
+                thread_id,
+            } => Some((*workspace_id, *thread_id)),
+            Action::CancelAgentTurn {
+                workspace_id,
+                thread_id,
+            } => Some((*workspace_id, *thread_id)),
             _ => None,
         };
-        let clear_pending_duration_workspace = match &action {
+        let clear_pending_duration_key = match &action {
             Action::AgentEventReceived {
                 workspace_id,
+                thread_id,
                 event: CodexThreadEvent::TurnDuration { .. },
-            } => Some(*workspace_id),
+            } => Some((*workspace_id, *thread_id)),
             _ => None,
         };
 
-        let stop_timer_turn_id = stop_timer_workspace.and_then(|workspace_id| {
+        let stop_timer_turn_id = stop_timer_key.and_then(|(workspace_id, thread_id)| {
             self.state
-                .workspace_conversation(workspace_id)
+                .workspace_thread_conversation(workspace_id, thread_id)
                 .and_then(|c| latest_agent_turn_id(&c.entries))
         });
 
         let mut effects = self.state.apply(action);
-        let next_workspace_for_scroll = match self.state.main_pane {
-            MainPane::Workspace(workspace_id) => Some(workspace_id),
+        let next_chat_key_for_scroll = match self.state.main_pane {
+            MainPane::Workspace(workspace_id) => {
+                Some(self.active_thread_key_for_workspace(workspace_id))
+            }
             _ => None,
         };
-        if previous_workspace_for_scroll != next_workspace_for_scroll
-            && let Some(workspace_id) = previous_workspace_for_scroll
+        if previous_chat_key_for_scroll != next_chat_key_for_scroll
+            && let Some((workspace_id, thread_id)) = previous_chat_key_for_scroll
         {
             let offset_y10 = quantize_pixels_y10(self.chat_scroll_handle.offset().y);
             effects.extend(self.state.apply(Action::WorkspaceChatScrollSaved {
                 workspace_id,
+                thread_id,
                 offset_y10,
             }));
         }
@@ -892,35 +956,35 @@ impl LubanRootView {
             self.show_success_toast(message, cx);
         }
 
-        if let Some(workspace_id) = start_timer_workspace {
-            self.pending_turn_durations.remove(&workspace_id);
+        if let Some(key) = start_timer_key {
+            self.pending_turn_durations.remove(&key);
             let is_running = self
                 .state
-                .workspace_conversation(workspace_id)
+                .workspace_thread_conversation(key.0, key.1)
                 .map(|c| c.run_status == OperationStatus::Running)
                 .unwrap_or(false);
             if is_running {
-                self.ensure_running_turn_timer(workspace_id, cx);
+                self.ensure_running_turn_timer(key, cx);
             }
         }
 
-        if let Some(workspace_id) = stop_timer_workspace {
-            if let Some(started_at) = self.running_turn_started_at.get(&workspace_id) {
+        if let Some(key) = stop_timer_key {
+            if let Some(started_at) = self.running_turn_started_at.get(&key) {
                 self.pending_turn_durations
-                    .insert(workspace_id, started_at.elapsed());
+                    .insert(key, started_at.elapsed());
             }
-            self.running_turn_started_at.remove(&workspace_id);
-            self.running_turn_tickers.remove(&workspace_id);
-            self.running_turn_user_message_count.remove(&workspace_id);
-            self.running_turn_summary_order.remove(&workspace_id);
+            self.running_turn_started_at.remove(&key);
+            self.running_turn_tickers.remove(&key);
+            self.running_turn_user_message_count.remove(&key);
+            self.running_turn_summary_order.remove(&key);
             if let Some(turn_id) = stop_timer_turn_id {
                 self.collapse_agent_turn_summary(&turn_id);
             }
             cx.notify();
         }
 
-        if let Some(workspace_id) = clear_pending_duration_workspace {
-            self.pending_turn_durations.remove(&workspace_id);
+        if let Some(key) = clear_pending_duration_key {
+            self.pending_turn_durations.remove(&key);
             cx.notify();
         }
 
@@ -931,8 +995,8 @@ impl LubanRootView {
         self.ensure_workspace_pull_request_numbers(cx);
     }
 
-    fn bump_turn_generation(&mut self, workspace_id: WorkspaceId) -> u64 {
-        let entry = self.turn_generation.entry(workspace_id).or_insert(0);
+    fn bump_turn_generation(&mut self, key: WorkspaceThreadKey) -> u64 {
+        let entry = self.turn_generation.entry(key).or_insert(0);
         *entry += 1;
         *entry
     }
@@ -955,11 +1019,11 @@ impl LubanRootView {
         }
     }
 
-    fn ensure_running_turn_timer(&mut self, workspace_id: WorkspaceId, cx: &mut Context<Self>) {
+    fn ensure_running_turn_timer(&mut self, key: WorkspaceThreadKey, cx: &mut Context<Self>) {
         self.running_turn_started_at
-            .entry(workspace_id)
+            .entry(key)
             .or_insert_with(Instant::now);
-        if !self.running_turn_tickers.insert(workspace_id) {
+        if !self.running_turn_tickers.insert(key) {
             return;
         }
 
@@ -974,14 +1038,14 @@ impl LubanRootView {
                             .update(&mut async_cx, |view: &mut LubanRootView, view_cx| {
                                 let running = view
                                     .state
-                                    .workspace_conversation(workspace_id)
+                                    .workspace_thread_conversation(key.0, key.1)
                                     .map(|c| c.run_status == OperationStatus::Running)
                                     .unwrap_or(false);
                                 if running {
                                     view_cx.notify();
                                 } else {
-                                    view.running_turn_started_at.remove(&workspace_id);
-                                    view.running_turn_tickers.remove(&workspace_id);
+                                    view.running_turn_started_at.remove(&key);
+                                    view.running_turn_tickers.remove(&key);
                                 }
                                 running
                             })
@@ -1008,20 +1072,30 @@ impl LubanRootView {
             Effect::ArchiveWorkspace { workspace_id } => {
                 self.run_archive_workspace(workspace_id, cx)
             }
-            Effect::EnsureConversation { workspace_id } => {
-                self.run_ensure_conversation(workspace_id, cx)
+            Effect::EnsureConversation {
+                workspace_id,
+                thread_id,
+            } => self.run_ensure_conversation(workspace_id, thread_id, cx),
+            Effect::LoadWorkspaceThreads { workspace_id } => {
+                self.run_load_workspace_threads(workspace_id, cx)
             }
-            Effect::LoadConversation { workspace_id } => {
-                self.run_load_conversation(workspace_id, cx)
-            }
+            Effect::LoadConversation {
+                workspace_id,
+                thread_id,
+            } => self.run_load_conversation(workspace_id, thread_id, cx),
             Effect::RunAgentTurn {
                 workspace_id,
+                thread_id,
                 text,
                 run_config,
-            } => self.run_agent_turn(workspace_id, text, run_config, cx),
-            Effect::CancelAgentTurn { workspace_id } => {
-                self.bump_turn_generation(workspace_id);
-                if let Some(flag) = self.turn_cancel_flags.get(&workspace_id) {
+            } => self.run_agent_turn(workspace_id, thread_id, text, run_config, cx),
+            Effect::CancelAgentTurn {
+                workspace_id,
+                thread_id,
+            } => {
+                let key = (workspace_id, thread_id);
+                self.bump_turn_generation(key);
+                if let Some(flag) = self.turn_cancel_flags.get(&key) {
                     flag.store(true, Ordering::SeqCst);
                 }
             }
@@ -1128,6 +1202,7 @@ impl LubanRootView {
     fn enqueue_context_import(
         &mut self,
         workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
         id: u64,
         _kind: luban_domain::ContextTokenKind,
         spec: ContextImportSpec,
@@ -1137,10 +1212,8 @@ impl LubanRootView {
             return;
         };
 
-        *self
-            .pending_context_imports
-            .entry(workspace_id)
-            .or_insert(0) += 1;
+        let key = (workspace_id, thread_id);
+        *self.pending_context_imports.entry(key).or_insert(0) += 1;
         let services = self.services.clone();
 
         cx.spawn(
@@ -1180,6 +1253,7 @@ impl LubanRootView {
                                 view.dispatch(
                                     Action::ChatDraftAttachmentResolved {
                                         workspace_id,
+                                        thread_id,
                                         id: attachment_id,
                                         path,
                                     },
@@ -1189,17 +1263,17 @@ impl LubanRootView {
                                 view.dispatch(
                                     Action::ChatDraftAttachmentFailed {
                                         workspace_id,
+                                        thread_id,
                                         id: attachment_id,
                                     },
                                     view_cx,
                                 );
                             }
 
-                            if let Some(count) = view.pending_context_imports.get_mut(&workspace_id)
-                            {
+                            if let Some(count) = view.pending_context_imports.get_mut(&key) {
                                 *count = count.saturating_sub(1);
                                 if *count == 0 {
-                                    view.pending_context_imports.remove(&workspace_id);
+                                    view.pending_context_imports.remove(&key);
                                 }
                             }
 
@@ -1314,11 +1388,17 @@ impl LubanRootView {
         .detach();
     }
 
-    fn run_ensure_conversation(&mut self, workspace_id: WorkspaceId, cx: &mut Context<Self>) {
+    fn run_ensure_conversation(
+        &mut self,
+        workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
+        cx: &mut Context<Self>,
+    ) {
         let Some(agent_context) = workspace_agent_context(&self.state, workspace_id) else {
             self.dispatch(
                 Action::ConversationLoadFailed {
                     workspace_id,
+                    thread_id,
                     message: "Workspace not found".to_owned(),
                 },
                 cx,
@@ -1327,6 +1407,7 @@ impl LubanRootView {
         };
 
         let services = self.services.clone();
+        let local_thread_id = thread_id.as_u64();
 
         cx.spawn(
             move |this: gpui::WeakEntity<LubanRootView>, cx: &mut gpui::AsyncApp| {
@@ -1337,6 +1418,7 @@ impl LubanRootView {
                             services.ensure_conversation(
                                 agent_context.project_slug,
                                 agent_context.workspace_name,
+                                local_thread_id,
                             )
                         })
                         .await;
@@ -1348,6 +1430,7 @@ impl LubanRootView {
                                 view.dispatch(
                                     Action::ConversationLoadFailed {
                                         workspace_id,
+                                        thread_id,
                                         message,
                                     },
                                     view_cx,
@@ -1361,10 +1444,70 @@ impl LubanRootView {
         .detach();
     }
 
-    fn run_load_conversation(&mut self, workspace_id: WorkspaceId, cx: &mut Context<Self>) {
+    fn run_load_conversation(
+        &mut self,
+        workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
+        cx: &mut Context<Self>,
+    ) {
         let Some(agent_context) = workspace_agent_context(&self.state, workspace_id) else {
             self.dispatch(
                 Action::ConversationLoadFailed {
+                    workspace_id,
+                    thread_id,
+                    message: "Workspace not found".to_owned(),
+                },
+                cx,
+            );
+            return;
+        };
+
+        let services = self.services.clone();
+        let local_thread_id = thread_id.as_u64();
+
+        cx.spawn(
+            move |this: gpui::WeakEntity<LubanRootView>, cx: &mut gpui::AsyncApp| {
+                let mut async_cx = cx.clone();
+                async move {
+                    let result = async_cx
+                        .background_spawn(async move {
+                            services.load_conversation(
+                                agent_context.project_slug,
+                                agent_context.workspace_name,
+                                local_thread_id,
+                            )
+                        })
+                        .await;
+
+                    let action = match result {
+                        Ok(snapshot) => Action::ConversationLoaded {
+                            workspace_id,
+                            thread_id,
+                            snapshot,
+                        },
+                        Err(message) => Action::ConversationLoadFailed {
+                            workspace_id,
+                            thread_id,
+                            message,
+                        },
+                    };
+
+                    let _ = this.update(
+                        &mut async_cx,
+                        |view: &mut LubanRootView, view_cx: &mut Context<LubanRootView>| {
+                            view.dispatch(action, view_cx)
+                        },
+                    );
+                }
+            },
+        )
+        .detach();
+    }
+
+    fn run_load_workspace_threads(&mut self, workspace_id: WorkspaceId, cx: &mut Context<Self>) {
+        let Some(agent_context) = workspace_agent_context(&self.state, workspace_id) else {
+            self.dispatch(
+                Action::WorkspaceThreadsLoadFailed {
                     workspace_id,
                     message: "Workspace not found".to_owned(),
                 },
@@ -1381,7 +1524,7 @@ impl LubanRootView {
                 async move {
                     let result = async_cx
                         .background_spawn(async move {
-                            services.load_conversation(
+                            services.list_conversation_threads(
                                 agent_context.project_slug,
                                 agent_context.workspace_name,
                             )
@@ -1389,11 +1532,11 @@ impl LubanRootView {
                         .await;
 
                     let action = match result {
-                        Ok(snapshot) => Action::ConversationLoaded {
+                        Ok(threads) => Action::WorkspaceThreadsLoaded {
                             workspace_id,
-                            snapshot,
+                            threads,
                         },
-                        Err(message) => Action::ConversationLoadFailed {
+                        Err(message) => Action::WorkspaceThreadsLoadFailed {
                             workspace_id,
                             message,
                         },
@@ -1414,29 +1557,37 @@ impl LubanRootView {
     fn run_agent_turn(
         &mut self,
         workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
         text: String,
         run_config: AgentRunConfig,
         cx: &mut Context<Self>,
     ) {
         let Some(agent_context) = workspace_agent_context(&self.state, workspace_id) else {
-            self.dispatch(Action::AgentTurnFinished { workspace_id }, cx);
+            self.dispatch(
+                Action::AgentTurnFinished {
+                    workspace_id,
+                    thread_id,
+                },
+                cx,
+            );
             return;
         };
 
-        let generation = self.bump_turn_generation(workspace_id);
+        let key = (workspace_id, thread_id);
+        let generation = self.bump_turn_generation(key);
         let cancel_flag = Arc::new(AtomicBool::new(false));
-        self.turn_cancel_flags
-            .insert(workspace_id, cancel_flag.clone());
+        self.turn_cancel_flags.insert(key, cancel_flag.clone());
 
-        let thread_id = self
+        let remote_thread_id = self
             .state
-            .workspace_conversation(workspace_id)
+            .workspace_thread_conversation(workspace_id, thread_id)
             .and_then(|c| c.thread_id.clone());
         let request = RunAgentTurnRequest {
             project_slug: agent_context.project_slug,
             workspace_name: agent_context.workspace_name,
             worktree_path: agent_context.worktree_path,
-            thread_id,
+            thread_local_id: thread_id.as_u64(),
+            thread_id: remote_thread_id,
             prompt: text,
             model: Some(run_config.model_id),
             model_reasoning_effort: Some(run_config.thinking_effort.as_str().to_owned()),
@@ -1471,11 +1622,8 @@ impl LubanRootView {
                         let _ = this.update(
                             &mut async_cx,
                             |view: &mut LubanRootView, view_cx: &mut Context<LubanRootView>| {
-                                let current_generation = view
-                                    .turn_generation
-                                    .get(&workspace_id)
-                                    .copied()
-                                    .unwrap_or(0);
+                                let current_generation =
+                                    view.turn_generation.get(&key).copied().unwrap_or(0);
                                 if current_generation != generation {
                                     return;
                                 }
@@ -1483,6 +1631,7 @@ impl LubanRootView {
                                 view.dispatch(
                                     Action::AgentEventReceived {
                                         workspace_id,
+                                        thread_id: key.1,
                                         event,
                                     },
                                     view_cx,
@@ -1494,15 +1643,18 @@ impl LubanRootView {
                     let _ = this.update(
                         &mut async_cx,
                         |view: &mut LubanRootView, view_cx: &mut Context<LubanRootView>| {
-                            let current_generation = view
-                                .turn_generation
-                                .get(&workspace_id)
-                                .copied()
-                                .unwrap_or(0);
+                            let current_generation =
+                                view.turn_generation.get(&key).copied().unwrap_or(0);
                             if current_generation != generation {
                                 return;
                             }
-                            view.dispatch(Action::AgentTurnFinished { workspace_id }, view_cx);
+                            view.dispatch(
+                                Action::AgentTurnFinished {
+                                    workspace_id,
+                                    thread_id: key.1,
+                                },
+                                view_cx,
+                            );
                         },
                     );
                 }
@@ -1582,6 +1734,230 @@ impl LubanRootView {
                     .child(Icon::new(IconName::Check))
                     .child(div().text_sm().child(message.to_owned())),
             )
+            .into_any_element()
+    }
+
+    fn render_workspace_thread_tabs(
+        &self,
+        workspace_id: WorkspaceId,
+        active_thread_id: WorkspaceThreadId,
+        view_handle: &gpui::WeakEntity<LubanRootView>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = cx.theme();
+        let Some(tabs) = self.state.workspace_tabs(workspace_id) else {
+            return div().hidden().into_any_element();
+        };
+
+        let mut known_threads = self
+            .state
+            .conversations
+            .keys()
+            .filter_map(|(wid, tid)| (*wid == workspace_id).then_some(*tid))
+            .collect::<Vec<_>>();
+        known_threads.sort_by_key(|id| id.as_u64());
+        known_threads.dedup();
+
+        let open_tabs = tabs.open_tabs.clone();
+        let allow_close = open_tabs.len() > 1;
+
+        let overflow_needed = known_threads.len() > open_tabs.len();
+        let view_handle_for_overflow = view_handle.clone();
+        let overflow_entries = known_threads
+            .iter()
+            .map(|thread_id| {
+                let title = self
+                    .state
+                    .workspace_thread_conversation(workspace_id, *thread_id)
+                    .map(|c| c.title.clone())
+                    .unwrap_or_else(|| format!("Thread {}", thread_id.as_u64()));
+                (*thread_id, title)
+            })
+            .collect::<Vec<_>>();
+
+        let overflow = Popover::new("workspace-thread-tabs-overflow")
+            .appearance(true)
+            .anchor(gpui::Corner::TopLeft)
+            .trigger(
+                Button::new("workspace-thread-tabs-overflow-trigger")
+                    .ghost()
+                    .compact()
+                    .with_size(Size::Small)
+                    .icon(Icon::new(IconName::Ellipsis))
+                    .debug_selector(|| "workspace-thread-tabs-overflow-trigger".to_owned()),
+            )
+            .content(move |_popover_state, _window, cx| {
+                let theme = cx.theme();
+                let popover_handle = cx.entity();
+                let items = overflow_entries.iter().map(|(thread_id, title)| {
+                    let selected = *thread_id == active_thread_id;
+                    let view_handle = view_handle_for_overflow.clone();
+                    let thread_id = *thread_id;
+                    let popover_handle = popover_handle.clone();
+
+                    div()
+                        .h(px(32.0))
+                        .w_full()
+                        .px_2()
+                        .rounded_md()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .cursor_pointer()
+                        .hover(move |s| s.bg(theme.list_hover))
+                        .on_mouse_down(MouseButton::Left, move |_, window, app| {
+                            let _ = view_handle.update(app, |view, cx| {
+                                view.dispatch(
+                                    Action::ActivateWorkspaceThread {
+                                        workspace_id,
+                                        thread_id,
+                                    },
+                                    cx,
+                                );
+                            });
+                            popover_handle.update(app, |state, cx| state.dismiss(window, cx));
+                        })
+                        .child(div().truncate().child(title.clone()))
+                        .when(selected, |s| {
+                            s.child(
+                                Icon::new(IconName::Check)
+                                    .with_size(Size::Small)
+                                    .text_color(theme.muted_foreground),
+                            )
+                        })
+                        .into_any_element()
+                });
+
+                div()
+                    .w(px(280.0))
+                    .p_2()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .children(items)
+                    .into_any_element()
+            });
+
+        let tab_children = open_tabs.iter().enumerate().map(|(idx, thread_id)| {
+            let thread_id = *thread_id;
+            let is_active = thread_id == active_thread_id;
+            let title = self
+                .state
+                .workspace_thread_conversation(workspace_id, thread_id)
+                .map(|c| c.title.clone())
+                .unwrap_or_else(|| format!("Thread {}", thread_id.as_u64()));
+            let running = self
+                .state
+                .workspace_thread_conversation(workspace_id, thread_id)
+                .map(|c| c.run_status == OperationStatus::Running)
+                .unwrap_or(false);
+            let dirty = self
+                .state
+                .workspace_thread_conversation(workspace_id, thread_id)
+                .map(|c| !c.draft.is_empty() || !c.draft_attachments.is_empty())
+                .unwrap_or(false);
+
+            let view_handle_activate = view_handle.clone();
+            let view_handle_close = view_handle.clone();
+            let button_id = format!("workspace-thread-tab-{idx}");
+            let close_id = format!("workspace-thread-tab-close-{idx}");
+
+            div()
+                .id(button_id.clone())
+                .debug_selector(move || button_id.clone())
+                .h(px(28.0))
+                .max_w(px(240.0))
+                .px_2()
+                .rounded_md()
+                .flex()
+                .items_center()
+                .gap_2()
+                .cursor_pointer()
+                .bg(if is_active {
+                    theme.secondary
+                } else {
+                    theme.transparent
+                })
+                .hover({
+                    let hover_bg = theme.secondary_hover;
+                    move |s| s.bg(hover_bg)
+                })
+                .on_mouse_down(MouseButton::Left, move |_, _, app| {
+                    let _ = view_handle_activate.update(app, |view, cx| {
+                        view.dispatch(
+                            Action::ActivateWorkspaceThread {
+                                workspace_id,
+                                thread_id,
+                            },
+                            cx,
+                        );
+                    });
+                })
+                .when(running, |s| {
+                    s.child(Spinner::new().with_size(Size::XSmall).into_any_element())
+                })
+                .when(!running && dirty, |s| {
+                    s.child(
+                        div()
+                            .w(px(6.0))
+                            .h(px(6.0))
+                            .rounded_full()
+                            .bg(theme.muted_foreground),
+                    )
+                })
+                .child(div().flex_1().truncate().child(title))
+                .when(allow_close, |s| {
+                    s.child(
+                        Button::new(close_id.clone())
+                            .ghost()
+                            .compact()
+                            .with_size(Size::Small)
+                            .icon(Icon::new(IconName::Close))
+                            .on_click(move |_, _, app| {
+                                let _ = view_handle_close.update(app, |view, cx| {
+                                    view.dispatch(
+                                        Action::CloseWorkspaceThreadTab {
+                                            workspace_id,
+                                            thread_id,
+                                        },
+                                        cx,
+                                    );
+                                });
+                            })
+                            .into_any_element(),
+                    )
+                })
+                .into_any_element()
+        });
+
+        let view_handle_for_new = view_handle.clone();
+        let new_tab = Button::new("workspace-thread-tab-new")
+            .ghost()
+            .compact()
+            .with_size(Size::Small)
+            .icon(Icon::new(IconName::Plus))
+            .debug_selector(|| "workspace-thread-tab-new".to_owned())
+            .tooltip("New thread")
+            .on_click(move |_, _, app| {
+                let _ = view_handle_for_new.update(app, |view, cx| {
+                    view.dispatch(Action::CreateWorkspaceThread { workspace_id }, cx);
+                });
+            });
+
+        div()
+            .debug_selector(|| "workspace-thread-tabs".to_owned())
+            .h(px(36.0))
+            .w_full()
+            .px_4()
+            .flex()
+            .items_center()
+            .gap_1()
+            .border_b_1()
+            .border_color(theme.border)
+            .bg(theme.background)
+            .children(tab_children)
+            .child(new_tab)
+            .when(overflow_needed, |s| s.child(overflow))
             .into_any_element()
     }
 }
@@ -2059,6 +2435,8 @@ impl LubanRootView {
                 let input_state = self.ensure_chat_input(window, cx);
 
                 let conversation = self.state.workspace_conversation(workspace_id);
+                let thread_id = self.active_thread_id_for_workspace(workspace_id);
+                let chat_key = (workspace_id, thread_id);
                 let entries: &[luban_domain::ConversationEntry] =
                     conversation.map(|c| c.entries.as_slice()).unwrap_or(&[]);
                 let entries_len = conversation.map(|c| c.entries.len()).unwrap_or(0);
@@ -2086,12 +2464,12 @@ impl LubanRootView {
                     .unwrap_or(default_thinking_effort());
 
                 let is_running = run_status == OperationStatus::Running;
-                let workspace_changed = self.last_chat_workspace_id != Some(workspace_id);
-                if workspace_changed {
+                let chat_target_changed = self.last_chat_workspace_id != Some(chat_key);
+                if chat_target_changed {
                     let offset_y10 = self
                         .state
                         .workspace_chat_scroll_y10
-                        .get(&workspace_id)
+                        .get(&(workspace_id, thread_id))
                         .copied()
                         .unwrap_or(0);
                     self.chat_scroll_handle
@@ -2125,20 +2503,20 @@ impl LubanRootView {
                 let composed = compose_user_message_text(&draft_text, &draft_attachments);
                 let pending_context_imports = self
                     .pending_context_imports
-                    .get(&workspace_id)
+                    .get(&chat_key)
                     .copied()
                     .unwrap_or(0);
                 let send_disabled = pending_context_imports > 0 || composed.trim().is_empty();
                 let running_elapsed = if is_running {
                     self.running_turn_started_at
-                        .get(&workspace_id)
+                        .get(&chat_key)
                         .map(|t| t.elapsed())
                 } else {
                     None
                 };
                 let tail_duration = running_elapsed.map(|elapsed| (elapsed, true)).or_else(|| {
                     self.pending_turn_durations
-                        .get(&workspace_id)
+                        .get(&chat_key)
                         .copied()
                         .map(|elapsed| (elapsed, false))
                 });
@@ -2151,22 +2529,15 @@ impl LubanRootView {
                 let running_turn_summary_items: Vec<&CodexThreadItem> = if force_expand_current_turn
                 {
                     let turn_count = agent_turn_count(entries);
-                    if self
-                        .running_turn_user_message_count
-                        .get(&workspace_id)
-                        .copied()
+                    if self.running_turn_user_message_count.get(&chat_key).copied()
                         != Some(turn_count)
                     {
                         self.running_turn_user_message_count
-                            .insert(workspace_id, turn_count);
-                        self.running_turn_summary_order
-                            .insert(workspace_id, Vec::new());
+                            .insert(chat_key, turn_count);
+                        self.running_turn_summary_order.insert(chat_key, Vec::new());
                     }
 
-                    let order = self
-                        .running_turn_summary_order
-                        .entry(workspace_id)
-                        .or_default();
+                    let order = self.running_turn_summary_order.entry(chat_key).or_default();
 
                     if let Some(conversation) = conversation {
                         for id in conversation.in_progress_order.iter() {
@@ -2220,8 +2591,8 @@ impl LubanRootView {
                     }
                     items
                 } else {
-                    self.running_turn_user_message_count.remove(&workspace_id);
-                    self.running_turn_summary_order.remove(&workspace_id);
+                    self.running_turn_user_message_count.remove(&chat_key);
+                    self.running_turn_summary_order.remove(&chat_key);
                     Vec::new()
                 };
 
@@ -2235,7 +2606,7 @@ impl LubanRootView {
                     &running_turn_summary_items,
                     force_expand_current_turn,
                 );
-                self.last_chat_workspace_id = Some(workspace_id);
+                self.last_chat_workspace_id = Some(chat_key);
                 self.last_chat_item_count = entries_len;
 
                 let debug_layout_enabled = self.debug_layout_enabled;
@@ -2335,6 +2706,7 @@ impl LubanRootView {
                                                     view.dispatch(
                                                         Action::ResumeQueuedPrompts {
                                                             workspace_id,
+                                                            thread_id,
                                                         },
                                                         cx,
                                                     );
@@ -2378,6 +2750,7 @@ impl LubanRootView {
                                                                 view.dispatch(
                                                                     Action::ClearQueuedPrompts {
                                                                         workspace_id,
+                                                                        thread_id,
                                                                     },
                                                                     view_cx,
                                                                 );
@@ -2441,6 +2814,7 @@ impl LubanRootView {
                                                     view.dispatch(
                                                         Action::ChatDraftAttachmentRemoved {
                                                             workspace_id,
+                                                            thread_id,
                                                             id,
                                                         },
                                                         cx,
@@ -2449,6 +2823,7 @@ impl LubanRootView {
                                                 view.dispatch(
                                                     Action::ChatDraftChanged {
                                                         workspace_id,
+                                                        thread_id,
                                                         text: draft_text.clone(),
                                                     },
                                                     cx,
@@ -2458,6 +2833,7 @@ impl LubanRootView {
                                                     view.dispatch(
                                                         Action::ChatDraftAttachmentAdded {
                                                             workspace_id,
+                                                            thread_id,
                                                             id,
                                                             kind,
                                                             anchor,
@@ -2467,6 +2843,7 @@ impl LubanRootView {
                                                     view.dispatch(
                                                         Action::ChatDraftAttachmentResolved {
                                                             workspace_id,
+                                                            thread_id,
                                                             id,
                                                             path,
                                                         },
@@ -2476,6 +2853,7 @@ impl LubanRootView {
                                                 view.dispatch(
                                                     Action::RemoveQueuedPrompt {
                                                         workspace_id,
+                                                        thread_id,
                                                         index: idx,
                                                     },
                                                     cx,
@@ -2495,6 +2873,7 @@ impl LubanRootView {
                                                     view.dispatch(
                                                         Action::RemoveQueuedPrompt {
                                                             workspace_id,
+                                                            thread_id,
                                                             index: idx,
                                                         },
                                                         cx,
@@ -2573,6 +2952,7 @@ impl LubanRootView {
                                             view.dispatch(
                                                 Action::ChatDraftChanged {
                                                     workspace_id,
+                                                    thread_id,
                                                     text: draft_text.to_string(),
                                                 },
                                                 cx,
@@ -2594,6 +2974,7 @@ impl LubanRootView {
                                                 view.dispatch(
                                                     Action::ChatDraftAttachmentAdded {
                                                         workspace_id,
+                                                        thread_id,
                                                         id,
                                                         kind,
                                                         anchor,
@@ -2602,6 +2983,7 @@ impl LubanRootView {
                                                 );
                                                 view.enqueue_context_import(
                                                     workspace_id,
+                                                    thread_id,
                                                     id,
                                                     kind,
                                                     spec,
@@ -2650,6 +3032,7 @@ impl LubanRootView {
                                             view.dispatch(
                                                 Action::ChatDraftChanged {
                                                     workspace_id,
+                                                    thread_id,
                                                     text: draft_text.to_string(),
                                                 },
                                                 cx,
@@ -2659,6 +3042,7 @@ impl LubanRootView {
                                                         view.dispatch(
                                                             Action::ChatDraftAttachmentAdded {
                                                                 workspace_id,
+                                                                thread_id,
                                                                 id,
                                                                 kind: luban_domain::ContextTokenKind::File,
                                                                 anchor,
@@ -2667,6 +3051,7 @@ impl LubanRootView {
                                                         );
                                                         view.enqueue_context_import(
                                                             workspace_id,
+                                                            thread_id,
                                                             id,
                                                             luban_domain::ContextTokenKind::File,
                                                             spec,
@@ -2700,6 +3085,7 @@ impl LubanRootView {
 	                                            .when_some(
 	                                                chat_composer_attachments_row(
 	                                                    workspace_id,
+	                                                    thread_id,
 	                                                    &draft_attachments,
 	                                                    &view_handle,
 	                                                    theme,
@@ -2762,6 +3148,7 @@ impl LubanRootView {
                                                                             view.dispatch(
                                                                                 Action::ChatModelChanged {
                                                                                     workspace_id,
+                                                                                    thread_id,
                                                                                     model_id: model_id.clone(),
                                                                                 },
                                                                                 cx,
@@ -2832,6 +3219,7 @@ impl LubanRootView {
                                                                                     view.dispatch(
                                                                                         Action::ThinkingEffortChanged {
                                                                                             workspace_id,
+                                                                                            thread_id,
                                                                                             thinking_effort: effort,
                                                                                         },
                                                                                         cx,
@@ -2895,6 +3283,7 @@ impl LubanRootView {
                                                                             view.dispatch(
                                                                                 Action::SendAgentMessage {
                                                                                     workspace_id,
+                                                                                    thread_id,
                                                                                     text: composed.clone(),
                                                                                 },
                                                                                 cx,
@@ -2914,10 +3303,13 @@ impl LubanRootView {
                                                                 .tooltip("Cancel")
                                                                 .on_click(move |_, _, app| {
                                                                     let _ = view_handle.update(app, |view, cx| {
-                                                                        view.dispatch(
-                                                                            Action::CancelAgentTurn { workspace_id },
-                                                                            cx,
-                                                                        );
+                                                                            view.dispatch(
+                                                                                Action::CancelAgentTurn {
+                                                                                    workspace_id,
+                                                                                    thread_id,
+                                                                                },
+                                                                                cx,
+                                                                            );
                                                                     });
                                                                 }),
                                                         )
@@ -2963,6 +3355,12 @@ impl LubanRootView {
                         .flex_1()
                         .flex()
                         .flex_col()
+                        .child(self.render_workspace_thread_tabs(
+                            workspace_id,
+                            thread_id,
+                            &view_handle,
+                            cx,
+                        ))
                         .child(history)
                         .child(composer),
                 )
@@ -4533,6 +4931,14 @@ mod tests {
             .id
     }
 
+    fn default_thread_id() -> WorkspaceThreadId {
+        WorkspaceThreadId::from_u64(1)
+    }
+
+    fn thread_key(workspace_id: WorkspaceId) -> (WorkspaceId, WorkspaceThreadId) {
+        (workspace_id, default_thread_id())
+    }
+
     #[test]
     fn agent_turn_summary_uses_thinking_label_and_omits_messages() {
         let summary = format_agent_turn_summary(TurnSummaryCounts {
@@ -4626,6 +5032,9 @@ mod tests {
                 sidebar_width: None,
                 terminal_pane_width: None,
                 last_open_workspace_id: None,
+                workspace_active_thread_id: HashMap::new(),
+                workspace_open_tabs: HashMap::new(),
+                workspace_next_thread_id: HashMap::new(),
                 workspace_chat_scroll_y10: HashMap::new(),
             })
         }
@@ -4662,14 +5071,24 @@ mod tests {
             &self,
             _project_slug: String,
             _workspace_name: String,
+            _thread_id: u64,
         ) -> Result<(), String> {
             Ok(())
+        }
+
+        fn list_conversation_threads(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+        ) -> Result<Vec<luban_domain::ConversationThreadMeta>, String> {
+            Ok(Vec::new())
         }
 
         fn load_conversation(
             &self,
             _project_slug: String,
             _workspace_name: String,
+            _thread_id: u64,
         ) -> Result<ConversationSnapshot, String> {
             Ok(ConversationSnapshot {
                 thread_id: None,
@@ -4976,7 +5395,7 @@ mod tests {
             let mut view = LubanRootView::with_state(services, state, cx);
             view.terminal_enabled = true;
             view.workspace_terminal_errors
-                .insert(workspace_id, "stub terminal".to_owned());
+                .insert(thread_key(workspace_id), "stub terminal".to_owned());
             view
         });
         window_cx.simulate_resize(size(px(900.0), px(240.0)));
@@ -5161,6 +5580,52 @@ mod tests {
     }
 
     #[gpui::test]
+    async fn workspace_thread_tabs_render_max_three_and_overflow(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "abandon-about".to_owned(),
+            branch_name: "luban/abandon-about".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+        });
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
+        state.apply(Action::OpenWorkspace { workspace_id });
+        for _ in 0..3 {
+            state.apply(Action::CreateWorkspaceThread { workspace_id });
+        }
+
+        let (_view, window_cx) =
+            cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+        window_cx.simulate_resize(size(px(900.0), px(320.0)));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        assert!(
+            window_cx.debug_bounds("workspace-thread-tabs").is_some(),
+            "missing workspace thread tab strip"
+        );
+        assert!(window_cx.debug_bounds("workspace-thread-tab-0").is_some());
+        assert!(window_cx.debug_bounds("workspace-thread-tab-1").is_some());
+        assert!(window_cx.debug_bounds("workspace-thread-tab-2").is_some());
+        assert!(window_cx.debug_bounds("workspace-thread-tab-3").is_none());
+        assert!(
+            window_cx
+                .debug_bounds("workspace-thread-tabs-overflow-trigger")
+                .is_some(),
+            "missing overflow trigger"
+        );
+        assert!(window_cx.debug_bounds("workspace-thread-tab-new").is_some());
+    }
+
+    #[gpui::test]
     async fn clicking_project_header_toggles_expanded(cx: &mut gpui::TestAppContext) {
         cx.update(gpui_component::init);
 
@@ -5332,6 +5797,7 @@ mod tests {
         state.main_pane = MainPane::Workspace(workspace_id);
         state.apply(Action::ConversationLoaded {
             workspace_id,
+            thread_id: default_thread_id(),
             snapshot: ConversationSnapshot {
                 thread_id: Some("thread-1".to_owned()),
                 entries: vec![
@@ -5380,6 +5846,7 @@ mod tests {
         state.main_pane = MainPane::Workspace(workspace_id);
         state.apply(Action::ConversationLoaded {
             workspace_id,
+            thread_id: default_thread_id(),
             snapshot: ConversationSnapshot {
                 thread_id: Some("thread-1".to_owned()),
                 entries: vec![
@@ -5442,6 +5909,7 @@ mod tests {
         state.main_pane = MainPane::Workspace(workspace_id);
         state.apply(Action::ConversationLoaded {
             workspace_id,
+            thread_id: default_thread_id(),
             snapshot: ConversationSnapshot {
                 thread_id: Some("thread-1".to_owned()),
                 entries: vec![
@@ -5504,6 +5972,7 @@ mod tests {
         state.main_pane = MainPane::Workspace(workspace_id);
         state.apply(Action::ConversationLoaded {
             workspace_id,
+            thread_id: default_thread_id(),
             snapshot: ConversationSnapshot {
                 thread_id: Some("thread-1".to_owned()),
                 entries: vec![
@@ -5572,10 +6041,12 @@ mod tests {
 
         state.apply(Action::SendAgentMessage {
             workspace_id,
+            thread_id: default_thread_id(),
             text: "Test".to_owned(),
         });
         state.apply(Action::AgentEventReceived {
             workspace_id,
+            thread_id: default_thread_id(),
             event: CodexThreadEvent::ItemStarted {
                 item: CodexThreadItem::Reasoning {
                     id: "item-1".to_owned(),
@@ -5640,10 +6111,12 @@ mod tests {
 
         state.apply(Action::SendAgentMessage {
             workspace_id,
+            thread_id: default_thread_id(),
             text: "Test".to_owned(),
         });
         state.apply(Action::AgentEventReceived {
             workspace_id,
+            thread_id: default_thread_id(),
             event: CodexThreadEvent::ItemStarted {
                 item: CodexThreadItem::Reasoning {
                     id: "item-1".to_owned(),
@@ -5664,6 +6137,7 @@ mod tests {
             view.dispatch(
                 Action::AgentEventReceived {
                     workspace_id,
+                    thread_id: default_thread_id(),
                     event: CodexThreadEvent::ItemCompleted {
                         item: CodexThreadItem::Reasoning {
                             id: "item-1".to_owned(),
@@ -5703,6 +6177,7 @@ mod tests {
 
         state.apply(Action::SendAgentMessage {
             workspace_id,
+            thread_id: default_thread_id(),
             text: "Test".to_owned(),
         });
 
@@ -5717,6 +6192,7 @@ mod tests {
             view.dispatch(
                 Action::AgentEventReceived {
                     workspace_id,
+                    thread_id: default_thread_id(),
                     event: CodexThreadEvent::TurnCompleted {
                         usage: luban_domain::CodexUsage {
                             input_tokens: 0,
@@ -5768,6 +6244,7 @@ mod tests {
         state.main_pane = MainPane::Workspace(workspace_id);
         state.apply(Action::ConversationLoaded {
             workspace_id,
+            thread_id: default_thread_id(),
             snapshot: ConversationSnapshot {
                 thread_id: Some("thread-1".to_owned()),
                 entries: vec![
@@ -5830,6 +6307,7 @@ mod tests {
 
         state.apply(Action::ConversationLoaded {
             workspace_id,
+            thread_id: default_thread_id(),
             snapshot: ConversationSnapshot {
                 thread_id: None,
                 entries: vec![ConversationEntry::UserMessage {
@@ -5880,6 +6358,7 @@ mod tests {
             .join(" ");
         state.apply(Action::ConversationLoaded {
             workspace_id,
+            thread_id: default_thread_id(),
             snapshot: ConversationSnapshot {
                 thread_id: Some("thread-1".to_owned()),
                 entries: vec![ConversationEntry::UserMessage { text: long_text }],
@@ -5947,6 +6426,7 @@ mod tests {
         let message = "select me".to_owned();
         state.apply(Action::ConversationLoaded {
             workspace_id,
+            thread_id: default_thread_id(),
             snapshot: ConversationSnapshot {
                 thread_id: Some("thread-1".to_owned()),
                 entries: vec![ConversationEntry::UserMessage {
@@ -6001,6 +6481,7 @@ mod tests {
         state.main_pane = MainPane::Workspace(workspace_id);
         state.apply(Action::ConversationLoaded {
             workspace_id,
+            thread_id: default_thread_id(),
             snapshot: ConversationSnapshot {
                 thread_id: Some("thread-1".to_owned()),
                 entries: vec![ConversationEntry::UserMessage {
@@ -6041,6 +6522,7 @@ mod tests {
         state.main_pane = MainPane::Workspace(workspace_id);
         state.apply(Action::ConversationLoaded {
             workspace_id,
+            thread_id: default_thread_id(),
             snapshot: ConversationSnapshot {
                 thread_id: Some("thread-1".to_owned()),
                 entries: vec![ConversationEntry::UserMessage {
@@ -6112,6 +6594,7 @@ mod tests {
         state.main_pane = MainPane::Workspace(workspace_id);
         state.apply(Action::ConversationLoaded {
             workspace_id,
+            thread_id: default_thread_id(),
             snapshot: ConversationSnapshot {
                 thread_id: Some("thread-1".to_owned()),
                 entries: vec![ConversationEntry::UserMessage {
@@ -6122,29 +6605,34 @@ mod tests {
 
         state.apply(Action::ChatDraftAttachmentAdded {
             workspace_id,
+            thread_id: default_thread_id(),
             id: 1,
             kind: luban_domain::ContextTokenKind::Image,
             anchor: 8,
         });
         state.apply(Action::ChatDraftAttachmentResolved {
             workspace_id,
+            thread_id: default_thread_id(),
             id: 1,
             path: PathBuf::from("/tmp/missing.png"),
         });
         state.apply(Action::ChatDraftAttachmentAdded {
             workspace_id,
+            thread_id: default_thread_id(),
             id: 2,
             kind: luban_domain::ContextTokenKind::Text,
             anchor: 0,
         });
         state.apply(Action::ChatDraftAttachmentResolved {
             workspace_id,
+            thread_id: default_thread_id(),
             id: 2,
             path: PathBuf::from("/tmp/missing.txt"),
         });
 
         state.apply(Action::ChatDraftChanged {
             workspace_id,
+            thread_id: default_thread_id(),
             text: "Hello world".to_owned(),
         });
 
@@ -6231,6 +6719,7 @@ mod tests {
         state.main_pane = MainPane::Workspace(workspace_id);
         state.apply(Action::ConversationLoaded {
             workspace_id,
+            thread_id: default_thread_id(),
             snapshot: ConversationSnapshot {
                 thread_id: Some("thread-1".to_owned()),
                 entries: Vec::new(),
@@ -6238,28 +6727,33 @@ mod tests {
         });
         state.apply(Action::ChatDraftAttachmentAdded {
             workspace_id,
+            thread_id: default_thread_id(),
             id: 1,
             kind: luban_domain::ContextTokenKind::Image,
             anchor: 0,
         });
         state.apply(Action::ChatDraftAttachmentResolved {
             workspace_id,
+            thread_id: default_thread_id(),
             id: 1,
             path: PathBuf::from("/tmp/a.png"),
         });
         state.apply(Action::ChatDraftAttachmentAdded {
             workspace_id,
+            thread_id: default_thread_id(),
             id: 2,
             kind: luban_domain::ContextTokenKind::Text,
             anchor: 0,
         });
         state.apply(Action::ChatDraftAttachmentResolved {
             workspace_id,
+            thread_id: default_thread_id(),
             id: 2,
             path: PathBuf::from("/tmp/b.txt"),
         });
         state.apply(Action::ChatDraftChanged {
             workspace_id,
+            thread_id: default_thread_id(),
             text: String::new(),
         });
 
@@ -6348,6 +6842,7 @@ mod tests {
         state.main_pane = MainPane::Workspace(workspace_id);
         state.apply(Action::ConversationLoaded {
             workspace_id,
+            thread_id: default_thread_id(),
             snapshot: ConversationSnapshot {
                 thread_id: Some("thread-1".to_owned()),
                 entries: Vec::new(),
@@ -6355,16 +6850,19 @@ mod tests {
         });
         state.apply(Action::ChatDraftChanged {
             workspace_id,
+            thread_id: default_thread_id(),
             text: "HelloWorld".to_owned(),
         });
         state.apply(Action::ChatDraftAttachmentAdded {
             workspace_id,
+            thread_id: default_thread_id(),
             id: 1,
             kind: luban_domain::ContextTokenKind::Image,
             anchor: 5,
         });
         state.apply(Action::ChatDraftAttachmentResolved {
             workspace_id,
+            thread_id: default_thread_id(),
             id: 1,
             path: PathBuf::from("/tmp/a.png"),
         });
@@ -6434,6 +6932,7 @@ mod tests {
 
         state.apply(Action::ConversationLoaded {
             workspace_id,
+            thread_id: default_thread_id(),
             snapshot: ConversationSnapshot {
                 thread_id: Some("thread-1".to_owned()),
                 entries: vec![ConversationEntry::UserMessage {
@@ -6505,6 +7004,7 @@ mod tests {
 
         state.apply(Action::ConversationLoaded {
             workspace_id,
+            thread_id: default_thread_id(),
             snapshot: ConversationSnapshot {
                 thread_id: Some("thread-1".to_owned()),
                 entries,
@@ -6570,6 +7070,7 @@ mod tests {
 
         state.apply(Action::ConversationLoaded {
             workspace_id,
+            thread_id: default_thread_id(),
             snapshot: ConversationSnapshot {
                 thread_id: Some("thread-1".to_owned()),
                 entries,
@@ -6614,7 +7115,7 @@ mod tests {
         let saved_offset_y10 = view.read_with(window_cx, |v, _| {
             v.debug_state()
                 .workspace_chat_scroll_y10
-                .get(&workspace_id)
+                .get(&thread_key(workspace_id))
                 .copied()
         });
         assert_eq!(saved_offset_y10, Some(current_offset_y10));
@@ -6674,6 +7175,7 @@ mod tests {
 
         state.apply(Action::ConversationLoaded {
             workspace_id,
+            thread_id: default_thread_id(),
             snapshot: ConversationSnapshot {
                 thread_id: Some("thread-1".to_owned()),
                 entries,
@@ -6684,7 +7186,7 @@ mod tests {
             let mut view = LubanRootView::with_state(services, state, cx);
             view.terminal_enabled = true;
             view.workspace_terminal_errors
-                .insert(workspace_id, "stub terminal".to_owned());
+                .insert(thread_key(workspace_id), "stub terminal".to_owned());
             view
         });
 
@@ -6955,7 +7457,7 @@ mod tests {
         let last_workspace = view.read_with(window_cx, |v, _| v.last_chat_workspace_id);
         assert_eq!(
             last_workspace,
-            Some(w1),
+            Some(thread_key(w1)),
             "expected last chat workspace to be set after rendering a workspace"
         );
 
@@ -7027,6 +7529,7 @@ mod tests {
 
         state.apply(Action::ConversationLoaded {
             workspace_id: w1,
+            thread_id: default_thread_id(),
             snapshot: ConversationSnapshot {
                 thread_id: Some("thread-1".to_owned()),
                 entries: vec![
@@ -7135,6 +7638,7 @@ mod tests {
         let w1 = workspace_id_by_name(&state, "w1");
         state.apply(Action::ConversationLoaded {
             workspace_id: w1,
+            thread_id: default_thread_id(),
             snapshot: ConversationSnapshot {
                 thread_id: Some("thread-1".to_owned()),
                 entries: vec![ConversationEntry::UserMessage {
@@ -7214,6 +7718,7 @@ mod tests {
         let w1 = workspace_id_by_name(&state, "w1");
         state.apply(Action::ConversationLoaded {
             workspace_id: w1,
+            thread_id: default_thread_id(),
             snapshot: ConversationSnapshot {
                 thread_id: Some("thread-1".to_owned()),
                 entries: vec![ConversationEntry::UserMessage {
@@ -7343,6 +7848,7 @@ mod tests {
         let w1 = workspace_id_by_name(&state, "w1");
         state.apply(Action::ConversationLoaded {
             workspace_id: w1,
+            thread_id: default_thread_id(),
             snapshot: ConversationSnapshot {
                 thread_id: Some("thread-1".to_owned()),
                 entries: vec![ConversationEntry::UserMessage {
@@ -7530,6 +8036,7 @@ mod tests {
 
         state.apply(Action::ConversationLoaded {
             workspace_id,
+            thread_id: default_thread_id(),
             snapshot: ConversationSnapshot {
                 thread_id: Some("thread-1".to_owned()),
                 entries: vec![ConversationEntry::UserMessage {
@@ -7542,7 +8049,7 @@ mod tests {
             let mut view = LubanRootView::with_state(services, state, cx);
             view.terminal_enabled = true;
             view.workspace_terminal_errors
-                .insert(workspace_id, "stub terminal".to_owned());
+                .insert(thread_key(workspace_id), "stub terminal".to_owned());
             view
         });
 
@@ -7603,6 +8110,7 @@ mod tests {
 
         state.apply(Action::ConversationLoaded {
             workspace_id,
+            thread_id: default_thread_id(),
             snapshot: ConversationSnapshot {
                 thread_id: Some("thread-1".to_owned()),
                 entries: vec![ConversationEntry::UserMessage {
@@ -7615,7 +8123,7 @@ mod tests {
             let mut view = LubanRootView::with_state(services, state, cx);
             view.terminal_enabled = true;
             view.workspace_terminal_errors
-                .insert(workspace_id, "stub terminal".to_owned());
+                .insert(thread_key(workspace_id), "stub terminal".to_owned());
             view
         });
 
@@ -7656,6 +8164,7 @@ mod tests {
 
         state.apply(Action::ConversationLoaded {
             workspace_id,
+            thread_id: default_thread_id(),
             snapshot: ConversationSnapshot {
                 thread_id: Some("thread-1".to_owned()),
                 entries: vec![ConversationEntry::UserMessage {
@@ -7668,7 +8177,7 @@ mod tests {
             let mut view = LubanRootView::with_state(services, state, cx);
             view.terminal_enabled = true;
             view.workspace_terminal_errors
-                .insert(workspace_id, "stub terminal".to_owned());
+                .insert(thread_key(workspace_id), "stub terminal".to_owned());
             view
         });
 
@@ -7759,9 +8268,8 @@ mod tests {
         }
 
         let initial_closed = view.read_with(window_cx, |view, _| {
-            view.workspace_terminals
-                .get(&workspace_id)
-                .map(|t| t.is_closed())
+            let key = thread_key(workspace_id);
+            view.workspace_terminals.get(&key).map(|t| t.is_closed())
         });
         assert_eq!(
             initial_closed,
@@ -7771,7 +8279,8 @@ mod tests {
 
         window_cx.update(|_, app| {
             view.update(app, |view, cx| {
-                if let Some(terminal) = view.workspace_terminals.get_mut(&workspace_id) {
+                let key = thread_key(workspace_id);
+                if let Some(terminal) = view.workspace_terminals.get_mut(&key) {
                     terminal.kill();
                 }
                 cx.notify();
@@ -7784,9 +8293,8 @@ mod tests {
         }
 
         let after_closed = view.read_with(window_cx, |view, _| {
-            view.workspace_terminals
-                .get(&workspace_id)
-                .map(|t| t.is_closed())
+            let key = thread_key(workspace_id);
+            view.workspace_terminals.get(&key).map(|t| t.is_closed())
         });
         assert_eq!(
             after_closed,
@@ -7795,7 +8303,9 @@ mod tests {
         );
         assert!(
             view.read_with(window_cx, |view, _| {
-                !view.workspace_terminal_errors.contains_key(&workspace_id)
+                !view
+                    .workspace_terminal_errors
+                    .contains_key(&thread_key(workspace_id))
             }),
             "expected terminal to reinitialize without errors"
         );
@@ -7950,7 +8460,7 @@ mod tests {
             let mut view = LubanRootView::with_state(services, state, cx);
             view.terminal_enabled = true;
             view.workspace_terminal_errors
-                .insert(workspace_id, "stub terminal".to_owned());
+                .insert(thread_key(workspace_id), "stub terminal".to_owned());
             view
         });
 
@@ -8006,6 +8516,7 @@ mod tests {
 
         state.apply(Action::ConversationLoaded {
             workspace_id,
+            thread_id: default_thread_id(),
             snapshot: ConversationSnapshot {
                 thread_id: Some("thread-1".to_owned()),
                 entries: vec![ConversationEntry::UserMessage {
@@ -8048,10 +8559,12 @@ mod tests {
 
         state.apply(Action::SendAgentMessage {
             workspace_id,
+            thread_id: default_thread_id(),
             text: "Test".to_owned(),
         });
         state.apply(Action::AgentEventReceived {
             workspace_id,
+            thread_id: default_thread_id(),
             event: CodexThreadEvent::ItemStarted {
                 item: CodexThreadItem::Reasoning {
                     id: "item-1".to_owned(),
@@ -8115,6 +8628,7 @@ mod tests {
 
         state.apply(Action::ConversationLoaded {
             workspace_id,
+            thread_id: default_thread_id(),
             snapshot: ConversationSnapshot {
                 thread_id: Some("thread-1".to_owned()),
                 entries: vec![
@@ -8195,6 +8709,7 @@ mod tests {
         state.main_pane = MainPane::Workspace(workspace_id);
         state.apply(Action::ConversationLoaded {
             workspace_id,
+            thread_id: default_thread_id(),
             snapshot: ConversationSnapshot {
                 thread_id: Some("thread-1".to_owned()),
                 entries: vec![
@@ -8243,6 +8758,7 @@ mod tests {
         state.main_pane = MainPane::Workspace(workspace_id);
         state.apply(Action::ConversationLoaded {
             workspace_id,
+            thread_id: default_thread_id(),
             snapshot: ConversationSnapshot {
                 thread_id: Some("thread-1".to_owned()),
                 entries: vec![ConversationEntry::UserMessage {
@@ -8256,7 +8772,7 @@ mod tests {
 
         view.update(window_cx, |v, cx| {
             v.pending_turn_durations
-                .insert(workspace_id, Duration::from_millis(1234));
+                .insert(thread_key(workspace_id), Duration::from_millis(1234));
             cx.notify();
         });
         window_cx.refresh().unwrap();
@@ -8290,6 +8806,7 @@ mod tests {
         state.main_pane = MainPane::Workspace(workspace_id);
         state.apply(Action::ConversationLoaded {
             workspace_id,
+            thread_id: default_thread_id(),
             snapshot: ConversationSnapshot {
                 thread_id: Some("thread-1".to_owned()),
                 entries: vec![
@@ -8352,6 +8869,7 @@ mod tests {
         state.main_pane = MainPane::Workspace(workspace_id);
         state.apply(Action::ConversationLoaded {
             workspace_id,
+            thread_id: default_thread_id(),
             snapshot: ConversationSnapshot {
                 thread_id: Some("thread-1".to_owned()),
                 entries: vec![
@@ -8414,10 +8932,12 @@ mod tests {
 
         state.apply(Action::ChatDraftChanged {
             workspace_id: w1,
+            thread_id: default_thread_id(),
             text: "draft-1".to_owned(),
         });
         state.apply(Action::ChatDraftChanged {
             workspace_id: w2,
+            thread_id: default_thread_id(),
             text: "draft-2".to_owned(),
         });
         state.main_pane = MainPane::Workspace(w1);
@@ -8502,10 +9022,12 @@ mod tests {
 
         state.apply(Action::ChatDraftChanged {
             workspace_id: w1,
+            thread_id: default_thread_id(),
             text: "draft-1".to_owned(),
         });
         state.apply(Action::ChatDraftChanged {
             workspace_id: w2,
+            thread_id: default_thread_id(),
             text: "draft-2".to_owned(),
         });
         state.main_pane = MainPane::Workspace(w1);
@@ -8557,6 +9079,9 @@ mod tests {
                 sidebar_width: None,
                 terminal_pane_width: None,
                 last_open_workspace_id: None,
+                workspace_active_thread_id: HashMap::new(),
+                workspace_open_tabs: HashMap::new(),
+                workspace_next_thread_id: HashMap::new(),
                 workspace_chat_scroll_y10: HashMap::new(),
             })
         }
@@ -8593,14 +9118,24 @@ mod tests {
             &self,
             _project_slug: String,
             _workspace_name: String,
+            _thread_id: u64,
         ) -> Result<(), String> {
             Ok(())
+        }
+
+        fn list_conversation_threads(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+        ) -> Result<Vec<luban_domain::ConversationThreadMeta>, String> {
+            Ok(Vec::new())
         }
 
         fn load_conversation(
             &self,
             _project_slug: String,
             _workspace_name: String,
+            _thread_id: u64,
         ) -> Result<ConversationSnapshot, String> {
             Ok(ConversationSnapshot {
                 thread_id: None,

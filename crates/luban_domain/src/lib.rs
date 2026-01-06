@@ -30,6 +30,19 @@ pub struct ProjectId(u64);
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct WorkspaceId(u64);
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub struct WorkspaceThreadId(u64);
+
+impl WorkspaceThreadId {
+    pub fn as_u64(self) -> u64 {
+        self.0
+    }
+
+    pub fn from_u64(id: u64) -> Self {
+        Self(id)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MainPane {
     None,
@@ -278,7 +291,17 @@ pub struct ConversationSnapshot {
 }
 
 #[derive(Clone, Debug)]
+pub struct ConversationThreadMeta {
+    pub thread_id: WorkspaceThreadId,
+    pub remote_thread_id: Option<String>,
+    pub title: String,
+    pub updated_at_unix_seconds: u64,
+}
+
+#[derive(Clone, Debug)]
 pub struct WorkspaceConversation {
+    pub local_thread_id: WorkspaceThreadId,
+    pub title: String,
     pub thread_id: Option<String>,
     pub draft: String,
     pub draft_attachments: Vec<DraftAttachment>,
@@ -290,6 +313,70 @@ pub struct WorkspaceConversation {
     pub in_progress_order: VecDeque<String>,
     pub pending_prompts: VecDeque<QueuedPrompt>,
     pub queue_paused: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct WorkspaceTabs {
+    pub open_tabs: Vec<WorkspaceThreadId>,
+    pub active_tab: WorkspaceThreadId,
+    pub lru: VecDeque<WorkspaceThreadId>,
+    pub next_thread_id: u64,
+}
+
+impl WorkspaceTabs {
+    pub const MAX_VISIBLE_TABS: usize = 3;
+
+    pub fn new_with_initial(thread_id: WorkspaceThreadId) -> Self {
+        Self {
+            open_tabs: vec![thread_id],
+            active_tab: thread_id,
+            lru: VecDeque::from([thread_id]),
+            next_thread_id: thread_id.0 + 1,
+        }
+    }
+
+    pub fn activate(&mut self, thread_id: WorkspaceThreadId) {
+        self.active_tab = thread_id;
+        self.touch(thread_id);
+        self.ensure_visible(thread_id);
+    }
+
+    pub fn close_tab(&mut self, thread_id: WorkspaceThreadId) {
+        self.open_tabs.retain(|id| *id != thread_id);
+        self.lru.retain(|id| *id != thread_id);
+        if self.active_tab == thread_id
+            && let Some(next) = self
+                .open_tabs
+                .first()
+                .copied()
+                .or_else(|| self.lru.front().copied())
+        {
+            self.active_tab = next;
+        }
+    }
+
+    pub fn allocate_thread_id(&mut self) -> WorkspaceThreadId {
+        let id = WorkspaceThreadId(self.next_thread_id);
+        self.next_thread_id += 1;
+        id
+    }
+
+    fn touch(&mut self, thread_id: WorkspaceThreadId) {
+        self.lru.retain(|id| *id != thread_id);
+        self.lru.push_front(thread_id);
+    }
+
+    fn ensure_visible(&mut self, thread_id: WorkspaceThreadId) {
+        if !self.open_tabs.contains(&thread_id) {
+            self.open_tabs.insert(0, thread_id);
+        } else {
+            self.open_tabs.retain(|id| *id != thread_id);
+            self.open_tabs.insert(0, thread_id);
+        }
+        if self.open_tabs.len() > Self::MAX_VISIBLE_TABS {
+            self.open_tabs.truncate(Self::MAX_VISIBLE_TABS);
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -386,11 +473,12 @@ pub struct AppState {
     pub right_pane: RightPane,
     pub sidebar_width: Option<u16>,
     pub terminal_pane_width: Option<u16>,
-    pub conversations: HashMap<WorkspaceId, WorkspaceConversation>,
+    pub conversations: HashMap<(WorkspaceId, WorkspaceThreadId), WorkspaceConversation>,
+    pub workspace_tabs: HashMap<WorkspaceId, WorkspaceTabs>,
     pub dashboard_preview_workspace_id: Option<WorkspaceId>,
     pub last_open_workspace_id: Option<WorkspaceId>,
     pub last_error: Option<String>,
-    pub workspace_chat_scroll_y10: HashMap<WorkspaceId, i32>,
+    pub workspace_chat_scroll_y10: HashMap<(WorkspaceId, WorkspaceThreadId), i32>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -399,7 +487,10 @@ pub struct PersistedAppState {
     pub sidebar_width: Option<u16>,
     pub terminal_pane_width: Option<u16>,
     pub last_open_workspace_id: Option<u64>,
-    pub workspace_chat_scroll_y10: HashMap<u64, i32>,
+    pub workspace_active_thread_id: HashMap<u64, u64>,
+    pub workspace_open_tabs: HashMap<u64, Vec<u64>>,
+    pub workspace_next_thread_id: HashMap<u64, u64>,
+    pub workspace_chat_scroll_y10: HashMap<(u64, u64), i32>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -478,66 +569,103 @@ pub enum Action {
 
     ConversationLoaded {
         workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
         snapshot: ConversationSnapshot,
     },
     ConversationLoadFailed {
         workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
         message: String,
     },
     SendAgentMessage {
         workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
         text: String,
     },
     ChatModelChanged {
         workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
         model_id: String,
     },
     ThinkingEffortChanged {
         workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
         thinking_effort: ThinkingEffort,
     },
     ChatDraftChanged {
         workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
         text: String,
     },
     ChatDraftAttachmentAdded {
         workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
         id: u64,
         kind: ContextTokenKind,
         anchor: usize,
     },
     ChatDraftAttachmentResolved {
         workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
         id: u64,
         path: PathBuf,
     },
     ChatDraftAttachmentFailed {
         workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
         id: u64,
     },
     ChatDraftAttachmentRemoved {
         workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
         id: u64,
     },
     RemoveQueuedPrompt {
         workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
         index: usize,
     },
     ClearQueuedPrompts {
         workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
     },
     ResumeQueuedPrompts {
         workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
     },
     AgentEventReceived {
         workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
         event: CodexThreadEvent,
     },
     AgentTurnFinished {
         workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
     },
     CancelAgentTurn {
         workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
+    },
+
+    CreateWorkspaceThread {
+        workspace_id: WorkspaceId,
+    },
+    ActivateWorkspaceThread {
+        workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
+    },
+    CloseWorkspaceThreadTab {
+        workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
+    },
+
+    WorkspaceThreadsLoaded {
+        workspace_id: WorkspaceId,
+        threads: Vec<ConversationThreadMeta>,
+    },
+    WorkspaceThreadsLoadFailed {
+        workspace_id: WorkspaceId,
+        message: String,
     },
 
     ToggleTerminalPane,
@@ -549,6 +677,7 @@ pub enum Action {
     },
     WorkspaceChatScrollSaved {
         workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
         offset_y10: i32,
     },
 
@@ -582,16 +711,24 @@ pub enum Effect {
     },
     EnsureConversation {
         workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
     },
     LoadConversation {
         workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
     },
     RunAgentTurn {
         workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
         text: String,
         run_config: AgentRunConfig,
     },
     CancelAgentTurn {
+        workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
+    },
+
+    LoadWorkspaceThreads {
         workspace_id: WorkspaceId,
     },
 }
@@ -610,6 +747,7 @@ impl AppState {
             sidebar_width: None,
             terminal_pane_width: None,
             conversations: HashMap::new(),
+            workspace_tabs: HashMap::new(),
             dashboard_preview_workspace_id: None,
             last_open_workspace_id: None,
             last_error: None,
@@ -652,19 +790,30 @@ impl AppState {
                 self.right_pane = RightPane::None;
                 self.dashboard_preview_workspace_id = None;
 
+                let workspace_ids = self
+                    .projects
+                    .iter()
+                    .flat_map(|project| {
+                        project.workspaces.iter().filter_map(move |workspace| {
+                            if workspace.status != WorkspaceStatus::Active {
+                                return None;
+                            }
+                            if Self::workspace_is_main(project, workspace) {
+                                return None;
+                            }
+                            Some(workspace.id)
+                        })
+                    })
+                    .collect::<Vec<_>>();
+
                 let mut effects = Vec::new();
-                for project in &self.projects {
-                    for workspace in &project.workspaces {
-                        if workspace.status != WorkspaceStatus::Active {
-                            continue;
-                        }
-                        if Self::workspace_is_main(project, workspace) {
-                            continue;
-                        }
-                        effects.push(Effect::LoadConversation {
-                            workspace_id: workspace.id,
-                        });
-                    }
+                for workspace_id in workspace_ids {
+                    let thread_id = self.ensure_workspace_tabs_mut(workspace_id).active_tab;
+                    effects.push(Effect::LoadWorkspaceThreads { workspace_id });
+                    effects.push(Effect::LoadConversation {
+                        workspace_id,
+                        thread_id,
+                    });
                 }
                 effects
             }
@@ -673,7 +822,14 @@ impl AppState {
                     return Vec::new();
                 }
                 self.dashboard_preview_workspace_id = Some(workspace_id);
-                vec![Effect::LoadConversation { workspace_id }]
+                let tabs = self.ensure_workspace_tabs_mut(workspace_id);
+                vec![
+                    Effect::LoadWorkspaceThreads { workspace_id },
+                    Effect::LoadConversation {
+                        workspace_id,
+                        thread_id: tabs.active_tab,
+                    },
+                ]
             }
             Action::DashboardPreviewClosed => {
                 self.dashboard_preview_workspace_id = None;
@@ -718,25 +874,21 @@ impl AppState {
                 if let Some(project) = self.projects.iter_mut().find(|p| p.id == project_id) {
                     project.create_workspace_status = OperationStatus::Idle;
                 }
-                self.conversations.insert(
+                let initial_thread_id = WorkspaceThreadId(1);
+                self.workspace_tabs.insert(
                     workspace_id,
-                    WorkspaceConversation {
-                        thread_id: None,
-                        draft: String::new(),
-                        draft_attachments: Vec::new(),
-                        agent_model_id: default_agent_model_id().to_owned(),
-                        thinking_effort: default_thinking_effort(),
-                        entries: Vec::new(),
-                        run_status: OperationStatus::Idle,
-                        in_progress_items: BTreeMap::new(),
-                        in_progress_order: VecDeque::new(),
-                        pending_prompts: VecDeque::new(),
-                        queue_paused: false,
-                    },
+                    WorkspaceTabs::new_with_initial(initial_thread_id),
+                );
+                self.conversations.insert(
+                    (workspace_id, initial_thread_id),
+                    Self::default_conversation(initial_thread_id),
                 );
                 vec![
                     Effect::SaveAppState,
-                    Effect::EnsureConversation { workspace_id },
+                    Effect::EnsureConversation {
+                        workspace_id,
+                        thread_id: initial_thread_id,
+                    },
                 ]
             }
             Action::WorkspaceCreateFailed {
@@ -755,9 +907,15 @@ impl AppState {
                 self.right_pane = RightPane::Terminal;
                 self.dashboard_preview_workspace_id = None;
                 self.last_open_workspace_id = Some(workspace_id);
+                let tabs = self.ensure_workspace_tabs_mut(workspace_id);
+                let thread_id = tabs.active_tab;
                 vec![
                     Effect::SaveAppState,
-                    Effect::LoadConversation { workspace_id },
+                    Effect::LoadWorkspaceThreads { workspace_id },
+                    Effect::LoadConversation {
+                        workspace_id,
+                        thread_id,
+                    },
                 ]
             }
             Action::OpenWorkspaceInIde { workspace_id } => {
@@ -831,75 +989,58 @@ impl AppState {
 
             Action::ConversationLoaded {
                 workspace_id,
+                thread_id,
                 snapshot,
             } => {
-                if let Some(conversation) = self.conversations.get_mut(&workspace_id) {
-                    if conversation.thread_id.is_none() {
-                        conversation.thread_id = snapshot.thread_id;
-                    }
+                let conversation = self.ensure_conversation_mut(workspace_id, thread_id);
 
-                    if conversation.entries.is_empty() {
-                        conversation.entries = snapshot.entries;
-                        return Vec::new();
-                    }
+                if conversation.thread_id.is_none() {
+                    conversation.thread_id = snapshot.thread_id;
+                }
 
-                    let snapshot_is_newer =
-                        entries_is_prefix(&conversation.entries, &snapshot.entries)
-                            || entries_is_suffix(&conversation.entries, &snapshot.entries);
-                    let conversation_is_newer =
-                        entries_is_prefix(&snapshot.entries, &conversation.entries)
-                            || entries_is_suffix(&snapshot.entries, &conversation.entries);
-
-                    if snapshot_is_newer && !conversation_is_newer {
-                        conversation.entries = snapshot.entries;
-                    }
-
+                if conversation.entries.is_empty() {
+                    conversation.entries = snapshot.entries;
                     return Vec::new();
                 }
 
-                self.conversations.insert(
-                    workspace_id,
-                    WorkspaceConversation {
-                        thread_id: snapshot.thread_id,
-                        draft: String::new(),
-                        draft_attachments: Vec::new(),
-                        agent_model_id: default_agent_model_id().to_owned(),
-                        thinking_effort: default_thinking_effort(),
-                        entries: snapshot.entries,
-                        run_status: OperationStatus::Idle,
-                        in_progress_items: BTreeMap::new(),
-                        in_progress_order: VecDeque::new(),
-                        pending_prompts: VecDeque::new(),
-                        queue_paused: false,
-                    },
-                );
+                let snapshot_is_newer = entries_is_prefix(&conversation.entries, &snapshot.entries)
+                    || entries_is_suffix(&conversation.entries, &snapshot.entries);
+                let conversation_is_newer =
+                    entries_is_prefix(&snapshot.entries, &conversation.entries)
+                        || entries_is_suffix(&snapshot.entries, &conversation.entries);
+
+                if snapshot_is_newer && !conversation_is_newer {
+                    conversation.entries = snapshot.entries;
+                }
+
                 Vec::new()
             }
             Action::ConversationLoadFailed {
                 workspace_id: _,
+                thread_id: _,
                 message,
             } => {
                 self.last_error = Some(message);
                 Vec::new()
             }
-            Action::SendAgentMessage { workspace_id, text } => {
-                let conversation = self.conversations.entry(workspace_id).or_insert_with(|| {
-                    WorkspaceConversation {
-                        thread_id: None,
-                        draft: String::new(),
-                        draft_attachments: Vec::new(),
-                        agent_model_id: default_agent_model_id().to_owned(),
-                        thinking_effort: default_thinking_effort(),
-                        entries: Vec::new(),
-                        run_status: OperationStatus::Idle,
-                        in_progress_items: BTreeMap::new(),
-                        in_progress_order: VecDeque::new(),
-                        pending_prompts: VecDeque::new(),
-                        queue_paused: false,
-                    }
-                });
+            Action::SendAgentMessage {
+                workspace_id,
+                thread_id,
+                text,
+            } => {
+                let tabs = self.ensure_workspace_tabs_mut(workspace_id);
+                tabs.activate(thread_id);
+
+                let conversation = self.ensure_conversation_mut(workspace_id, thread_id);
                 conversation.draft.clear();
                 conversation.draft_attachments.clear();
+
+                if conversation.entries.is_empty() && conversation.title.starts_with("Thread ") {
+                    let title = derive_thread_title(&text);
+                    if !title.is_empty() {
+                        conversation.title = title;
+                    }
+                }
 
                 let run_config = AgentRunConfig {
                     model_id: conversation.agent_model_id.clone(),
@@ -922,6 +1063,7 @@ impl AppState {
                     conversation.in_progress_order.clear();
                     return vec![Effect::RunAgentTurn {
                         workspace_id,
+                        thread_id,
                         text,
                         run_config,
                     }];
@@ -937,6 +1079,7 @@ impl AppState {
                     conversation.in_progress_order.clear();
                     return vec![Effect::RunAgentTurn {
                         workspace_id,
+                        thread_id,
                         text,
                         run_config,
                     }];
@@ -945,30 +1088,16 @@ impl AppState {
                 conversation
                     .pending_prompts
                     .push_back(QueuedPrompt { text, run_config });
-                start_next_queued_prompt(conversation, workspace_id)
+                start_next_queued_prompt(conversation, workspace_id, thread_id)
                     .into_iter()
                     .collect()
             }
             Action::ChatModelChanged {
                 workspace_id,
+                thread_id,
                 model_id,
             } => {
-                let conversation = self.conversations.entry(workspace_id).or_insert_with(|| {
-                    WorkspaceConversation {
-                        thread_id: None,
-                        draft: String::new(),
-                        draft_attachments: Vec::new(),
-                        agent_model_id: default_agent_model_id().to_owned(),
-                        thinking_effort: default_thinking_effort(),
-                        entries: Vec::new(),
-                        run_status: OperationStatus::Idle,
-                        in_progress_items: BTreeMap::new(),
-                        in_progress_order: VecDeque::new(),
-                        pending_prompts: VecDeque::new(),
-                        queue_paused: false,
-                    }
-                });
-
+                let conversation = self.ensure_conversation_mut(workspace_id, thread_id);
                 conversation.agent_model_id = model_id.clone();
                 conversation.thinking_effort =
                     normalize_thinking_effort(&model_id, conversation.thinking_effort);
@@ -976,69 +1105,32 @@ impl AppState {
             }
             Action::ThinkingEffortChanged {
                 workspace_id,
+                thread_id,
                 thinking_effort,
             } => {
-                let conversation = self.conversations.entry(workspace_id).or_insert_with(|| {
-                    WorkspaceConversation {
-                        thread_id: None,
-                        draft: String::new(),
-                        draft_attachments: Vec::new(),
-                        agent_model_id: default_agent_model_id().to_owned(),
-                        thinking_effort: default_thinking_effort(),
-                        entries: Vec::new(),
-                        run_status: OperationStatus::Idle,
-                        in_progress_items: BTreeMap::new(),
-                        in_progress_order: VecDeque::new(),
-                        pending_prompts: VecDeque::new(),
-                        queue_paused: false,
-                    }
-                });
-
+                let conversation = self.ensure_conversation_mut(workspace_id, thread_id);
                 if thinking_effort_supported(&conversation.agent_model_id, thinking_effort) {
                     conversation.thinking_effort = thinking_effort;
                 }
                 Vec::new()
             }
-            Action::ChatDraftChanged { workspace_id, text } => {
-                let conversation = self.conversations.entry(workspace_id).or_insert_with(|| {
-                    WorkspaceConversation {
-                        thread_id: None,
-                        draft: String::new(),
-                        draft_attachments: Vec::new(),
-                        agent_model_id: default_agent_model_id().to_owned(),
-                        thinking_effort: default_thinking_effort(),
-                        entries: Vec::new(),
-                        run_status: OperationStatus::Idle,
-                        in_progress_items: BTreeMap::new(),
-                        in_progress_order: VecDeque::new(),
-                        pending_prompts: VecDeque::new(),
-                        queue_paused: false,
-                    }
-                });
+            Action::ChatDraftChanged {
+                workspace_id,
+                thread_id,
+                text,
+            } => {
+                let conversation = self.ensure_conversation_mut(workspace_id, thread_id);
                 apply_draft_text_diff(conversation, &text);
                 Vec::new()
             }
             Action::ChatDraftAttachmentAdded {
                 workspace_id,
+                thread_id,
                 id,
                 kind,
                 anchor,
             } => {
-                let conversation = self.conversations.entry(workspace_id).or_insert_with(|| {
-                    WorkspaceConversation {
-                        thread_id: None,
-                        draft: String::new(),
-                        draft_attachments: Vec::new(),
-                        agent_model_id: default_agent_model_id().to_owned(),
-                        thinking_effort: default_thinking_effort(),
-                        entries: Vec::new(),
-                        run_status: OperationStatus::Idle,
-                        in_progress_items: BTreeMap::new(),
-                        in_progress_order: VecDeque::new(),
-                        pending_prompts: VecDeque::new(),
-                        queue_paused: false,
-                    }
-                });
+                let conversation = self.ensure_conversation_mut(workspace_id, thread_id);
                 conversation.draft_attachments.push(DraftAttachment {
                     id,
                     kind,
@@ -1050,12 +1142,11 @@ impl AppState {
             }
             Action::ChatDraftAttachmentResolved {
                 workspace_id,
+                thread_id,
                 id,
                 path,
             } => {
-                let Some(conversation) = self.conversations.get_mut(&workspace_id) else {
-                    return Vec::new();
-                };
+                let conversation = self.ensure_conversation_mut(workspace_id, thread_id);
                 if let Some(attachment) = conversation
                     .draft_attachments
                     .iter_mut()
@@ -1066,10 +1157,12 @@ impl AppState {
                 }
                 Vec::new()
             }
-            Action::ChatDraftAttachmentFailed { workspace_id, id } => {
-                let Some(conversation) = self.conversations.get_mut(&workspace_id) else {
-                    return Vec::new();
-                };
+            Action::ChatDraftAttachmentFailed {
+                workspace_id,
+                thread_id,
+                id,
+            } => {
+                let conversation = self.ensure_conversation_mut(workspace_id, thread_id);
                 if let Some(attachment) = conversation
                     .draft_attachments
                     .iter_mut()
@@ -1079,58 +1172,48 @@ impl AppState {
                 }
                 Vec::new()
             }
-            Action::ChatDraftAttachmentRemoved { workspace_id, id } => {
-                let Some(conversation) = self.conversations.get_mut(&workspace_id) else {
-                    return Vec::new();
-                };
+            Action::ChatDraftAttachmentRemoved {
+                workspace_id,
+                thread_id,
+                id,
+            } => {
+                let conversation = self.ensure_conversation_mut(workspace_id, thread_id);
                 conversation.draft_attachments.retain(|a| a.id != id);
                 Vec::new()
             }
             Action::RemoveQueuedPrompt {
                 workspace_id,
+                thread_id,
                 index,
             } => {
-                let Some(conversation) = self.conversations.get_mut(&workspace_id) else {
-                    return Vec::new();
-                };
+                let conversation = self.ensure_conversation_mut(workspace_id, thread_id);
                 let _ = conversation.pending_prompts.remove(index);
                 Vec::new()
             }
-            Action::ClearQueuedPrompts { workspace_id } => {
-                let Some(conversation) = self.conversations.get_mut(&workspace_id) else {
-                    return Vec::new();
-                };
+            Action::ClearQueuedPrompts {
+                workspace_id,
+                thread_id,
+            } => {
+                let conversation = self.ensure_conversation_mut(workspace_id, thread_id);
                 conversation.pending_prompts.clear();
                 Vec::new()
             }
-            Action::ResumeQueuedPrompts { workspace_id } => {
-                let Some(conversation) = self.conversations.get_mut(&workspace_id) else {
-                    return Vec::new();
-                };
+            Action::ResumeQueuedPrompts {
+                workspace_id,
+                thread_id,
+            } => {
+                let conversation = self.ensure_conversation_mut(workspace_id, thread_id);
                 conversation.queue_paused = false;
-                start_next_queued_prompt(conversation, workspace_id)
+                start_next_queued_prompt(conversation, workspace_id, thread_id)
                     .into_iter()
                     .collect()
             }
             Action::AgentEventReceived {
                 workspace_id,
+                thread_id,
                 event,
             } => {
-                let conversation = self.conversations.entry(workspace_id).or_insert_with(|| {
-                    WorkspaceConversation {
-                        thread_id: None,
-                        draft: String::new(),
-                        draft_attachments: Vec::new(),
-                        agent_model_id: default_agent_model_id().to_owned(),
-                        thinking_effort: default_thinking_effort(),
-                        entries: Vec::new(),
-                        run_status: OperationStatus::Idle,
-                        in_progress_items: BTreeMap::new(),
-                        in_progress_order: VecDeque::new(),
-                        pending_prompts: VecDeque::new(),
-                        queue_paused: false,
-                    }
-                });
+                let conversation = self.ensure_conversation_mut(workspace_id, thread_id);
 
                 match event {
                     CodexThreadEvent::ThreadStarted { thread_id } => {
@@ -1144,7 +1227,7 @@ impl AppState {
                         flush_in_progress_items(conversation);
                         conversation.in_progress_items.clear();
                         conversation.in_progress_order.clear();
-                        start_next_queued_prompt(conversation, workspace_id)
+                        start_next_queued_prompt(conversation, workspace_id, thread_id)
                             .into_iter()
                             .collect()
                     }
@@ -1205,8 +1288,11 @@ impl AppState {
                     }
                 }
             }
-            Action::AgentTurnFinished { workspace_id } => {
-                if let Some(conversation) = self.conversations.get_mut(&workspace_id)
+            Action::AgentTurnFinished {
+                workspace_id,
+                thread_id,
+            } => {
+                if let Some(conversation) = self.conversations.get_mut(&(workspace_id, thread_id))
                     && conversation.run_status == OperationStatus::Running
                 {
                     conversation.run_status = OperationStatus::Idle;
@@ -1216,8 +1302,12 @@ impl AppState {
                 }
                 Vec::new()
             }
-            Action::CancelAgentTurn { workspace_id } => {
-                let Some(conversation) = self.conversations.get_mut(&workspace_id) else {
+            Action::CancelAgentTurn {
+                workspace_id,
+                thread_id,
+            } => {
+                let Some(conversation) = self.conversations.get_mut(&(workspace_id, thread_id))
+                else {
                     return Vec::new();
                 };
                 if conversation.run_status != OperationStatus::Running {
@@ -1229,7 +1319,87 @@ impl AppState {
                 conversation.in_progress_order.clear();
                 conversation.queue_paused = true;
                 conversation.entries.push(ConversationEntry::TurnCanceled);
-                vec![Effect::CancelAgentTurn { workspace_id }]
+                vec![Effect::CancelAgentTurn {
+                    workspace_id,
+                    thread_id,
+                }]
+            }
+            Action::CreateWorkspaceThread { workspace_id } => {
+                let thread_id = {
+                    let tabs = self.ensure_workspace_tabs_mut(workspace_id);
+                    tabs.allocate_thread_id()
+                };
+                self.conversations.insert(
+                    (workspace_id, thread_id),
+                    Self::default_conversation(thread_id),
+                );
+                self.ensure_workspace_tabs_mut(workspace_id)
+                    .activate(thread_id);
+                vec![
+                    Effect::SaveAppState,
+                    Effect::EnsureConversation {
+                        workspace_id,
+                        thread_id,
+                    },
+                ]
+            }
+            Action::ActivateWorkspaceThread {
+                workspace_id,
+                thread_id,
+            } => {
+                let tabs = self.ensure_workspace_tabs_mut(workspace_id);
+                tabs.activate(thread_id);
+                self.ensure_conversation_mut(workspace_id, thread_id);
+                vec![
+                    Effect::SaveAppState,
+                    Effect::LoadConversation {
+                        workspace_id,
+                        thread_id,
+                    },
+                ]
+            }
+            Action::CloseWorkspaceThreadTab {
+                workspace_id,
+                thread_id,
+            } => {
+                let tabs = self.ensure_workspace_tabs_mut(workspace_id);
+                let previous_active = tabs.active_tab;
+                tabs.close_tab(thread_id);
+                let mut effects = vec![Effect::SaveAppState];
+                if tabs.active_tab != previous_active {
+                    effects.push(Effect::LoadConversation {
+                        workspace_id,
+                        thread_id: tabs.active_tab,
+                    });
+                }
+                effects
+            }
+            Action::WorkspaceThreadsLoaded {
+                workspace_id,
+                threads,
+            } => {
+                self.ensure_workspace_tabs_mut(workspace_id);
+                let mut max_thread_id = 0u64;
+                for meta in threads {
+                    max_thread_id = max_thread_id.max(meta.thread_id.0);
+                    let conversation = self
+                        .conversations
+                        .entry((workspace_id, meta.thread_id))
+                        .or_insert_with(|| Self::default_conversation(meta.thread_id));
+                    conversation.title = meta.title;
+                    conversation.thread_id = meta.remote_thread_id;
+                }
+                if let Some(tabs) = self.workspace_tabs.get_mut(&workspace_id) {
+                    tabs.next_thread_id = tabs.next_thread_id.max(max_thread_id + 1);
+                }
+                Vec::new()
+            }
+            Action::WorkspaceThreadsLoadFailed {
+                workspace_id: _,
+                message,
+            } => {
+                self.last_error = Some(message);
+                Vec::new()
             }
             Action::ToggleTerminalPane => {
                 let can_show_terminal = match self.main_pane {
@@ -1258,13 +1428,14 @@ impl AppState {
             }
             Action::WorkspaceChatScrollSaved {
                 workspace_id,
+                thread_id,
                 offset_y10,
             } => {
-                if self.workspace_chat_scroll_y10.get(&workspace_id).copied() == Some(offset_y10) {
+                let key = (workspace_id, thread_id);
+                if self.workspace_chat_scroll_y10.get(&key).copied() == Some(offset_y10) {
                     return Vec::new();
                 }
-                self.workspace_chat_scroll_y10
-                    .insert(workspace_id, offset_y10);
+                self.workspace_chat_scroll_y10.insert(key, offset_y10);
                 vec![Effect::SaveAppState]
             }
 
@@ -1303,10 +1474,67 @@ impl AppState {
                 self.sidebar_width = persisted.sidebar_width;
                 self.terminal_pane_width = persisted.terminal_pane_width;
                 self.last_open_workspace_id = persisted.last_open_workspace_id.map(WorkspaceId);
+                self.workspace_tabs = HashMap::new();
+                self.conversations = HashMap::new();
+
+                for workspace in self.projects.iter().flat_map(|p| &p.workspaces) {
+                    let workspace_id = workspace.id;
+                    let active = persisted
+                        .workspace_active_thread_id
+                        .get(&workspace_id.0)
+                        .copied()
+                        .map(WorkspaceThreadId)
+                        .unwrap_or(WorkspaceThreadId(1));
+
+                    let mut open_tabs = persisted
+                        .workspace_open_tabs
+                        .get(&workspace_id.0)
+                        .cloned()
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(WorkspaceThreadId)
+                        .collect::<Vec<_>>();
+                    if open_tabs.is_empty() {
+                        open_tabs.push(active);
+                    }
+                    if !open_tabs.contains(&active) {
+                        open_tabs.insert(0, active);
+                    }
+                    open_tabs.truncate(WorkspaceTabs::MAX_VISIBLE_TABS);
+
+                    let next_thread_id = persisted
+                        .workspace_next_thread_id
+                        .get(&workspace_id.0)
+                        .copied()
+                        .unwrap_or(active.0 + 1);
+
+                    self.workspace_tabs.insert(
+                        workspace_id,
+                        WorkspaceTabs {
+                            open_tabs: open_tabs.clone(),
+                            active_tab: active,
+                            lru: open_tabs.iter().copied().collect(),
+                            next_thread_id,
+                        },
+                    );
+
+                    for thread_id in open_tabs {
+                        self.conversations.insert(
+                            (workspace_id, thread_id),
+                            Self::default_conversation(thread_id),
+                        );
+                    }
+                }
+
                 self.workspace_chat_scroll_y10 = persisted
                     .workspace_chat_scroll_y10
                     .into_iter()
-                    .map(|(id, offset)| (WorkspaceId(id), offset))
+                    .map(|((workspace_id, thread_id), offset)| {
+                        (
+                            (WorkspaceId(workspace_id), WorkspaceThreadId(thread_id)),
+                            offset,
+                        )
+                    })
                     .collect();
 
                 let max_project_id = self.projects.iter().map(|p| p.id.0).max().unwrap_or(0);
@@ -1340,7 +1568,16 @@ impl AppState {
                 if let Some(workspace_id) = restored_workspace_id {
                     self.main_pane = MainPane::Workspace(workspace_id);
                     self.right_pane = RightPane::Terminal;
-                    effects.push(Effect::LoadConversation { workspace_id });
+                    let thread_id = self
+                        .workspace_tabs
+                        .get(&workspace_id)
+                        .map(|tabs| tabs.active_tab)
+                        .unwrap_or(WorkspaceThreadId(1));
+                    effects.push(Effect::LoadWorkspaceThreads { workspace_id });
+                    effects.push(Effect::LoadConversation {
+                        workspace_id,
+                        thread_id,
+                    });
                 }
 
                 effects
@@ -1394,10 +1631,32 @@ impl AppState {
             sidebar_width: self.sidebar_width,
             terminal_pane_width: self.terminal_pane_width,
             last_open_workspace_id: self.last_open_workspace_id.map(|id| id.0),
+            workspace_active_thread_id: self
+                .workspace_tabs
+                .iter()
+                .map(|(workspace_id, tabs)| (workspace_id.0, tabs.active_tab.0))
+                .collect(),
+            workspace_open_tabs: self
+                .workspace_tabs
+                .iter()
+                .map(|(workspace_id, tabs)| {
+                    (
+                        workspace_id.0,
+                        tabs.open_tabs.iter().map(|id| id.0).collect(),
+                    )
+                })
+                .collect(),
+            workspace_next_thread_id: self
+                .workspace_tabs
+                .iter()
+                .map(|(workspace_id, tabs)| (workspace_id.0, tabs.next_thread_id))
+                .collect(),
             workspace_chat_scroll_y10: self
                 .workspace_chat_scroll_y10
                 .iter()
-                .map(|(id, offset_y10)| (id.0, *offset_y10))
+                .map(|((workspace_id, thread_id), offset_y10)| {
+                    ((workspace_id.0, thread_id.0), *offset_y10)
+                })
                 .collect(),
         }
     }
@@ -1417,7 +1676,70 @@ impl AppState {
         &self,
         workspace_id: WorkspaceId,
     ) -> Option<&WorkspaceConversation> {
-        self.conversations.get(&workspace_id)
+        let thread_id = self
+            .workspace_tabs
+            .get(&workspace_id)
+            .map(|tabs| tabs.active_tab)?;
+        self.conversations.get(&(workspace_id, thread_id))
+    }
+
+    pub fn workspace_thread_conversation(
+        &self,
+        workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
+    ) -> Option<&WorkspaceConversation> {
+        self.conversations.get(&(workspace_id, thread_id))
+    }
+
+    pub fn workspace_tabs(&self, workspace_id: WorkspaceId) -> Option<&WorkspaceTabs> {
+        self.workspace_tabs.get(&workspace_id)
+    }
+
+    pub fn active_thread_id(&self, workspace_id: WorkspaceId) -> Option<WorkspaceThreadId> {
+        self.workspace_tabs.get(&workspace_id).map(|t| t.active_tab)
+    }
+
+    fn ensure_workspace_tabs_mut(&mut self, workspace_id: WorkspaceId) -> &mut WorkspaceTabs {
+        use std::collections::hash_map::Entry;
+
+        match self.workspace_tabs.entry(workspace_id) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => {
+                let initial = WorkspaceThreadId(1);
+                self.conversations
+                    .insert((workspace_id, initial), Self::default_conversation(initial));
+                entry.insert(WorkspaceTabs::new_with_initial(initial))
+            }
+        }
+    }
+
+    fn ensure_conversation_mut(
+        &mut self,
+        workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
+    ) -> &mut WorkspaceConversation {
+        self.ensure_workspace_tabs_mut(workspace_id);
+        self.conversations
+            .entry((workspace_id, thread_id))
+            .or_insert_with(|| Self::default_conversation(thread_id))
+    }
+
+    fn default_conversation(thread_id: WorkspaceThreadId) -> WorkspaceConversation {
+        WorkspaceConversation {
+            local_thread_id: thread_id,
+            title: format!("Thread {}", thread_id.0),
+            thread_id: None,
+            draft: String::new(),
+            draft_attachments: Vec::new(),
+            agent_model_id: default_agent_model_id().to_owned(),
+            thinking_effort: default_thinking_effort(),
+            entries: Vec::new(),
+            run_status: OperationStatus::Idle,
+            in_progress_items: BTreeMap::new(),
+            in_progress_order: VecDeque::new(),
+            pending_prompts: VecDeque::new(),
+            queue_paused: false,
+        }
     }
 
     fn add_project(&mut self, path: PathBuf) -> ProjectId {
@@ -1608,9 +1930,22 @@ fn sanitize_slug(input: &str) -> String {
     }
 }
 
+pub fn derive_thread_title(text: &str) -> String {
+    let first_line = text.lines().next().unwrap_or("").trim();
+    if first_line.is_empty() {
+        return String::new();
+    }
+    let mut out = String::new();
+    for ch in first_line.chars().take(48) {
+        out.push(ch);
+    }
+    out
+}
+
 fn start_next_queued_prompt(
     conversation: &mut WorkspaceConversation,
     workspace_id: WorkspaceId,
+    thread_id: WorkspaceThreadId,
 ) -> Option<Effect> {
     if conversation.queue_paused || conversation.run_status != OperationStatus::Idle {
         return None;
@@ -1626,6 +1961,7 @@ fn start_next_queued_prompt(
     conversation.in_progress_order.clear();
     Some(Effect::RunAgentTurn {
         workspace_id,
+        thread_id,
         text: queued.text,
         run_config: queued.run_config,
     })
@@ -1634,6 +1970,10 @@ fn start_next_queued_prompt(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn default_thread_id() -> WorkspaceThreadId {
+        WorkspaceThreadId(1)
+    }
 
     fn main_workspace_id(state: &AppState) -> WorkspaceId {
         let project = &state.projects[0];
@@ -1688,12 +2028,13 @@ mod tests {
 
         assert!(
             effects.iter().any(
-                |e| matches!(e, Effect::LoadConversation { workspace_id } if *workspace_id == w1)
+                |e| matches!(e, Effect::LoadConversation { workspace_id, .. } if *workspace_id == w1)
             ),
             "expected dashboard to load non-main workspace conversation"
         );
         assert!(
-            !effects.iter().any(|e| matches!(e, Effect::LoadConversation { workspace_id } if *workspace_id == main_id)),
+            !effects.iter()
+                .any(|e| matches!(e, Effect::LoadConversation { workspace_id, .. } if *workspace_id == main_id)),
             "dashboard should not load main workspace conversation"
         );
     }
@@ -1779,6 +2120,9 @@ mod tests {
                 sidebar_width: None,
                 terminal_pane_width: Some(480),
                 last_open_workspace_id: None,
+                workspace_active_thread_id: HashMap::new(),
+                workspace_open_tabs: HashMap::new(),
+                workspace_next_thread_id: HashMap::new(),
                 workspace_chat_scroll_y10: HashMap::new(),
             },
         });
@@ -1803,6 +2147,9 @@ mod tests {
                 sidebar_width: Some(360),
                 terminal_pane_width: None,
                 last_open_workspace_id: None,
+                workspace_active_thread_id: HashMap::new(),
+                workspace_open_tabs: HashMap::new(),
+                workspace_next_thread_id: HashMap::new(),
                 workspace_chat_scroll_y10: HashMap::new(),
             },
         });
@@ -1813,13 +2160,18 @@ mod tests {
     fn workspace_chat_scroll_is_persisted() {
         let mut state = AppState::new();
         let workspace_id = WorkspaceId(42);
+        let thread_id = default_thread_id();
 
         let effects = state.apply(Action::WorkspaceChatScrollSaved {
             workspace_id,
+            thread_id,
             offset_y10: -1234,
         });
         assert_eq!(
-            state.workspace_chat_scroll_y10.get(&workspace_id).copied(),
+            state
+                .workspace_chat_scroll_y10
+                .get(&(workspace_id, thread_id))
+                .copied(),
             Some(-1234)
         );
         assert_eq!(effects.len(), 1);
@@ -1827,15 +2179,70 @@ mod tests {
 
         let persisted = state.to_persisted();
         assert_eq!(
-            persisted.workspace_chat_scroll_y10.get(&42).copied(),
+            persisted.workspace_chat_scroll_y10.get(&(42, 1)).copied(),
             Some(-1234)
         );
 
         let mut loaded = AppState::new();
         loaded.apply(Action::AppStateLoaded { persisted });
         assert_eq!(
-            loaded.workspace_chat_scroll_y10.get(&workspace_id).copied(),
+            loaded
+                .workspace_chat_scroll_y10
+                .get(&(workspace_id, thread_id))
+                .copied(),
             Some(-1234)
+        );
+    }
+
+    #[test]
+    fn workspace_thread_tabs_limit_visible_to_three_and_preserve_conversation() {
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "w1".to_owned(),
+            branch_name: "repo/w1".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/w1"),
+        });
+        let workspace_id = workspace_id_by_name(&state, "w1");
+        state.apply(Action::OpenWorkspace { workspace_id });
+
+        let mut thread_ids = Vec::new();
+        thread_ids.push(state.active_thread_id(workspace_id).unwrap());
+        for _ in 0..3 {
+            state.apply(Action::CreateWorkspaceThread { workspace_id });
+            thread_ids.push(state.active_thread_id(workspace_id).unwrap());
+        }
+
+        let tabs = state.workspace_tabs(workspace_id).unwrap();
+        assert_eq!(tabs.open_tabs.len(), 3);
+
+        let closed_thread = tabs.open_tabs[0];
+        state.apply(Action::CloseWorkspaceThreadTab {
+            workspace_id,
+            thread_id: closed_thread,
+        });
+        assert!(
+            state
+                .workspace_thread_conversation(workspace_id, closed_thread)
+                .is_some(),
+            "closing a tab should not delete the conversation"
+        );
+
+        state.apply(Action::ActivateWorkspaceThread {
+            workspace_id,
+            thread_id: thread_ids[0],
+        });
+        assert!(
+            state
+                .workspace_tabs(workspace_id)
+                .unwrap()
+                .open_tabs
+                .contains(&thread_ids[0]),
+            "activating a thread should make it visible"
         );
     }
 
@@ -1875,13 +2282,16 @@ mod tests {
             worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
         });
         let workspace_id = workspace_id_by_name(&state, "abandon-about");
+        let thread_id = default_thread_id();
 
         state.apply(Action::SendAgentMessage {
             workspace_id,
+            thread_id,
             text: "Test".to_owned(),
         });
         state.apply(Action::AgentEventReceived {
             workspace_id,
+            thread_id,
             event: CodexThreadEvent::ItemStarted {
                 item: CodexThreadItem::Reasoning {
                     id: "r-1".to_owned(),
@@ -1891,6 +2301,7 @@ mod tests {
         });
         state.apply(Action::AgentEventReceived {
             workspace_id,
+            thread_id,
             event: CodexThreadEvent::ItemStarted {
                 item: CodexThreadItem::CommandExecution {
                     id: "c-1".to_owned(),
@@ -1903,7 +2314,7 @@ mod tests {
         });
 
         let conversation = state
-            .workspace_conversation(workspace_id)
+            .workspace_thread_conversation(workspace_id, thread_id)
             .expect("missing conversation");
         assert_eq!(
             conversation
@@ -1916,6 +2327,7 @@ mod tests {
 
         state.apply(Action::AgentEventReceived {
             workspace_id,
+            thread_id,
             event: CodexThreadEvent::ItemCompleted {
                 item: CodexThreadItem::Reasoning {
                     id: "r-1".to_owned(),
@@ -1925,7 +2337,7 @@ mod tests {
         });
 
         let conversation = state
-            .workspace_conversation(workspace_id)
+            .workspace_thread_conversation(workspace_id, thread_id)
             .expect("missing conversation");
         assert_eq!(
             conversation
@@ -2022,9 +2434,10 @@ mod tests {
         let workspace_id = first_non_main_workspace_id(&state);
 
         let effects = state.apply(Action::OpenWorkspace { workspace_id });
-        assert_eq!(effects.len(), 2);
+        assert_eq!(effects.len(), 3);
         assert!(matches!(effects[0], Effect::SaveAppState));
-        assert!(matches!(effects[1], Effect::LoadConversation { .. }));
+        assert!(matches!(effects[1], Effect::LoadWorkspaceThreads { .. }));
+        assert!(matches!(effects[2], Effect::LoadConversation { .. }));
     }
 
     #[test]
@@ -2054,12 +2467,11 @@ mod tests {
             "expected main pane to restore workspace"
         );
         assert_eq!(loaded.right_pane, RightPane::Terminal);
-        assert_eq!(effects.len(), 1);
+        assert_eq!(effects.len(), 2);
+        assert!(matches!(effects[0], Effect::LoadWorkspaceThreads { .. }));
         assert!(matches!(
-            effects[0],
-            Effect::LoadConversation {
-                workspace_id: id
-            } if id == workspace_id
+            effects[1],
+            Effect::LoadConversation { workspace_id: id, .. } if id == workspace_id
         ));
     }
 
@@ -2086,13 +2498,16 @@ mod tests {
 
         let w1 = workspace_id_by_name(&state, "w1");
         let w2 = workspace_id_by_name(&state, "w2");
+        let thread_id = default_thread_id();
 
         state.apply(Action::ChatDraftChanged {
             workspace_id: w1,
+            thread_id,
             text: "draft-1".to_owned(),
         });
         state.apply(Action::ChatDraftChanged {
             workspace_id: w2,
+            thread_id,
             text: "draft-2".to_owned(),
         });
 
@@ -2101,6 +2516,7 @@ mod tests {
 
         state.apply(Action::ConversationLoaded {
             workspace_id: w1,
+            thread_id,
             snapshot: ConversationSnapshot {
                 thread_id: None,
                 entries: Vec::new(),
@@ -2124,30 +2540,36 @@ mod tests {
             worktree_path: PathBuf::from("/tmp/repo/worktrees/w1"),
         });
         let w1 = workspace_id_by_name(&state, "w1");
+        let thread_id = default_thread_id();
 
         state.apply(Action::ChatDraftChanged {
             workspace_id: w1,
+            thread_id,
             text: "0123456789".to_owned(),
         });
         state.apply(Action::ChatDraftAttachmentAdded {
             workspace_id: w1,
+            thread_id,
             id: 1,
             kind: ContextTokenKind::Image,
             anchor: 8,
         });
         state.apply(Action::ChatDraftAttachmentResolved {
             workspace_id: w1,
+            thread_id,
             id: 1,
             path: PathBuf::from("/tmp/a.png"),
         });
         state.apply(Action::ChatDraftAttachmentAdded {
             workspace_id: w1,
+            thread_id,
             id: 2,
             kind: ContextTokenKind::Text,
             anchor: 5,
         });
         state.apply(Action::ChatDraftAttachmentResolved {
             workspace_id: w1,
+            thread_id,
             id: 2,
             path: PathBuf::from("/tmp/b.txt"),
         });
@@ -2155,6 +2577,7 @@ mod tests {
         // Delete bytes [3,7): "3456" -> "012789".
         state.apply(Action::ChatDraftChanged {
             workspace_id: w1,
+            thread_id,
             text: "012789".to_owned(),
         });
 
@@ -2185,9 +2608,11 @@ mod tests {
     fn conversation_loaded_does_not_reset_running_turn_state() {
         let mut state = AppState::demo();
         let workspace_id = first_non_main_workspace_id(&state);
+        let thread_id = default_thread_id();
 
         state.apply(Action::SendAgentMessage {
             workspace_id,
+            thread_id,
             text: "Hello".to_owned(),
         });
 
@@ -2197,6 +2622,7 @@ mod tests {
         };
         state.apply(Action::AgentEventReceived {
             workspace_id,
+            thread_id,
             event: CodexThreadEvent::ItemStarted { item },
         });
 
@@ -2218,6 +2644,7 @@ mod tests {
 
         state.apply(Action::ConversationLoaded {
             workspace_id,
+            thread_id,
             snapshot: ConversationSnapshot {
                 thread_id: Some("thread_0".to_owned()),
                 entries: Vec::new(),
@@ -2239,18 +2666,22 @@ mod tests {
     fn conversation_loaded_does_not_overwrite_newer_local_entries() {
         let mut state = AppState::demo();
         let workspace_id = first_non_main_workspace_id(&state);
+        let thread_id = default_thread_id();
 
         state.apply(Action::SendAgentMessage {
             workspace_id,
+            thread_id,
             text: "Hello".to_owned(),
         });
         state.apply(Action::AgentEventReceived {
             workspace_id,
+            thread_id,
             event: CodexThreadEvent::TurnDuration { duration_ms: 1234 },
         });
 
         state.apply(Action::ConversationLoaded {
             workspace_id,
+            thread_id,
             snapshot: ConversationSnapshot {
                 thread_id: None,
                 entries: vec![ConversationEntry::UserMessage {
@@ -2275,9 +2706,11 @@ mod tests {
     fn conversation_loaded_replaces_entries_when_snapshot_is_newer() {
         let mut state = AppState::demo();
         let workspace_id = first_non_main_workspace_id(&state);
+        let thread_id = default_thread_id();
 
         state.apply(Action::ConversationLoaded {
             workspace_id,
+            thread_id,
             snapshot: ConversationSnapshot {
                 thread_id: None,
                 entries: vec![ConversationEntry::UserMessage {
@@ -2288,6 +2721,7 @@ mod tests {
 
         state.apply(Action::ConversationLoaded {
             workspace_id,
+            thread_id,
             snapshot: ConversationSnapshot {
                 thread_id: None,
                 entries: vec![
@@ -2313,9 +2747,11 @@ mod tests {
     fn send_agent_message_sets_running_and_emits_effect() {
         let mut state = AppState::demo();
         let workspace_id = first_non_main_workspace_id(&state);
+        let thread_id = default_thread_id();
 
         let effects = state.apply(Action::SendAgentMessage {
             workspace_id,
+            thread_id,
             text: "Hello".to_owned(),
         });
         assert_eq!(effects.len(), 1);
@@ -2323,9 +2759,11 @@ mod tests {
             &effects[0],
             Effect::RunAgentTurn {
                 workspace_id: wid,
+                thread_id: tid,
                 text,
                 run_config
             } if *wid == workspace_id
+                && *tid == thread_id
                 && text == "Hello"
                 && run_config.model_id == default_agent_model_id()
                 && run_config.thinking_effort == default_thinking_effort()
@@ -2344,9 +2782,11 @@ mod tests {
     fn agent_item_completed_is_idempotent() {
         let mut state = AppState::demo();
         let workspace_id = first_non_main_workspace_id(&state);
+        let thread_id = default_thread_id();
 
         state.apply(Action::SendAgentMessage {
             workspace_id,
+            thread_id,
             text: "Hello".to_owned(),
         });
 
@@ -2357,10 +2797,12 @@ mod tests {
 
         state.apply(Action::AgentEventReceived {
             workspace_id,
+            thread_id,
             event: CodexThreadEvent::ItemCompleted { item: item.clone() },
         });
         state.apply(Action::AgentEventReceived {
             workspace_id,
+            thread_id,
             event: CodexThreadEvent::ItemCompleted { item },
         });
 
@@ -2377,9 +2819,11 @@ mod tests {
     fn agent_item_completed_is_idempotent_even_if_not_last_entry() {
         let mut state = AppState::demo();
         let workspace_id = first_non_main_workspace_id(&state);
+        let thread_id = default_thread_id();
 
         state.apply(Action::SendAgentMessage {
             workspace_id,
+            thread_id,
             text: "Hello".to_owned(),
         });
 
@@ -2390,14 +2834,17 @@ mod tests {
 
         state.apply(Action::AgentEventReceived {
             workspace_id,
+            thread_id,
             event: CodexThreadEvent::ItemCompleted { item: item.clone() },
         });
         state.apply(Action::AgentEventReceived {
             workspace_id,
+            thread_id,
             event: CodexThreadEvent::TurnDuration { duration_ms: 1000 },
         });
         state.apply(Action::AgentEventReceived {
             workspace_id,
+            thread_id,
             event: CodexThreadEvent::ItemCompleted { item },
         });
 
@@ -2414,13 +2861,18 @@ mod tests {
     fn cancel_agent_turn_sets_idle_and_emits_effect() {
         let mut state = AppState::demo();
         let workspace_id = first_non_main_workspace_id(&state);
+        let thread_id = default_thread_id();
 
         state.apply(Action::SendAgentMessage {
             workspace_id,
+            thread_id,
             text: "Hello".to_owned(),
         });
 
-        let effects = state.apply(Action::CancelAgentTurn { workspace_id });
+        let effects = state.apply(Action::CancelAgentTurn {
+            workspace_id,
+            thread_id,
+        });
         assert_eq!(effects.len(), 1);
         assert!(matches!(effects[0], Effect::CancelAgentTurn { .. }));
 
@@ -2437,13 +2889,16 @@ mod tests {
     fn send_agent_message_while_running_is_queued() {
         let mut state = AppState::demo();
         let workspace_id = first_non_main_workspace_id(&state);
+        let thread_id = default_thread_id();
 
         state.apply(Action::SendAgentMessage {
             workspace_id,
+            thread_id,
             text: "First".to_owned(),
         });
         let effects = state.apply(Action::SendAgentMessage {
             workspace_id,
+            thread_id,
             text: "Second".to_owned(),
         });
         assert!(effects.is_empty());
@@ -2459,18 +2914,22 @@ mod tests {
     fn completed_turn_auto_sends_next_queued_prompt() {
         let mut state = AppState::demo();
         let workspace_id = first_non_main_workspace_id(&state);
+        let thread_id = default_thread_id();
 
         state.apply(Action::SendAgentMessage {
             workspace_id,
+            thread_id,
             text: "First".to_owned(),
         });
         state.apply(Action::SendAgentMessage {
             workspace_id,
+            thread_id,
             text: "Second".to_owned(),
         });
 
         let effects = state.apply(Action::AgentEventReceived {
             workspace_id,
+            thread_id,
             event: CodexThreadEvent::TurnCompleted {
                 usage: CodexUsage {
                     input_tokens: 0,
@@ -2484,9 +2943,11 @@ mod tests {
             &effects[0],
             Effect::RunAgentTurn {
                 workspace_id: wid,
+                thread_id: tid,
                 text,
                 run_config
             } if *wid == workspace_id
+                && *tid == thread_id
                 && text == "Second"
                 && run_config.model_id == default_agent_model_id()
                 && run_config.thinking_effort == default_thinking_effort()
@@ -2509,18 +2970,22 @@ mod tests {
     fn failed_turn_pauses_queue_until_resumed() {
         let mut state = AppState::demo();
         let workspace_id = first_non_main_workspace_id(&state);
+        let thread_id = default_thread_id();
 
         state.apply(Action::SendAgentMessage {
             workspace_id,
+            thread_id,
             text: "First".to_owned(),
         });
         state.apply(Action::SendAgentMessage {
             workspace_id,
+            thread_id,
             text: "Second".to_owned(),
         });
 
         let effects = state.apply(Action::AgentEventReceived {
             workspace_id,
+            thread_id,
             event: CodexThreadEvent::TurnFailed {
                 error: CodexThreadError {
                     message: "boom".to_owned(),
@@ -2534,15 +2999,20 @@ mod tests {
         assert_eq!(conversation.pending_prompts.len(), 1);
         assert!(conversation.queue_paused);
 
-        let effects = state.apply(Action::ResumeQueuedPrompts { workspace_id });
+        let effects = state.apply(Action::ResumeQueuedPrompts {
+            workspace_id,
+            thread_id,
+        });
         assert_eq!(effects.len(), 1);
         assert!(matches!(
             &effects[0],
             Effect::RunAgentTurn {
                 workspace_id: wid,
+                thread_id: tid,
                 text,
                 run_config
             } if *wid == workspace_id
+                && *tid == thread_id
                 && text == "Second"
                 && run_config.model_id == default_agent_model_id()
                 && run_config.thinking_effort == default_thinking_effort()

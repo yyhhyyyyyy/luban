@@ -1,12 +1,18 @@
 use anyhow::{Context as _, anyhow};
-use luban_domain::{ConversationEntry, ConversationSnapshot, PersistedAppState, WorkspaceStatus};
+use luban_domain::{
+    ConversationEntry, ConversationSnapshot, ConversationThreadMeta, PersistedAppState,
+    WorkspaceStatus, WorkspaceThreadId,
+};
 use rusqlite::{Connection, OptionalExtension as _, params, params_from_iter};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
-const LATEST_SCHEMA_VERSION: u32 = 4;
+const LATEST_SCHEMA_VERSION: u32 = 5;
 const WORKSPACE_CHAT_SCROLL_PREFIX: &str = "workspace_chat_scroll_y10_";
+const WORKSPACE_ACTIVE_THREAD_PREFIX: &str = "workspace_active_thread_id_";
+const WORKSPACE_OPEN_TAB_PREFIX: &str = "workspace_open_tab_";
+const WORKSPACE_NEXT_THREAD_ID_PREFIX: &str = "workspace_next_thread_id_";
 const LAST_OPEN_WORKSPACE_ID_KEY: &str = "last_open_workspace_id";
 
 const MIGRATIONS: &[(u32, &str)] = &[
@@ -38,6 +44,13 @@ const MIGRATIONS: &[(u32, &str)] = &[
             "/migrations/0004_project_expanded.sql"
         )),
     ),
+    (
+        5,
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/migrations/0005_threaded_conversations.sql"
+        )),
+    ),
 ];
 
 pub struct SqliteStore {
@@ -63,28 +76,38 @@ enum DbCommand {
     EnsureConversation {
         project_slug: String,
         workspace_name: String,
+        thread_local_id: u64,
         reply: mpsc::Sender<anyhow::Result<()>>,
     },
     GetConversationThreadId {
         project_slug: String,
         workspace_name: String,
+        thread_local_id: u64,
         reply: mpsc::Sender<anyhow::Result<Option<String>>>,
     },
     SetConversationThreadId {
         project_slug: String,
         workspace_name: String,
+        thread_local_id: u64,
         thread_id: String,
         reply: mpsc::Sender<anyhow::Result<()>>,
+    },
+    ListConversationThreads {
+        project_slug: String,
+        workspace_name: String,
+        reply: mpsc::Sender<anyhow::Result<Vec<ConversationThreadMeta>>>,
     },
     AppendConversationEntries {
         project_slug: String,
         workspace_name: String,
+        thread_local_id: u64,
         entries: Vec<ConversationEntry>,
         reply: mpsc::Sender<anyhow::Result<()>>,
     },
     LoadConversation {
         project_slug: String,
         workspace_name: String,
+        thread_local_id: u64,
         reply: mpsc::Sender<anyhow::Result<ConversationSnapshot>>,
     },
 }
@@ -110,29 +133,37 @@ impl SqliteStore {
                             DbCommand::EnsureConversation {
                                 project_slug,
                                 workspace_name,
+                                thread_local_id,
                                 reply,
                             },
                         ) => {
-                            let _ =
-                                reply.send(db.ensure_conversation(&project_slug, &workspace_name));
+                            let _ = reply.send(db.ensure_conversation(
+                                &project_slug,
+                                &workspace_name,
+                                thread_local_id,
+                            ));
                         }
                         (
                             Ok(db),
                             DbCommand::GetConversationThreadId {
                                 project_slug,
                                 workspace_name,
+                                thread_local_id,
                                 reply,
                             },
                         ) => {
-                            let _ = reply.send(
-                                db.get_conversation_thread_id(&project_slug, &workspace_name),
-                            );
+                            let _ = reply.send(db.get_conversation_thread_id(
+                                &project_slug,
+                                &workspace_name,
+                                thread_local_id,
+                            ));
                         }
                         (
                             Ok(db),
                             DbCommand::SetConversationThreadId {
                                 project_slug,
                                 workspace_name,
+                                thread_local_id,
                                 thread_id,
                                 reply,
                             },
@@ -140,14 +171,27 @@ impl SqliteStore {
                             let _ = reply.send(db.set_conversation_thread_id(
                                 &project_slug,
                                 &workspace_name,
+                                thread_local_id,
                                 &thread_id,
                             ));
+                        }
+                        (
+                            Ok(db),
+                            DbCommand::ListConversationThreads {
+                                project_slug,
+                                workspace_name,
+                                reply,
+                            },
+                        ) => {
+                            let _ = reply
+                                .send(db.list_conversation_threads(&project_slug, &workspace_name));
                         }
                         (
                             Ok(db),
                             DbCommand::AppendConversationEntries {
                                 project_slug,
                                 workspace_name,
+                                thread_local_id,
                                 entries,
                                 reply,
                             },
@@ -155,6 +199,7 @@ impl SqliteStore {
                             let _ = reply.send(db.append_conversation_entries(
                                 &project_slug,
                                 &workspace_name,
+                                thread_local_id,
                                 &entries,
                             ));
                         }
@@ -163,11 +208,15 @@ impl SqliteStore {
                             DbCommand::LoadConversation {
                                 project_slug,
                                 workspace_name,
+                                thread_local_id,
                                 reply,
                             },
                         ) => {
-                            let _ =
-                                reply.send(db.load_conversation(&project_slug, &workspace_name));
+                            let _ = reply.send(db.load_conversation(
+                                &project_slug,
+                                &workspace_name,
+                                thread_local_id,
+                            ));
                         }
                         (Err(err), cmd) => {
                             respond_db_open_error(err, cmd);
@@ -203,12 +252,14 @@ impl SqliteStore {
         &self,
         project_slug: String,
         workspace_name: String,
+        thread_local_id: u64,
     ) -> anyhow::Result<()> {
         let (reply_tx, reply_rx) = mpsc::channel();
         self.tx
             .send(DbCommand::EnsureConversation {
                 project_slug,
                 workspace_name,
+                thread_local_id,
                 reply: reply_tx,
             })
             .context("sqlite worker is not running")?;
@@ -219,12 +270,14 @@ impl SqliteStore {
         &self,
         project_slug: String,
         workspace_name: String,
+        thread_local_id: u64,
     ) -> anyhow::Result<Option<String>> {
         let (reply_tx, reply_rx) = mpsc::channel();
         self.tx
             .send(DbCommand::GetConversationThreadId {
                 project_slug,
                 workspace_name,
+                thread_local_id,
                 reply: reply_tx,
             })
             .context("sqlite worker is not running")?;
@@ -235,6 +288,7 @@ impl SqliteStore {
         &self,
         project_slug: String,
         workspace_name: String,
+        thread_local_id: u64,
         thread_id: String,
     ) -> anyhow::Result<()> {
         let (reply_tx, reply_rx) = mpsc::channel();
@@ -242,7 +296,24 @@ impl SqliteStore {
             .send(DbCommand::SetConversationThreadId {
                 project_slug,
                 workspace_name,
+                thread_local_id,
                 thread_id,
+                reply: reply_tx,
+            })
+            .context("sqlite worker is not running")?;
+        reply_rx.recv().context("sqlite worker terminated")?
+    }
+
+    pub fn list_conversation_threads(
+        &self,
+        project_slug: String,
+        workspace_name: String,
+    ) -> anyhow::Result<Vec<ConversationThreadMeta>> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(DbCommand::ListConversationThreads {
+                project_slug,
+                workspace_name,
                 reply: reply_tx,
             })
             .context("sqlite worker is not running")?;
@@ -253,6 +324,7 @@ impl SqliteStore {
         &self,
         project_slug: String,
         workspace_name: String,
+        thread_local_id: u64,
         entries: Vec<ConversationEntry>,
     ) -> anyhow::Result<()> {
         let (reply_tx, reply_rx) = mpsc::channel();
@@ -260,6 +332,7 @@ impl SqliteStore {
             .send(DbCommand::AppendConversationEntries {
                 project_slug,
                 workspace_name,
+                thread_local_id,
                 entries,
                 reply: reply_tx,
             })
@@ -271,12 +344,14 @@ impl SqliteStore {
         &self,
         project_slug: String,
         workspace_name: String,
+        thread_local_id: u64,
     ) -> anyhow::Result<ConversationSnapshot> {
         let (reply_tx, reply_rx) = mpsc::channel();
         self.tx
             .send(DbCommand::LoadConversation {
                 project_slug,
                 workspace_name,
+                thread_local_id,
                 reply: reply_tx,
             })
             .context("sqlite worker is not running")?;
@@ -300,6 +375,9 @@ fn respond_db_open_error(err: &anyhow::Error, cmd: DbCommand) {
             let _ = reply.send(Err(anyhow!(message)));
         }
         DbCommand::SetConversationThreadId { reply, .. } => {
+            let _ = reply.send(Err(anyhow!(message)));
+        }
+        DbCommand::ListConversationThreads { reply, .. } => {
             let _ = reply.send(Err(anyhow!(message)));
         }
         DbCommand::AppendConversationEntries { reply, .. } => {
@@ -435,6 +513,93 @@ impl SqliteDatabase {
             .context("failed to load last open workspace id")?
             .and_then(|value| u64::try_from(value).ok());
 
+        let mut workspace_active_thread_id = HashMap::new();
+        let mut stmt = self.conn.prepare(
+            "SELECT key, value FROM app_settings WHERE key LIKE 'workspace_active_thread_id_%'",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        for row in rows {
+            let (key, value) = row?;
+            let Some(workspace_id) = key.strip_prefix(WORKSPACE_ACTIVE_THREAD_PREFIX) else {
+                continue;
+            };
+            let Ok(workspace_id) = workspace_id.parse::<u64>() else {
+                continue;
+            };
+            let Some(thread_id) = u64::try_from(value).ok() else {
+                continue;
+            };
+            workspace_active_thread_id.insert(workspace_id, thread_id);
+        }
+
+        let mut workspace_next_thread_id = HashMap::new();
+        let mut stmt = self.conn.prepare(
+            "SELECT key, value FROM app_settings WHERE key LIKE 'workspace_next_thread_id_%'",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        for row in rows {
+            let (key, value) = row?;
+            let Some(workspace_id) = key.strip_prefix(WORKSPACE_NEXT_THREAD_ID_PREFIX) else {
+                continue;
+            };
+            let Ok(workspace_id) = workspace_id.parse::<u64>() else {
+                continue;
+            };
+            let Some(thread_id) = u64::try_from(value).ok() else {
+                continue;
+            };
+            workspace_next_thread_id.insert(workspace_id, thread_id);
+        }
+
+        let mut workspace_open_tabs_indexed: HashMap<u64, Vec<(u8, u64)>> = HashMap::new();
+        let mut stmt = self
+            .conn
+            .prepare("SELECT key, value FROM app_settings WHERE key LIKE 'workspace_open_tab_%'")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        for row in rows {
+            let (key, value) = row?;
+            let Some(rest) = key.strip_prefix(WORKSPACE_OPEN_TAB_PREFIX) else {
+                continue;
+            };
+            let mut parts = rest.split('_');
+            let Some(index_str) = parts.next() else {
+                continue;
+            };
+            let Some(workspace_id_str) = parts.next() else {
+                continue;
+            };
+            if parts.next().is_some() {
+                continue;
+            }
+            let Ok(index) = index_str.parse::<u8>() else {
+                continue;
+            };
+            let Ok(workspace_id) = workspace_id_str.parse::<u64>() else {
+                continue;
+            };
+            let Some(thread_id) = u64::try_from(value).ok() else {
+                continue;
+            };
+            workspace_open_tabs_indexed
+                .entry(workspace_id)
+                .or_default()
+                .push((index, thread_id));
+        }
+        let mut workspace_open_tabs: HashMap<u64, Vec<u64>> = HashMap::new();
+        for (workspace_id, mut tabs) in workspace_open_tabs_indexed {
+            tabs.sort_by_key(|(index, _)| *index);
+            let ids = tabs.into_iter().map(|(_, id)| id).collect::<Vec<_>>();
+            if !ids.is_empty() {
+                workspace_open_tabs.insert(workspace_id, ids);
+            }
+        }
+
         let mut workspace_chat_scroll_y10 = HashMap::new();
         let mut stmt = self.conn.prepare(
             "SELECT key, value FROM app_settings WHERE key LIKE 'workspace_chat_scroll_y10_%'",
@@ -444,16 +609,30 @@ impl SqliteDatabase {
         })?;
         for row in rows {
             let (key, value) = row?;
-            let Some(workspace_id) = key.strip_prefix(WORKSPACE_CHAT_SCROLL_PREFIX) else {
+            let Some(rest) = key.strip_prefix(WORKSPACE_CHAT_SCROLL_PREFIX) else {
                 continue;
             };
-            let Ok(workspace_id) = workspace_id.parse::<u64>() else {
+            let mut parts = rest.split('_');
+            let Some(workspace_id_str) = parts.next() else {
                 continue;
             };
+            let Ok(workspace_id) = workspace_id_str.parse::<u64>() else {
+                continue;
+            };
+            let thread_id = match parts.next() {
+                Some(thread_id_str) => match thread_id_str.parse::<u64>() {
+                    Ok(v) => v,
+                    Err(_) => continue,
+                },
+                None => 1,
+            };
+            if parts.next().is_some() {
+                continue;
+            }
             let Some(offset_y10) = i32::try_from(value).ok() else {
                 continue;
             };
-            workspace_chat_scroll_y10.insert(workspace_id, offset_y10);
+            workspace_chat_scroll_y10.insert((workspace_id, thread_id), offset_y10);
         }
 
         Ok(PersistedAppState {
@@ -461,6 +640,9 @@ impl SqliteDatabase {
             sidebar_width,
             terminal_pane_width,
             last_open_workspace_id,
+            workspace_active_thread_id,
+            workspace_open_tabs,
+            workspace_next_thread_id,
             workspace_chat_scroll_y10,
         })
     }
@@ -591,11 +773,61 @@ impl SqliteDatabase {
         }
 
         tx.execute(
+            "DELETE FROM app_settings WHERE key LIKE 'workspace_active_thread_id_%'",
+            [],
+        )?;
+        for (workspace_id, thread_id) in &snapshot.workspace_active_thread_id {
+            let key = format!("{WORKSPACE_ACTIVE_THREAD_PREFIX}{workspace_id}");
+            tx.execute(
+                "INSERT INTO app_settings (key, value, created_at, updated_at)
+                 VALUES (?1, ?2, COALESCE((SELECT created_at FROM app_settings WHERE key = ?1), ?3), ?3)
+                 ON CONFLICT(key) DO UPDATE SET
+                   value = excluded.value,
+                   updated_at = excluded.updated_at",
+                params![key, *thread_id as i64, now],
+            )?;
+        }
+
+        tx.execute(
+            "DELETE FROM app_settings WHERE key LIKE 'workspace_open_tab_%'",
+            [],
+        )?;
+        for (workspace_id, tabs) in &snapshot.workspace_open_tabs {
+            for (idx, thread_id) in tabs.iter().copied().enumerate() {
+                let key = format!("{WORKSPACE_OPEN_TAB_PREFIX}{idx}_{workspace_id}");
+                tx.execute(
+                    "INSERT INTO app_settings (key, value, created_at, updated_at)
+                     VALUES (?1, ?2, COALESCE((SELECT created_at FROM app_settings WHERE key = ?1), ?3), ?3)
+                     ON CONFLICT(key) DO UPDATE SET
+                       value = excluded.value,
+                       updated_at = excluded.updated_at",
+                    params![key, thread_id as i64, now],
+                )?;
+            }
+        }
+
+        tx.execute(
+            "DELETE FROM app_settings WHERE key LIKE 'workspace_next_thread_id_%'",
+            [],
+        )?;
+        for (workspace_id, next_id) in &snapshot.workspace_next_thread_id {
+            let key = format!("{WORKSPACE_NEXT_THREAD_ID_PREFIX}{workspace_id}");
+            tx.execute(
+                "INSERT INTO app_settings (key, value, created_at, updated_at)
+                 VALUES (?1, ?2, COALESCE((SELECT created_at FROM app_settings WHERE key = ?1), ?3), ?3)
+                 ON CONFLICT(key) DO UPDATE SET
+                   value = excluded.value,
+                   updated_at = excluded.updated_at",
+                params![key, *next_id as i64, now],
+            )?;
+        }
+
+        tx.execute(
             "DELETE FROM app_settings WHERE key LIKE 'workspace_chat_scroll_y10_%'",
             [],
         )?;
-        for (workspace_id, offset_y10) in &snapshot.workspace_chat_scroll_y10 {
-            let key = format!("{WORKSPACE_CHAT_SCROLL_PREFIX}{workspace_id}");
+        for ((workspace_id, thread_id), offset_y10) in &snapshot.workspace_chat_scroll_y10 {
+            let key = format!("{WORKSPACE_CHAT_SCROLL_PREFIX}{workspace_id}_{thread_id}");
             tx.execute(
                 "INSERT INTO app_settings (key, value, created_at, updated_at)
                  VALUES (?1, ?2, COALESCE((SELECT created_at FROM app_settings WHERE key = ?1), ?3), ?3)
@@ -614,13 +846,32 @@ impl SqliteDatabase {
         &mut self,
         project_slug: &str,
         workspace_name: &str,
+        thread_local_id: u64,
     ) -> anyhow::Result<()> {
         let now = now_unix_seconds();
+        let default_title = format!("Thread {thread_local_id}");
         self.conn.execute(
-            "INSERT INTO conversations (project_slug, workspace_name, thread_id, created_at, updated_at)
-             VALUES (?1, ?2, NULL, ?3, ?3)
-             ON CONFLICT(project_slug, workspace_name) DO NOTHING",
-            params![project_slug, workspace_name, now],
+            "INSERT INTO conversations (project_slug, workspace_name, thread_local_id, thread_id, title, created_at, updated_at)
+             VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?5)
+             ON CONFLICT(project_slug, workspace_name, thread_local_id) DO NOTHING",
+            params![
+                project_slug,
+                workspace_name,
+                thread_local_id as i64,
+                default_title,
+                now
+            ],
+        )?;
+        self.conn.execute(
+            "UPDATE conversations
+             SET title = COALESCE(title, ?4)
+             WHERE project_slug = ?1 AND workspace_name = ?2 AND thread_local_id = ?3",
+            params![
+                project_slug,
+                workspace_name,
+                thread_local_id as i64,
+                default_title
+            ],
         )?;
 
         Ok(())
@@ -630,12 +881,14 @@ impl SqliteDatabase {
         &mut self,
         project_slug: &str,
         workspace_name: &str,
+        thread_local_id: u64,
     ) -> anyhow::Result<Option<String>> {
-        self.ensure_conversation(project_slug, workspace_name)?;
+        self.ensure_conversation(project_slug, workspace_name, thread_local_id)?;
         self.conn
             .query_row(
-                "SELECT thread_id FROM conversations WHERE project_slug = ?1 AND workspace_name = ?2",
-                params![project_slug, workspace_name],
+                "SELECT thread_id FROM conversations
+                 WHERE project_slug = ?1 AND workspace_name = ?2 AND thread_local_id = ?3",
+                params![project_slug, workspace_name, thread_local_id as i64],
                 |row| row.get::<_, Option<String>>(0),
             )
             .optional()
@@ -647,31 +900,89 @@ impl SqliteDatabase {
         &mut self,
         project_slug: &str,
         workspace_name: &str,
+        thread_local_id: u64,
         thread_id: &str,
     ) -> anyhow::Result<()> {
-        self.ensure_conversation(project_slug, workspace_name)?;
+        self.ensure_conversation(project_slug, workspace_name, thread_local_id)?;
         let now = now_unix_seconds();
         self.conn.execute(
             "UPDATE conversations
              SET thread_id = ?3, updated_at = ?4
-             WHERE project_slug = ?1 AND workspace_name = ?2",
-            params![project_slug, workspace_name, thread_id, now],
+             WHERE project_slug = ?1 AND workspace_name = ?2 AND thread_local_id = ?5",
+            params![
+                project_slug,
+                workspace_name,
+                thread_id,
+                now,
+                thread_local_id as i64
+            ],
         )?;
 
         Ok(())
+    }
+
+    fn list_conversation_threads(
+        &mut self,
+        project_slug: &str,
+        workspace_name: &str,
+    ) -> anyhow::Result<Vec<ConversationThreadMeta>> {
+        self.ensure_conversation(project_slug, workspace_name, 1)?;
+        let mut stmt = self.conn.prepare(
+            "SELECT thread_local_id, thread_id, title, updated_at
+             FROM conversations
+             WHERE project_slug = ?1 AND workspace_name = ?2
+             ORDER BY updated_at DESC, thread_local_id DESC",
+        )?;
+        let rows = stmt.query_map(params![project_slug, workspace_name], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
+        })?;
+
+        let mut threads = Vec::new();
+        for row in rows {
+            let (thread_local_id, remote_thread_id, title, updated_at) = row?;
+            let Some(thread_local_id) = u64::try_from(thread_local_id).ok() else {
+                continue;
+            };
+            let Some(updated_at) = u64::try_from(updated_at).ok() else {
+                continue;
+            };
+            let title = title.unwrap_or_else(|| format!("Thread {thread_local_id}"));
+            threads.push(ConversationThreadMeta {
+                thread_id: WorkspaceThreadId::from_u64(thread_local_id),
+                remote_thread_id,
+                title,
+                updated_at_unix_seconds: updated_at,
+            });
+        }
+
+        Ok(threads)
     }
 
     fn append_conversation_entries(
         &mut self,
         project_slug: &str,
         workspace_name: &str,
+        thread_local_id: u64,
         entries: &[ConversationEntry],
     ) -> anyhow::Result<()> {
         if entries.is_empty() {
             return Ok(());
         }
 
-        self.ensure_conversation(project_slug, workspace_name)?;
+        self.ensure_conversation(project_slug, workspace_name, thread_local_id)?;
+
+        let derived_title = entries.iter().find_map(|entry| match entry {
+            ConversationEntry::UserMessage { text } => {
+                let title = luban_domain::derive_thread_title(text);
+                if title.is_empty() { None } else { Some(title) }
+            }
+            _ => None,
+        });
 
         let now = now_unix_seconds();
         let tx = self.conn.transaction()?;
@@ -680,17 +991,38 @@ impl SqliteDatabase {
             let payload_json = serde_json::to_string(entry).context("failed to serialize entry")?;
             tx.execute(
                 "INSERT OR IGNORE INTO conversation_entries
-                 (project_slug, workspace_name, seq, kind, codex_item_id, payload_json, created_at)
-                 VALUES (?1, ?2,
-                   (SELECT COALESCE(MAX(seq), 0) + 1 FROM conversation_entries WHERE project_slug = ?1 AND workspace_name = ?2),
-                   ?3, ?4, ?5, ?6)",
-                params![project_slug, workspace_name, kind, codex_item_id, payload_json, now],
+                 (project_slug, workspace_name, thread_local_id, seq, kind, codex_item_id, payload_json, created_at)
+                 VALUES (?1, ?2, ?3,
+                   (SELECT COALESCE(MAX(seq), 0) + 1
+                    FROM conversation_entries
+                    WHERE project_slug = ?1 AND workspace_name = ?2 AND thread_local_id = ?3),
+                   ?4, ?5, ?6, ?7)",
+                params![
+                    project_slug,
+                    workspace_name,
+                    thread_local_id as i64,
+                    kind,
+                    codex_item_id,
+                    payload_json,
+                    now
+                ],
             )?;
         }
         tx.execute(
-            "UPDATE conversations SET updated_at = ?3 WHERE project_slug = ?1 AND workspace_name = ?2",
-            params![project_slug, workspace_name, now],
+            "UPDATE conversations
+             SET updated_at = ?4
+             WHERE project_slug = ?1 AND workspace_name = ?2 AND thread_local_id = ?3",
+            params![project_slug, workspace_name, thread_local_id as i64, now],
         )?;
+        if let Some(title) = derived_title {
+            tx.execute(
+                "UPDATE conversations
+                 SET title = ?4
+                 WHERE project_slug = ?1 AND workspace_name = ?2 AND thread_local_id = ?3
+                   AND (title IS NULL OR title LIKE 'Thread %')",
+                params![project_slug, workspace_name, thread_local_id as i64, title],
+            )?;
+        }
         tx.commit()?;
 
         Ok(())
@@ -700,13 +1032,15 @@ impl SqliteDatabase {
         &mut self,
         project_slug: &str,
         workspace_name: &str,
+        thread_local_id: u64,
     ) -> anyhow::Result<ConversationSnapshot> {
-        self.ensure_conversation(project_slug, workspace_name)?;
+        self.ensure_conversation(project_slug, workspace_name, thread_local_id)?;
         let thread_id = self
             .conn
             .query_row(
-                "SELECT thread_id FROM conversations WHERE project_slug = ?1 AND workspace_name = ?2",
-                params![project_slug, workspace_name],
+                "SELECT thread_id FROM conversations
+                 WHERE project_slug = ?1 AND workspace_name = ?2 AND thread_local_id = ?3",
+                params![project_slug, workspace_name, thread_local_id as i64],
                 |row| row.get::<_, Option<String>>(0),
             )
             .optional()
@@ -716,12 +1050,13 @@ impl SqliteDatabase {
         let mut stmt = self.conn.prepare(
             "SELECT payload_json
              FROM conversation_entries
-             WHERE project_slug = ?1 AND workspace_name = ?2
+             WHERE project_slug = ?1 AND workspace_name = ?2 AND thread_local_id = ?3
              ORDER BY seq ASC",
         )?;
-        let rows = stmt.query_map(params![project_slug, workspace_name], |row| {
-            row.get::<_, String>(0)
-        })?;
+        let rows = stmt.query_map(
+            params![project_slug, workspace_name, thread_local_id as i64],
+            |row| row.get::<_, String>(0),
+        )?;
 
         let mut entries = Vec::new();
         for row in rows {
@@ -886,7 +1221,10 @@ mod tests {
             sidebar_width: Some(280),
             terminal_pane_width: Some(360),
             last_open_workspace_id: Some(10),
-            workspace_chat_scroll_y10: HashMap::from([(10, -1234)]),
+            workspace_active_thread_id: HashMap::from([(10, 1)]),
+            workspace_open_tabs: HashMap::from([(10, vec![1, 2, 3])]),
+            workspace_next_thread_id: HashMap::from([(10, 4)]),
+            workspace_chat_scroll_y10: HashMap::from([((10, 1), -1234)]),
         };
 
         db.save_app_state(&snapshot).unwrap();
@@ -918,11 +1256,14 @@ mod tests {
             sidebar_width: None,
             terminal_pane_width: None,
             last_open_workspace_id: None,
+            workspace_active_thread_id: HashMap::new(),
+            workspace_open_tabs: HashMap::new(),
+            workspace_next_thread_id: HashMap::new(),
             workspace_chat_scroll_y10: HashMap::new(),
         };
         db.save_app_state(&snapshot).unwrap();
 
-        db.ensure_conversation("p", "w").unwrap();
+        db.ensure_conversation("p", "w", 1).unwrap();
 
         let item = CodexThreadItem::AgentMessage {
             id: "item_0".to_owned(),
@@ -932,12 +1273,12 @@ mod tests {
             item: Box::new(item),
         };
 
-        db.append_conversation_entries("p", "w", std::slice::from_ref(&entry))
+        db.append_conversation_entries("p", "w", 1, std::slice::from_ref(&entry))
             .unwrap();
-        db.append_conversation_entries("p", "w", std::slice::from_ref(&entry))
+        db.append_conversation_entries("p", "w", 1, std::slice::from_ref(&entry))
             .unwrap();
 
-        let snapshot = db.load_conversation("p", "w").unwrap();
+        let snapshot = db.load_conversation("p", "w", 1).unwrap();
         let count = snapshot
             .entries
             .iter()
@@ -970,11 +1311,14 @@ mod tests {
             sidebar_width: None,
             terminal_pane_width: None,
             last_open_workspace_id: None,
+            workspace_active_thread_id: HashMap::new(),
+            workspace_open_tabs: HashMap::new(),
+            workspace_next_thread_id: HashMap::new(),
             workspace_chat_scroll_y10: HashMap::new(),
         };
         db.save_app_state(&snapshot).unwrap();
 
-        db.ensure_conversation("p", "w").unwrap();
+        db.ensure_conversation("p", "w", 1).unwrap();
 
         let entry_a = ConversationEntry::CodexItem {
             item: Box::new(CodexThreadItem::AgentMessage {
@@ -989,12 +1333,12 @@ mod tests {
             }),
         };
 
-        db.append_conversation_entries("p", "w", std::slice::from_ref(&entry_a))
+        db.append_conversation_entries("p", "w", 1, std::slice::from_ref(&entry_a))
             .unwrap();
-        db.append_conversation_entries("p", "w", std::slice::from_ref(&entry_b))
+        db.append_conversation_entries("p", "w", 1, std::slice::from_ref(&entry_b))
             .unwrap();
 
-        let snapshot = db.load_conversation("p", "w").unwrap();
+        let snapshot = db.load_conversation("p", "w", 1).unwrap();
         let messages = snapshot
             .entries
             .iter()

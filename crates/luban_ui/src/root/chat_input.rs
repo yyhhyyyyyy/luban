@@ -20,12 +20,7 @@ impl LubanRootView {
             let input_state = input_state.clone();
             move |this: &mut LubanRootView, _, ev: &InputEvent, window, cx| match ev {
                 InputEvent::Change => {
-                    let workspace_id = match this.state.main_pane {
-                        MainPane::Workspace(workspace_id) => Some(workspace_id),
-                        MainPane::Dashboard => this.state.dashboard_preview_workspace_id,
-                        _ => None,
-                    };
-                    if let Some(workspace_id) = workspace_id {
+                    if let Some((workspace_id, thread_id)) = this.current_chat_key() {
                         let text = input_state.read(cx).value().to_owned();
                         let existing = this
                             .state
@@ -36,6 +31,7 @@ impl LubanRootView {
                             this.dispatch(
                                 Action::ChatDraftChanged {
                                     workspace_id,
+                                    thread_id,
                                     text: text.to_string(),
                                 },
                                 cx,
@@ -46,17 +42,12 @@ impl LubanRootView {
                 }
                 InputEvent::PressEnter { secondary: true } => {
                     let draft_text = input_state.read(cx).value().to_owned();
-                    let workspace_id = match this.state.main_pane {
-                        MainPane::Workspace(workspace_id) => Some(workspace_id),
-                        MainPane::Dashboard => this.state.dashboard_preview_workspace_id,
-                        _ => None,
-                    };
-                    let Some(workspace_id) = workspace_id else {
+                    let Some((workspace_id, thread_id)) = this.current_chat_key() else {
                         return;
                     };
                     if this
                         .pending_context_imports
-                        .get(&workspace_id)
+                        .get(&(workspace_id, thread_id))
                         .copied()
                         .unwrap_or(0)
                         > 0
@@ -76,6 +67,7 @@ impl LubanRootView {
                     this.dispatch(
                         Action::SendAgentMessage {
                             workspace_id,
+                            thread_id,
                             text: composed,
                         },
                         cx,

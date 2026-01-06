@@ -1,4 +1,4 @@
-use crate::{CodexThreadEvent, ConversationSnapshot, PersistedAppState};
+use crate::{CodexThreadEvent, ConversationSnapshot, ConversationThreadMeta, PersistedAppState};
 use std::{path::PathBuf, sync::Arc, sync::atomic::AtomicBool};
 
 #[derive(Clone, Debug)]
@@ -39,6 +39,7 @@ pub struct RunAgentTurnRequest {
     pub project_slug: String,
     pub workspace_name: String,
     pub worktree_path: PathBuf,
+    pub thread_local_id: u64,
     pub thread_id: Option<String>,
     pub prompt: String,
     pub model: Option<String>,
@@ -68,12 +69,20 @@ pub trait ProjectWorkspaceService: Send + Sync {
         &self,
         project_slug: String,
         workspace_name: String,
+        thread_id: u64,
     ) -> Result<(), String>;
+
+    fn list_conversation_threads(
+        &self,
+        project_slug: String,
+        workspace_name: String,
+    ) -> Result<Vec<ConversationThreadMeta>, String>;
 
     fn load_conversation(
         &self,
         project_slug: String,
         workspace_name: String,
+        thread_id: u64,
     ) -> Result<ConversationSnapshot, String>;
 
     fn store_context_image(

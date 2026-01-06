@@ -371,6 +371,8 @@ impl LubanRootView {
         let input_state = self.ensure_chat_input(window, cx);
 
         let conversation = self.state.workspace_conversation(workspace_id);
+        let thread_id = self.active_thread_id_for_workspace(workspace_id);
+        let chat_key = (workspace_id, thread_id);
         let entries: &[luban_domain::ConversationEntry] =
             conversation.map(|c| c.entries.as_slice()).unwrap_or(&[]);
         let entries_len = conversation.map(|c| c.entries.len()).unwrap_or(0);
@@ -398,12 +400,12 @@ impl LubanRootView {
             .unwrap_or(default_thinking_effort());
 
         let is_running = run_status == OperationStatus::Running;
-        let workspace_changed = self.last_chat_workspace_id != Some(workspace_id);
-        if workspace_changed {
+        let chat_target_changed = self.last_chat_workspace_id != Some(chat_key);
+        if chat_target_changed {
             let offset_y10 = self
                 .state
                 .workspace_chat_scroll_y10
-                .get(&workspace_id)
+                .get(&(workspace_id, thread_id))
                 .copied()
                 .unwrap_or(0);
             self.chat_scroll_handle
@@ -437,20 +439,20 @@ impl LubanRootView {
         let composed = compose_user_message_text(&draft_text, &draft_attachments);
         let pending_context_imports = self
             .pending_context_imports
-            .get(&workspace_id)
+            .get(&chat_key)
             .copied()
             .unwrap_or(0);
         let send_disabled = pending_context_imports > 0 || composed.trim().is_empty();
         let running_elapsed = if is_running {
             self.running_turn_started_at
-                .get(&workspace_id)
+                .get(&chat_key)
                 .map(|t| t.elapsed())
         } else {
             None
         };
         let tail_duration = running_elapsed.map(|elapsed| (elapsed, true)).or_else(|| {
             self.pending_turn_durations
-                .get(&workspace_id)
+                .get(&chat_key)
                 .copied()
                 .map(|elapsed| (elapsed, false))
         });
@@ -462,22 +464,13 @@ impl LubanRootView {
 
         let running_turn_summary_items: Vec<&CodexThreadItem> = if force_expand_current_turn {
             let turn_count = agent_turn_count(entries);
-            if self
-                .running_turn_user_message_count
-                .get(&workspace_id)
-                .copied()
-                != Some(turn_count)
-            {
+            if self.running_turn_user_message_count.get(&chat_key).copied() != Some(turn_count) {
                 self.running_turn_user_message_count
-                    .insert(workspace_id, turn_count);
-                self.running_turn_summary_order
-                    .insert(workspace_id, Vec::new());
+                    .insert(chat_key, turn_count);
+                self.running_turn_summary_order.insert(chat_key, Vec::new());
             }
 
-            let order = self
-                .running_turn_summary_order
-                .entry(workspace_id)
-                .or_default();
+            let order = self.running_turn_summary_order.entry(chat_key).or_default();
 
             if let Some(conversation) = conversation {
                 for id in conversation.in_progress_order.iter() {
@@ -532,8 +525,8 @@ impl LubanRootView {
             }
             items
         } else {
-            self.running_turn_user_message_count.remove(&workspace_id);
-            self.running_turn_summary_order.remove(&workspace_id);
+            self.running_turn_user_message_count.remove(&chat_key);
+            self.running_turn_summary_order.remove(&chat_key);
             Vec::new()
         };
 
@@ -547,7 +540,7 @@ impl LubanRootView {
             &running_turn_summary_items,
             force_expand_current_turn,
         );
-        self.last_chat_workspace_id = Some(workspace_id);
+        self.last_chat_workspace_id = Some(chat_key);
         self.last_chat_item_count = entries_len;
 
         let debug_layout_enabled = self.debug_layout_enabled;
@@ -644,7 +637,10 @@ impl LubanRootView {
                                         .on_click(move |_, _, app| {
                                             let _ = view_handle.update(app, |view, cx| {
                                                 view.dispatch(
-                                                    Action::ResumeQueuedPrompts { workspace_id },
+                                                    Action::ResumeQueuedPrompts {
+                                                        workspace_id,
+                                                        thread_id,
+                                                    },
                                                     cx,
                                                 );
                                             });
@@ -687,6 +683,7 @@ impl LubanRootView {
                                                             view.dispatch(
                                                                 Action::ClearQueuedPrompts {
                                                                     workspace_id,
+                                                                    thread_id,
                                                                 },
                                                                 view_cx,
                                                             );
@@ -749,6 +746,7 @@ impl LubanRootView {
                                             view.dispatch(
                                                 Action::ChatDraftAttachmentRemoved {
                                                     workspace_id,
+                                                    thread_id,
                                                     id,
                                                 },
                                                 cx,
@@ -757,6 +755,7 @@ impl LubanRootView {
                                         view.dispatch(
                                             Action::ChatDraftChanged {
                                                 workspace_id,
+                                                thread_id,
                                                 text: draft_text.clone(),
                                             },
                                             cx,
@@ -766,6 +765,7 @@ impl LubanRootView {
                                             view.dispatch(
                                                 Action::ChatDraftAttachmentAdded {
                                                     workspace_id,
+                                                    thread_id,
                                                     id,
                                                     kind,
                                                     anchor,
@@ -775,6 +775,7 @@ impl LubanRootView {
                                             view.dispatch(
                                                 Action::ChatDraftAttachmentResolved {
                                                     workspace_id,
+                                                    thread_id,
                                                     id,
                                                     path,
                                                 },
@@ -784,6 +785,7 @@ impl LubanRootView {
                                         view.dispatch(
                                             Action::RemoveQueuedPrompt {
                                                 workspace_id,
+                                                thread_id,
                                                 index: idx,
                                             },
                                             cx,
@@ -802,6 +804,7 @@ impl LubanRootView {
                                         view.dispatch(
                                             Action::RemoveQueuedPrompt {
                                                 workspace_id,
+                                                thread_id,
                                                 index: idx,
                                             },
                                             cx,
@@ -870,13 +873,14 @@ impl LubanRootView {
                                     let draft_text = input_state.read(app).value().to_owned();
                                     let anchor = input_state.read(app).cursor();
                                     let _ = view_handle.update(app, move |view, cx| {
-                                        view.dispatch(
-                                            Action::ChatDraftChanged {
-                                                workspace_id,
-                                                text: draft_text.to_string(),
-                                            },
-                                            cx,
-                                        );
+	                                        view.dispatch(
+	                                            Action::ChatDraftChanged {
+	                                                workspace_id,
+	                                                thread_id,
+	                                                text: draft_text.to_string(),
+	                                            },
+	                                            cx,
+	                                        );
 
                                         for spec in imports {
                                             let id = next_pending_context_id();
@@ -891,17 +895,25 @@ impl LubanRootView {
                                                     luban_domain::ContextTokenKind::File
                                                 }
                                             };
-                                            view.dispatch(
-                                                Action::ChatDraftAttachmentAdded {
-                                                    workspace_id,
-                                                    id,
-                                                    kind,
-                                                    anchor,
-                                                },
-                                                cx,
-                                            );
-                                            view.enqueue_context_import(workspace_id, id, kind, spec, cx);
-                                        }
+	                                            view.dispatch(
+	                                                Action::ChatDraftAttachmentAdded {
+	                                                    workspace_id,
+	                                                    thread_id,
+	                                                    id,
+	                                                    kind,
+	                                                    anchor,
+	                                                },
+	                                                cx,
+	                                            );
+	                                            view.enqueue_context_import(
+	                                                workspace_id,
+	                                                thread_id,
+	                                                id,
+	                                                kind,
+	                                                spec,
+	                                                cx,
+	                                            );
+	                                        }
                                     });
 	                            }
 	                        })
@@ -947,6 +959,7 @@ impl LubanRootView {
                                             view.dispatch(
                                                 Action::ChatDraftChanged {
                                                     workspace_id,
+                                                    thread_id,
                                                     text: draft_text.to_string(),
                                                 },
                                                 cx,
@@ -956,6 +969,7 @@ impl LubanRootView {
                                                 view.dispatch(
                                                     Action::ChatDraftAttachmentAdded {
                                                         workspace_id,
+                                                        thread_id,
                                                         id,
                                                         kind: luban_domain::ContextTokenKind::File,
                                                         anchor,
@@ -964,6 +978,7 @@ impl LubanRootView {
                                                 );
                                                 view.enqueue_context_import(
                                                     workspace_id,
+                                                    thread_id,
                                                     id,
                                                     luban_domain::ContextTokenKind::File,
                                                     spec,
@@ -997,6 +1012,7 @@ impl LubanRootView {
                                     .when_some(
                                         chat_composer_attachments_row(
                                             workspace_id,
+                                            thread_id,
                                             &draft_attachments,
                                             &view_handle,
                                             theme,
@@ -1057,7 +1073,11 @@ impl LubanRootView {
                                                             .on_mouse_down(MouseButton::Left, move |_, window, app| {
                                                                 let _ = view_handle.update(app, |view, cx| {
                                                                     view.dispatch(
-                                                                        Action::ChatModelChanged { workspace_id, model_id: model_id.clone() },
+                                                                        Action::ChatModelChanged {
+                                                                            workspace_id,
+                                                                            thread_id,
+                                                                            model_id: model_id.clone(),
+                                                                        },
                                                                         cx,
                                                                     );
                                                                 });
@@ -1134,7 +1154,11 @@ impl LubanRootView {
                                                                             .on_mouse_down(MouseButton::Left, move |_, window, app| {
                                                                                 let _ = view_handle.update(app, |view, cx| {
                                                                                     view.dispatch(
-                                                                                        Action::ThinkingEffortChanged { workspace_id, thinking_effort: effort },
+                                                                                        Action::ThinkingEffortChanged {
+                                                                                            workspace_id,
+                                                                                            thread_id,
+                                                                                            thinking_effort: effort,
+                                                                                        },
                                                                                         cx,
                                                                                     );
                                                                                 });
@@ -1200,7 +1224,11 @@ impl LubanRootView {
 
 	                                                                let _ = view_handle.update(app, |view, cx| {
 	                                                                    view.dispatch(
-	                                                                        Action::SendAgentMessage { workspace_id, text: composed.clone() },
+	                                                                        Action::SendAgentMessage {
+	                                                                            workspace_id,
+	                                                                            thread_id,
+	                                                                            text: composed.clone(),
+	                                                                        },
 	                                                                        cx,
 	                                                                    );
 	                                                                });
@@ -1218,7 +1246,13 @@ impl LubanRootView {
                                                         .tooltip("Cancel")
                                                         .on_click(move |_, _, app| {
                                                             let _ = view_handle.update(app, |view, cx| {
-                                                                view.dispatch(Action::CancelAgentTurn { workspace_id }, cx);
+                                                                view.dispatch(
+                                                                    Action::CancelAgentTurn {
+                                                                        workspace_id,
+                                                                        thread_id,
+                                                                    },
+                                                                    cx,
+                                                                );
                                                             });
                                                         }),
                                                 )
@@ -1258,6 +1292,7 @@ impl LubanRootView {
                 .flex_1()
                 .flex()
                 .flex_col()
+                .child(self.render_workspace_thread_tabs(workspace_id, thread_id, &view_handle, cx))
                 .child(history)
                 .child(composer),
         )

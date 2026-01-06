@@ -590,21 +590,29 @@ impl GitWorkspaceService {
         &self,
         project_slug: String,
         workspace_name: String,
+        thread_id: u64,
     ) -> anyhow::Result<()> {
         self.sqlite
-            .ensure_conversation(project_slug, workspace_name)
+            .ensure_conversation(project_slug, workspace_name, thread_id)
     }
 
     fn load_conversation_internal(
         &self,
         project_slug: String,
         workspace_name: String,
+        thread_id: u64,
     ) -> anyhow::Result<ConversationSnapshot> {
-        let snapshot = self
-            .sqlite
-            .load_conversation(project_slug.clone(), workspace_name.clone())?;
+        let snapshot = self.sqlite.load_conversation(
+            project_slug.clone(),
+            workspace_name.clone(),
+            thread_id,
+        )?;
 
         if !snapshot.entries.is_empty() || snapshot.thread_id.is_some() {
+            return Ok(snapshot);
+        }
+
+        if thread_id != 1 {
             return Ok(snapshot);
         }
 
@@ -617,13 +625,16 @@ impl GitWorkspaceService {
         }
 
         if let Some(thread_id) = legacy.thread_id.as_deref() {
-            let existing_thread_id = self
-                .sqlite
-                .get_conversation_thread_id(project_slug.clone(), workspace_name.clone())?;
+            let existing_thread_id = self.sqlite.get_conversation_thread_id(
+                project_slug.clone(),
+                workspace_name.clone(),
+                1,
+            )?;
             if existing_thread_id.is_none() {
                 self.sqlite.set_conversation_thread_id(
                     project_slug.clone(),
                     workspace_name.clone(),
+                    1,
                     thread_id.to_owned(),
                 )?;
             }
@@ -633,12 +644,13 @@ impl GitWorkspaceService {
             self.sqlite.append_conversation_entries(
                 project_slug.clone(),
                 workspace_name.clone(),
+                1,
                 legacy.entries,
             )?;
         }
 
         self.sqlite
-            .load_conversation(project_slug.clone(), workspace_name.clone())
+            .load_conversation(project_slug.clone(), workspace_name.clone(), 1)
     }
 
     fn run_codex_turn_streamed_via_cli(
@@ -1174,8 +1186,19 @@ impl ProjectWorkspaceService for GitWorkspaceService {
         &self,
         project_slug: String,
         workspace_name: String,
+        thread_id: u64,
     ) -> Result<(), String> {
-        self.ensure_conversation_internal(project_slug, workspace_name)
+        self.ensure_conversation_internal(project_slug, workspace_name, thread_id)
+            .map_err(|e| format!("{e:#}"))
+    }
+
+    fn list_conversation_threads(
+        &self,
+        project_slug: String,
+        workspace_name: String,
+    ) -> Result<Vec<luban_domain::ConversationThreadMeta>, String> {
+        self.sqlite
+            .list_conversation_threads(project_slug, workspace_name)
             .map_err(|e| format!("{e:#}"))
     }
 
@@ -1183,8 +1206,9 @@ impl ProjectWorkspaceService for GitWorkspaceService {
         &self,
         project_slug: String,
         workspace_name: String,
+        thread_id: u64,
     ) -> Result<ConversationSnapshot, String> {
-        self.load_conversation_internal(project_slug, workspace_name)
+        self.load_conversation_internal(project_slug, workspace_name, thread_id)
             .map_err(|e| format!("{e:#}"))
     }
 
@@ -1236,6 +1260,7 @@ impl ProjectWorkspaceService for GitWorkspaceService {
             project_slug,
             workspace_name,
             worktree_path,
+            thread_local_id,
             thread_id,
             prompt,
             model,
@@ -1248,12 +1273,19 @@ impl ProjectWorkspaceService for GitWorkspaceService {
         let mut appended_item_ids = HashSet::<String>::new();
 
         let result: anyhow::Result<()> = (|| {
-            self.ensure_conversation_internal(project_slug.clone(), workspace_name.clone())?;
+            self.ensure_conversation_internal(
+                project_slug.clone(),
+                workspace_name.clone(),
+                thread_local_id,
+            )?;
 
-            let mut existing_thread_id = self
-                .sqlite
-                .get_conversation_thread_id(project_slug.clone(), workspace_name.clone())?;
-            if existing_thread_id.is_none()
+            let mut existing_thread_id = self.sqlite.get_conversation_thread_id(
+                project_slug.clone(),
+                workspace_name.clone(),
+                thread_local_id,
+            )?;
+            if thread_local_id == 1
+                && existing_thread_id.is_none()
                 && let Some(legacy) =
                     self.load_conversation_legacy(&project_slug, &workspace_name)?
                 && let Some(legacy_thread_id) = legacy.thread_id
@@ -1261,6 +1293,7 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                 self.sqlite.set_conversation_thread_id(
                     project_slug.clone(),
                     workspace_name.clone(),
+                    thread_local_id,
                     legacy_thread_id.clone(),
                 )?;
                 existing_thread_id = Some(legacy_thread_id);
@@ -1269,6 +1302,7 @@ impl ProjectWorkspaceService for GitWorkspaceService {
             self.sqlite.append_conversation_entries(
                 project_slug.clone(),
                 workspace_name.clone(),
+                thread_local_id,
                 vec![ConversationEntry::UserMessage {
                     text: prompt.clone(),
                 }],
@@ -1317,6 +1351,7 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                                 self.sqlite.set_conversation_thread_id(
                                     project_slug.clone(),
                                     workspace_name.clone(),
+                                    thread_local_id,
                                     thread_id.clone(),
                                 )?;
                             }
@@ -1326,6 +1361,7 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                                     self.sqlite.append_conversation_entries(
                                         project_slug.clone(),
                                         workspace_name.clone(),
+                                        thread_local_id,
                                         vec![ConversationEntry::CodexItem {
                                             item: Box::new(item.clone()),
                                         }],
@@ -1347,6 +1383,7 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                                     self.sqlite.append_conversation_entries(
                                         project_slug.clone(),
                                         workspace_name.clone(),
+                                        thread_local_id,
                                         vec![ConversationEntry::TurnDuration { duration_ms }],
                                     )?;
                                     on_event(CodexThreadEvent::TurnDuration { duration_ms });
@@ -1359,6 +1396,7 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                                 self.sqlite.append_conversation_entries(
                                     project_slug.clone(),
                                     workspace_name.clone(),
+                                    thread_local_id,
                                     vec![ConversationEntry::TurnError {
                                         message: error.message.clone(),
                                     }],
@@ -1376,6 +1414,7 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                                     self.sqlite.append_conversation_entries(
                                         project_slug.clone(),
                                         workspace_name.clone(),
+                                        thread_local_id,
                                         vec![ConversationEntry::TurnDuration { duration_ms }],
                                     )?;
                                     on_event(CodexThreadEvent::TurnDuration { duration_ms });
@@ -1388,6 +1427,7 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                                 self.sqlite.append_conversation_entries(
                                     project_slug.clone(),
                                     workspace_name.clone(),
+                                    thread_local_id,
                                     vec![ConversationEntry::TurnError {
                                         message: message.clone(),
                                     }],
@@ -1405,6 +1445,7 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                                     self.sqlite.append_conversation_entries(
                                         project_slug.clone(),
                                         workspace_name.clone(),
+                                        thread_local_id,
                                         vec![ConversationEntry::TurnDuration { duration_ms }],
                                     )?;
                                     on_event(CodexThreadEvent::TurnDuration { duration_ms });
@@ -1430,6 +1471,7 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                     self.sqlite.append_conversation_entries(
                         project_slug.clone(),
                         workspace_name.clone(),
+                        thread_local_id,
                         vec![ConversationEntry::TurnDuration { duration_ms }],
                     )?;
                     on_event(CodexThreadEvent::TurnDuration { duration_ms });
@@ -1437,6 +1479,7 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                 self.sqlite.append_conversation_entries(
                     project_slug.clone(),
                     workspace_name.clone(),
+                    thread_local_id,
                     vec![ConversationEntry::TurnCanceled],
                 )?;
                 return Ok(());
@@ -1458,6 +1501,7 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                 let _ = self.sqlite.append_conversation_entries(
                     project_slug.clone(),
                     workspace_name.clone(),
+                    thread_local_id,
                     vec![ConversationEntry::TurnDuration { duration_ms }],
                 );
                 on_event(CodexThreadEvent::TurnDuration { duration_ms });
@@ -1465,6 +1509,7 @@ impl ProjectWorkspaceService for GitWorkspaceService {
             let _ = self.sqlite.append_conversation_entries(
                 project_slug.clone(),
                 workspace_name.clone(),
+                thread_local_id,
                 vec![ConversationEntry::TurnError {
                     message: format!("{err:#}"),
                 }],

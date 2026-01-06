@@ -74,9 +74,11 @@ The tab strip is rendered inside the chat pane:
 The menu lists all threads sorted by `last_active_at` descending:
 
 - Clicking an item activates the thread and ensures it is in `open_tabs` (subject to the 3-tab cap).
-- Provides secondary actions:
-  - Rename thread
-  - Delete thread (confirmation; deletes local thread state only)
+
+Future (not implemented in the initial delivery):
+
+- Rename thread.
+- Delete thread (confirmation; deletes local thread state only).
 
 ## Terminal behavior
 
@@ -118,4 +120,3 @@ We keep attachments on disk at the workspace-level context directory; threads on
   - Tab strip renders in both workspace and dashboard preview.
   - Only 3 tabs visible; overflow menu exists.
   - Active tab changes update the visible conversation and terminal selection.
-

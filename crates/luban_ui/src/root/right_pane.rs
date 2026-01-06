@@ -42,18 +42,20 @@ impl LubanRootView {
     fn ensure_workspace_terminal(
         &mut self,
         workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<gpui::Entity<gpui_ghostty_terminal::view::TerminalView>> {
         if !self.terminal_enabled {
             return None;
         }
-        if self.workspace_terminal_errors.contains_key(&workspace_id) {
+        let key = (workspace_id, thread_id);
+        if self.workspace_terminal_errors.contains_key(&key) {
             return None;
         }
-        if let Some(terminal) = self.workspace_terminals.get(&workspace_id) {
+        if let Some(terminal) = self.workspace_terminals.get(&key) {
             if terminal.is_closed() {
-                self.workspace_terminals.remove(&workspace_id);
+                self.workspace_terminals.remove(&key);
             } else {
                 return Some(terminal.view());
             }
@@ -62,14 +64,12 @@ impl LubanRootView {
         let (_, worktree_path) = workspace_context(&self.state, workspace_id)?;
         match spawn_workspace_terminal(cx, window, worktree_path) {
             Ok(terminal) => {
-                self.workspace_terminals.insert(workspace_id, terminal);
+                self.workspace_terminals.insert(key, terminal);
                 self.resize_workspace_terminals(window, cx);
-                self.workspace_terminals
-                    .get(&workspace_id)
-                    .map(|t| t.view())
+                self.workspace_terminals.get(&key).map(|t| t.view())
             }
             Err(message) => {
-                self.workspace_terminal_errors.insert(workspace_id, message);
+                self.workspace_terminal_errors.insert(key, message);
                 None
             }
         }
@@ -84,10 +84,12 @@ impl LubanRootView {
         let MainPane::Workspace(workspace_id) = self.state.main_pane else {
             return div().into_any_element();
         };
+        let thread_id = self.active_thread_id_for_workspace(workspace_id);
+        let key = (workspace_id, thread_id);
 
-        let error = self.workspace_terminal_errors.get(&workspace_id).cloned();
+        let error = self.workspace_terminal_errors.get(&key).cloned();
         let terminal_view = if error.is_none() {
-            self.ensure_workspace_terminal(workspace_id, window, cx)
+            self.ensure_workspace_terminal(workspace_id, thread_id, window, cx)
         } else {
             None
         };
