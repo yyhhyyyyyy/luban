@@ -41,17 +41,18 @@ use crate::terminal_panel::{WorkspaceTerminal, spawn_workspace_terminal, termina
 mod chat_input;
 mod dashboard;
 mod gh;
+mod layout;
 mod right_pane;
 mod sidebar;
 mod titlebar;
+use layout::{
+    DASHBOARD_PREVIEW_RESIZER_WIDTH, DashboardPreviewResizeDrag, DashboardPreviewResizeGhost,
+    DashboardPreviewResizeState, RIGHT_PANE_CONTENT_PADDING, SIDEBAR_RESIZER_WIDTH,
+    SidebarResizeDrag, SidebarResizeGhost, SidebarResizeState, TERMINAL_PANE_RESIZER_WIDTH,
+    TITLEBAR_HEIGHT, TerminalPaneResizeDrag, TerminalPaneResizeGhost, TerminalPaneResizeState,
+};
 use sidebar::render_sidebar;
 use titlebar::render_titlebar;
-
-const TERMINAL_PANE_RESIZER_WIDTH: f32 = 6.0;
-const SIDEBAR_RESIZER_WIDTH: f32 = 6.0;
-const DASHBOARD_PREVIEW_RESIZER_WIDTH: f32 = 6.0;
-const RIGHT_PANE_CONTENT_PADDING: f32 = 8.0;
-const TITLEBAR_HEIGHT: f32 = 44.0;
 const MAX_INLINE_PASTE_CHARS: usize = 8_000;
 const MAX_INLINE_PASTE_LINES: usize = 200;
 const CHAT_ATTACHMENT_THUMBNAIL_SIZE: f32 = 72.0;
@@ -462,57 +463,6 @@ fn chat_composer_attachments_row(
             )
             .into_any_element(),
     )
-}
-
-#[derive(Clone, Copy, Debug)]
-struct TerminalPaneResizeState {
-    start_mouse_x: Pixels,
-    start_width: Pixels,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct TerminalPaneResizeDrag;
-
-struct TerminalPaneResizeGhost;
-
-impl gpui::Render for TerminalPaneResizeGhost {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        div().w(px(0.0)).h(px(0.0)).hidden()
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-struct SidebarResizeState {
-    start_mouse_x: Pixels,
-    start_width: Pixels,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct SidebarResizeDrag;
-
-struct SidebarResizeGhost;
-
-impl gpui::Render for SidebarResizeGhost {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        div().w(px(0.0)).h(px(0.0)).hidden()
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-struct DashboardPreviewResizeState {
-    start_mouse_x: Pixels,
-    start_width: Pixels,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct DashboardPreviewResizeDrag;
-
-struct DashboardPreviewResizeGhost;
-
-impl gpui::Render for DashboardPreviewResizeGhost {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        div().w(px(0.0)).h(px(0.0)).hidden()
-    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -2381,201 +2331,6 @@ impl gpui::Render for LubanRootView {
 }
 
 impl LubanRootView {
-    fn ensure_terminal_resize_observer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.terminal_resize_hooked {
-            return;
-        }
-        self.terminal_resize_hooked = true;
-
-        let subscription = cx.observe_window_bounds(window, move |this, window, cx| {
-            if !this.terminal_enabled {
-                return;
-            }
-            this.resize_workspace_terminals(window, cx);
-        });
-        self._subscriptions.push(subscription);
-    }
-
-    fn sidebar_width(&self, window: &Window) -> Pixels {
-        let viewport_width = window.viewport_size().width;
-        let desired = self
-            .sidebar_width_preview
-            .or_else(|| self.state.sidebar_width.map(|v| px(v as f32)))
-            .unwrap_or(px(300.0));
-        self.clamp_sidebar_width(desired, viewport_width)
-    }
-
-    fn clamp_sidebar_width(&self, desired: Pixels, viewport_width: Pixels) -> Pixels {
-        let divider_width = px(SIDEBAR_RESIZER_WIDTH);
-        if viewport_width <= divider_width + px(1.0) {
-            return px(0.0);
-        }
-
-        let min_width = px(240.0);
-        let max_width = px(480.0);
-        let min_main_width = px(480.0);
-        let min_terminal_width = px(240.0) + px(TERMINAL_PANE_RESIZER_WIDTH);
-        let reserved_right =
-            if self.terminal_enabled && self.state.right_pane == RightPane::Terminal {
-                min_terminal_width
-            } else {
-                px(0.0)
-            };
-
-        let absolute_max = viewport_width - divider_width;
-        let max_by_layout = if viewport_width > divider_width + reserved_right + min_main_width {
-            viewport_width - divider_width - reserved_right - min_main_width
-        } else {
-            px(0.0)
-        };
-        let layout_max = if max_by_layout > px(0.0) {
-            max_by_layout
-        } else {
-            absolute_max
-        };
-        let max_allowed = max_width.min(absolute_max).min(layout_max);
-        let min_allowed = min_width.min(max_allowed);
-
-        desired.clamp(min_allowed, max_allowed)
-    }
-
-    fn finish_sidebar_resize(&mut self, viewport_width: Pixels, cx: &mut Context<Self>) {
-        self.sidebar_resize = None;
-
-        let Some(preview) = self.sidebar_width_preview.take() else {
-            return;
-        };
-
-        let clamped = self.clamp_sidebar_width(preview, viewport_width);
-        let width = f32::from(clamped).round().max(0.0) as u16;
-        self.dispatch(Action::SidebarWidthChanged { width }, cx);
-    }
-
-    fn right_pane_width(&self, window: &Window, sidebar_width: Pixels) -> gpui::Pixels {
-        let viewport = window.viewport_size().width;
-        let sidebar_divider_width = px(SIDEBAR_RESIZER_WIDTH);
-        let divider_width = px(TERMINAL_PANE_RESIZER_WIDTH);
-        if viewport <= sidebar_width + sidebar_divider_width + divider_width + px(1.0) {
-            return px(0.0);
-        }
-
-        let available = viewport - sidebar_width - sidebar_divider_width - divider_width;
-        let min_main_width = px(640.0);
-        let min_user_main_width = px(480.0);
-        let preferred_main_width = px(900.0);
-        let min_width = px(240.0);
-        let max_width = px(480.0);
-        let ratio_width = px((f32::from(available) * 0.34).round()).clamp(min_width, max_width);
-
-        let clamp_user_width = |desired: Pixels| {
-            let max_by_main = if available > min_user_main_width + px(1.0) {
-                available - min_user_main_width
-            } else {
-                available
-            };
-            desired
-                .clamp(min_width, max_width)
-                .min(max_by_main)
-                .min(available)
-        };
-
-        if let Some(desired) = self
-            .terminal_pane_width_preview
-            .or_else(|| self.state.terminal_pane_width.map(|v| px(v as f32)))
-        {
-            return clamp_user_width(desired);
-        }
-
-        if available > preferred_main_width + px(1.0) {
-            let max_by_preferred_main = available - preferred_main_width;
-            ratio_width.min(max_by_preferred_main).min(available)
-        } else if available > min_main_width + px(1.0) {
-            let max_by_min_main = available - min_main_width;
-            ratio_width.min(max_by_min_main).min(available)
-        } else {
-            ratio_width.min(available)
-        }
-    }
-
-    fn clamp_terminal_pane_width(
-        &self,
-        desired: Pixels,
-        viewport_width: Pixels,
-        sidebar_width: Pixels,
-    ) -> Pixels {
-        let sidebar_divider_width = px(SIDEBAR_RESIZER_WIDTH);
-        let divider_width = px(TERMINAL_PANE_RESIZER_WIDTH);
-        if viewport_width <= sidebar_width + sidebar_divider_width + divider_width + px(1.0) {
-            return px(0.0);
-        }
-
-        let available = viewport_width - sidebar_width - sidebar_divider_width - divider_width;
-        let min_main_width = px(480.0);
-        let min_width = px(240.0);
-        let max_width = px(480.0);
-        let max_by_main = if available > min_main_width + px(1.0) {
-            available - min_main_width
-        } else {
-            available
-        };
-
-        desired
-            .clamp(min_width, max_width)
-            .min(max_by_main)
-            .min(available)
-    }
-
-    fn finish_terminal_pane_resize(
-        &mut self,
-        viewport_width: Pixels,
-        sidebar_width: Pixels,
-        cx: &mut Context<Self>,
-    ) {
-        self.terminal_pane_resize = None;
-
-        let Some(preview) = self.terminal_pane_width_preview.take() else {
-            return;
-        };
-
-        let clamped = self.clamp_terminal_pane_width(preview, viewport_width, sidebar_width);
-        let width = f32::from(clamped).round().max(0.0) as u16;
-        self.dispatch(Action::TerminalPaneWidthChanged { width }, cx);
-    }
-
-    fn dashboard_preview_width(&self, window: &Window) -> Pixels {
-        let viewport_width = window.viewport_size().width;
-        let desired = self
-            .dashboard_preview_width_preview
-            .unwrap_or(self.last_dashboard_preview_width);
-        self.clamp_dashboard_preview_width(desired, viewport_width)
-    }
-
-    fn clamp_dashboard_preview_width(&self, desired: Pixels, viewport_width: Pixels) -> Pixels {
-        let divider_width = px(DASHBOARD_PREVIEW_RESIZER_WIDTH);
-        if viewport_width <= divider_width + px(1.0) {
-            return px(0.0);
-        }
-
-        let min_width = px(320.0);
-        let max_width = px(900.0);
-        let absolute_max = viewport_width - divider_width;
-        let max_allowed = max_width.min(absolute_max);
-        let min_allowed = min_width.min(max_allowed);
-        desired.clamp(min_allowed, max_allowed)
-    }
-
-    fn finish_dashboard_preview_resize(&mut self, viewport_width: Pixels, cx: &mut Context<Self>) {
-        self.dashboard_preview_resize = None;
-
-        let Some(preview) = self.dashboard_preview_width_preview.take() else {
-            return;
-        };
-
-        let clamped = self.clamp_dashboard_preview_width(preview, viewport_width);
-        self.last_dashboard_preview_width = px(f32::from(clamped).round().max(0.0));
-        cx.notify();
-    }
-
     fn update_workspace_thread_tab_reorder(&mut self, mouse_x: Pixels, cx: &mut Context<Self>) {
         let Some(state) = self.workspace_thread_tab_reorder else {
             return;
