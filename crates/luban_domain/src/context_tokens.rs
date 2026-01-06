@@ -16,6 +16,14 @@ impl ContextTokenKind {
             _ => None,
         }
     }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Image => "image",
+            Self::Text => "text",
+            Self::File => "file",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

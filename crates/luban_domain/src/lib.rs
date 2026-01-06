@@ -13,6 +13,11 @@ mod context_tokens;
 pub use context_tokens::{
     ContextToken, ContextTokenKind, extract_context_image_paths_in_order, find_context_tokens,
 };
+mod chat_draft;
+pub use chat_draft::{
+    compose_user_message_text, draft_text_and_attachments_from_message_text,
+    ordered_draft_attachments_for_display,
+};
 mod agent_settings;
 pub use agent_settings::{
     AgentModelSpec, ThinkingEffort, agent_model_label, agent_models, default_agent_model_id,

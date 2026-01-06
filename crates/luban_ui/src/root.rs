@@ -21,8 +21,9 @@ use luban_domain::{
     DashboardPreviewModel, DashboardStage, Effect, MainPane, OperationStatus, ProjectId,
     ProjectWorkspaceService, PullRequestInfo, RightPane, RunAgentTurnRequest, ThinkingEffort,
     WorkspaceId, WorkspaceStatus, WorkspaceThreadId, agent_model_label, agent_models,
-    dashboard_cards, dashboard_preview, default_agent_model_id, default_thinking_effort,
-    thinking_effort_supported,
+    compose_user_message_text, dashboard_cards, dashboard_preview, default_agent_model_id,
+    default_thinking_effort, draft_text_and_attachments_from_message_text,
+    ordered_draft_attachments_for_display, thinking_effort_supported,
 };
 use std::{
     cell::RefCell,
@@ -73,104 +74,8 @@ enum ContextImportSpec {
     File { source_path: PathBuf },
 }
 
-fn context_token(kind: &str, value: &str) -> String {
-    format!("<<context:{kind}:{value}>>>")
-}
-
 fn next_pending_context_id() -> u64 {
     PENDING_CONTEXT_TOKEN_ID.fetch_add(1, Ordering::Relaxed)
-}
-
-fn draft_text_and_attachments_from_message_text(
-    text: &str,
-) -> (
-    String,
-    Vec<(luban_domain::ContextTokenKind, usize, PathBuf)>,
-) {
-    let tokens = luban_domain::find_context_tokens(text);
-    if tokens.is_empty() {
-        return (text.to_owned(), Vec::new());
-    }
-
-    let mut draft = String::with_capacity(text.len());
-    let mut attachments = Vec::new();
-    let mut cursor = 0usize;
-    for token in tokens {
-        if token.range.start > cursor {
-            draft.push_str(&text[cursor..token.range.start]);
-        }
-        let anchor = draft.len();
-        attachments.push((token.kind, anchor, token.path));
-        cursor = token.range.end;
-    }
-    if cursor < text.len() {
-        draft.push_str(&text[cursor..]);
-    }
-
-    (draft, attachments)
-}
-
-fn ordered_draft_attachments_for_display(
-    attachments: &[luban_domain::DraftAttachment],
-) -> Vec<luban_domain::DraftAttachment> {
-    let mut out = attachments.to_vec();
-    out.sort_by(|a, b| (a.anchor, a.id).cmp(&(b.anchor, b.id)));
-    out
-}
-
-fn compose_user_message_text(
-    draft_text: &str,
-    attachments: &[luban_domain::DraftAttachment],
-) -> String {
-    let mut ready = attachments
-        .iter()
-        .filter(|a| a.path.is_some() && !a.failed)
-        .collect::<Vec<_>>();
-    if ready.is_empty() {
-        return draft_text.trim().to_owned();
-    }
-
-    ready.sort_by(|a, b| (a.anchor, a.id).cmp(&(b.anchor, b.id)));
-
-    let bytes = draft_text.as_bytes();
-    let mut cursor = 0usize;
-    let mut out = String::with_capacity(draft_text.len() + ready.len() * 48);
-
-    let mut idx = 0usize;
-    while idx < ready.len() {
-        let anchor = ready[idx].anchor.min(draft_text.len());
-        out.push_str(&draft_text[cursor..anchor]);
-
-        if anchor > 0 && bytes[anchor - 1] != b'\n' {
-            out.push('\n');
-        }
-
-        let mut first = true;
-        while idx < ready.len() && ready[idx].anchor.min(draft_text.len()) == anchor {
-            let attachment = ready[idx];
-            let path = attachment.path.as_ref().expect("ready attachment path");
-            let kind = match attachment.kind {
-                luban_domain::ContextTokenKind::Image => "image",
-                luban_domain::ContextTokenKind::Text => "text",
-                luban_domain::ContextTokenKind::File => "file",
-            };
-            if !first {
-                out.push('\n');
-            }
-            first = false;
-            out.push_str(&context_token(kind, path.to_string_lossy().as_ref()));
-            idx += 1;
-        }
-
-        if anchor < draft_text.len() && bytes[anchor] != b'\n' {
-            out.push('\n');
-        }
-
-        cursor = anchor;
-    }
-
-    out.push_str(&draft_text[cursor..]);
-    out.trim().to_owned()
 }
 
 fn should_inline_paste_text(text: &str) -> bool {
@@ -207,6 +112,11 @@ fn is_text_like_extension(path: &std::path::Path) -> bool {
             | "log"
             | "csv"
     )
+}
+
+#[cfg(test)]
+fn context_token(kind: &str, value: &str) -> String {
+    format!("<<context:{kind}:{value}>>>")
 }
 
 fn image_format_extension(format: gpui::ImageFormat) -> Option<&'static str> {
