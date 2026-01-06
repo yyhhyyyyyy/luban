@@ -23,8 +23,14 @@ test:
 test-fast:
   cargo test -p luban_domain
 
-run:
-  cargo run -p luban_app
+run profile="debug":
+  if [ "{{profile}}" = "release" ]; then \
+    cargo run -p luban_app --release; \
+  elif [ "{{profile}}" = "debug" ] || [ "{{profile}}" = "dev" ]; then \
+    cargo run -p luban_app; \
+  else \
+    cargo run -p luban_app --profile "{{profile}}"; \
+  fi
 
 build profile="debug":
   if [ "{{profile}}" = "release" ]; then \
