@@ -19,7 +19,6 @@ use std::{
 
 use crate::sqlite_store::SqliteStore;
 
-const SIDECAR_EVENT_PREFIX: &str = "__LUBAN_EVENT__ ";
 const CODEX_BIN_ENV: &str = "LUBAN_CODEX_BIN";
 
 fn contains_attempt_fraction(text: &str) -> bool {
@@ -168,43 +167,35 @@ fn generate_turn_scope_id() -> String {
     format!("turn-{micros:x}-{rand:x}")
 }
 
-enum SidecarStdoutLine {
+enum CodexStdoutLine {
     Event(Box<CodexThreadEvent>),
     Ignored { message: String },
     Noise { message: String },
 }
 
-fn parse_sidecar_stdout_line(line: &str) -> anyhow::Result<SidecarStdoutLine> {
+fn parse_codex_stdout_line(line: &str) -> anyhow::Result<CodexStdoutLine> {
     let trimmed = line.trim();
     if trimmed.is_empty() {
-        return Ok(SidecarStdoutLine::Noise {
+        return Ok(CodexStdoutLine::Noise {
             message: String::new(),
         });
     }
 
-    let (payload, is_protocol) = if let Some(payload) = trimmed.strip_prefix(SIDECAR_EVENT_PREFIX) {
-        (payload.trim_start(), true)
-    } else {
-        (trimmed, false)
-    };
-
+    let payload = trimmed;
     let looks_like_json = payload.starts_with('{') || payload.starts_with('[');
     if !looks_like_json {
-        return Ok(SidecarStdoutLine::Noise {
+        return Ok(CodexStdoutLine::Noise {
             message: payload.to_owned(),
         });
     }
 
     match serde_json::from_str::<CodexThreadEvent>(payload) {
-        Ok(event) => Ok(SidecarStdoutLine::Event(Box::new(event))),
-        Err(err) => {
+        Ok(event) => Ok(CodexStdoutLine::Event(Box::new(event))),
+        Err(_err) => {
             let value = match serde_json::from_str::<serde_json::Value>(payload) {
                 Ok(value) => value,
-                Err(_) if is_protocol => {
-                    return Err(err).context("failed to parse sidecar protocol JSON");
-                }
                 Err(_) => {
-                    return Ok(SidecarStdoutLine::Noise {
+                    return Ok(CodexStdoutLine::Noise {
                         message: payload.to_owned(),
                     });
                 }
@@ -216,8 +207,8 @@ fn parse_sidecar_stdout_line(line: &str) -> anyhow::Result<SidecarStdoutLine> {
                 .and_then(|v| v.as_str())
                 .unwrap_or("<missing type>");
 
-            Ok(SidecarStdoutLine::Ignored {
-                message: format!("ignored sidecar event: {type_name}"),
+            Ok(CodexStdoutLine::Ignored {
+                message: format!("ignored codex event: {type_name}"),
             })
         }
     }
@@ -781,11 +772,9 @@ impl GitWorkspaceService {
                 break;
             }
 
-            match parse_sidecar_stdout_line(trimmed) {
-                Ok(SidecarStdoutLine::Event(event)) => on_event(*event)?,
-                Ok(
-                    SidecarStdoutLine::Ignored { message } | SidecarStdoutLine::Noise { message },
-                ) => {
+            match parse_codex_stdout_line(trimmed) {
+                Ok(CodexStdoutLine::Event(event)) => on_event(*event)?,
+                Ok(CodexStdoutLine::Ignored { message } | CodexStdoutLine::Noise { message }) => {
                     if message.is_empty() {
                         continue;
                     }
@@ -804,9 +793,9 @@ impl GitWorkspaceService {
 
         let status = child
             .lock()
-            .map_err(|_| anyhow!("failed to lock node child"))?
+            .map_err(|_| anyhow!("failed to lock codex child"))?
             .wait()
-            .context("failed to wait for node")?;
+            .context("failed to wait for codex")?;
         finished.store(true, Ordering::SeqCst);
         let _ = killer.join();
         let stderr_text = stderr_handle.join().unwrap_or_default();
@@ -816,7 +805,7 @@ impl GitWorkspaceService {
         }
 
         if !status.success() {
-            let sidecar_noise = if stdout_noise.is_empty() {
+            let codex_noise = if stdout_noise.is_empty() {
                 String::new()
             } else {
                 format!("\nstdout (non-protocol):\n{}\n", stdout_noise.join("\n"))
@@ -825,7 +814,7 @@ impl GitWorkspaceService {
                 "codex failed ({}):\nstderr:\n{}{}",
                 status,
                 stderr_text.trim(),
-                sidecar_noise
+                codex_noise
             ));
         }
 
@@ -921,38 +910,36 @@ mod tests {
     }
 
     #[test]
-    fn sidecar_stdout_parsing_accepts_prefixed_events() {
-        let parsed = parse_sidecar_stdout_line("__LUBAN_EVENT__ {\"type\":\"turn.started\"}")
-            .expect("parse should succeed");
-        assert!(matches!(
-            parsed,
-            SidecarStdoutLine::Event(event) if matches!(*event, CodexThreadEvent::TurnStarted)
-        ));
-    }
-
-    #[test]
-    fn sidecar_stdout_parsing_accepts_legacy_json_events() {
+    fn codex_stdout_parsing_accepts_events() {
         let parsed =
-            parse_sidecar_stdout_line("{\"type\":\"turn.started\"}").expect("parse should succeed");
+            parse_codex_stdout_line("{\"type\":\"turn.started\"}").expect("parse should succeed");
         assert!(matches!(
             parsed,
-            SidecarStdoutLine::Event(event) if matches!(*event, CodexThreadEvent::TurnStarted)
+            CodexStdoutLine::Event(event) if matches!(*event, CodexThreadEvent::TurnStarted)
         ));
     }
 
     #[test]
-    fn sidecar_stdout_parsing_ignores_unknown_events() {
-        let parsed = parse_sidecar_stdout_line(
-            "__LUBAN_EVENT__ {\"type\":\"turn.reconnect\",\"detail\":\"x\"}",
-        )
-        .expect("parse should succeed");
-        assert!(matches!(parsed, SidecarStdoutLine::Ignored { .. }));
+    fn codex_stdout_parsing_accepts_legacy_json_events() {
+        let parsed =
+            parse_codex_stdout_line("{\"type\":\"turn.started\"}").expect("parse should succeed");
+        assert!(matches!(
+            parsed,
+            CodexStdoutLine::Event(event) if matches!(*event, CodexThreadEvent::TurnStarted)
+        ));
     }
 
     #[test]
-    fn sidecar_stdout_parsing_treats_plain_text_as_noise() {
-        let parsed = parse_sidecar_stdout_line("retry/reconnect").expect("parse should succeed");
-        assert!(matches!(parsed, SidecarStdoutLine::Noise { .. }));
+    fn codex_stdout_parsing_ignores_unknown_events() {
+        let parsed = parse_codex_stdout_line("{\"type\":\"turn.reconnect\",\"detail\":\"x\"}")
+            .expect("parse should succeed");
+        assert!(matches!(parsed, CodexStdoutLine::Ignored { .. }));
+    }
+
+    #[test]
+    fn codex_stdout_parsing_treats_plain_text_as_noise() {
+        let parsed = parse_codex_stdout_line("retry/reconnect").expect("parse should succeed");
+        assert!(matches!(parsed, CodexStdoutLine::Noise { .. }));
     }
 
     #[test]

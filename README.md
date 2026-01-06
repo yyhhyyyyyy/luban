@@ -32,17 +32,13 @@ xcodebuild -downloadComponent MetalToolchain
 just run
 ```
 
-### Codex SDK (local sidecar)
+### Codex CLI
 
-The Agent chat panel uses the `@openai/codex-sdk` TypeScript SDK via a small sidecar.
+The Agent chat panel streams events from the Codex CLI.
 
-The bundled sidecar (`tools/codex_sidecar/dist/run.mjs`) is checked in. You generally should not rebuild it unless you bump the SDK version.
+Install Codex CLI and ensure `codex` is available in `PATH`.
 
-To rebuild the bundled script:
-
-```bash
-just sidecar-build
-```
+Optionally, set `LUBAN_CODEX_BIN` to override the executable path.
 
 ### Build
 
