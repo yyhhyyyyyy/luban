@@ -1816,6 +1816,7 @@ impl LubanRootView {
                 let popover_handle = cx.entity();
                 let scroll_handle = gpui::ScrollHandle::new();
                 let scroll_handle_overlay = scroll_handle.clone();
+                let has_archived = !archived_entries.is_empty();
 
                 let active_header = div()
                     .debug_selector(|| "workspace-thread-tabs-menu-active-section".to_owned())
@@ -2022,8 +2023,9 @@ impl LubanRootView {
                                     .gap_1()
                                     .child(active_header)
                                     .children(active_items)
-                                    .child(archived_header)
-                                    .children(archived_items),
+                                    .when(has_archived, move |s| {
+                                        s.child(archived_header).children(archived_items)
+                                    }),
                             ),
                     )
                     .child(
@@ -6040,6 +6042,64 @@ mod tests {
         assert!(
             !tabs.archived_tabs.contains(&archived_thread),
             "expected restored tab to be removed from archived tabs"
+        );
+    }
+
+    #[gpui::test]
+    async fn workspace_thread_tabs_menu_hides_archived_section_when_empty(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "abandon-about".to_owned(),
+            branch_name: "luban/abandon-about".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+        });
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
+        state.apply(Action::OpenWorkspace { workspace_id });
+        for _ in 0..2 {
+            state.apply(Action::CreateWorkspaceThread { workspace_id });
+        }
+
+        let (_view, window_cx) =
+            cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+        window_cx.simulate_resize(size(px(900.0), px(320.0)));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        let trigger = window_cx
+            .debug_bounds("workspace-thread-tabs-menu-trigger")
+            .expect("missing thread menu trigger");
+        window_cx.simulate_click(trigger.center(), Modifiers::none());
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        assert!(
+            window_cx
+                .debug_bounds("workspace-thread-tabs-menu-active-section")
+                .is_some(),
+            "expected active section header in the thread menu"
+        );
+        assert!(
+            window_cx
+                .debug_bounds("workspace-thread-tabs-menu-archived-section")
+                .is_none(),
+            "archived section should be hidden when there are no archived tabs"
+        );
+        assert!(
+            window_cx
+                .debug_bounds("workspace-thread-tabs-menu-archived-0")
+                .is_none(),
+            "archived rows should be hidden when there are no archived tabs"
         );
     }
 
