@@ -52,6 +52,8 @@ const RIGHT_PANE_CONTENT_PADDING: f32 = 8.0;
 const TITLEBAR_HEIGHT: f32 = 44.0;
 const MAX_INLINE_PASTE_CHARS: usize = 8_000;
 const MAX_INLINE_PASTE_LINES: usize = 200;
+const CONTEXT_TOKEN_MARKER: char = '\u{2060}';
+const CONTEXT_TOKEN_MARKER_STR: &str = "\u{2060}";
 
 static PENDING_CONTEXT_TOKEN_ID: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(1);
@@ -76,40 +78,161 @@ fn next_pending_context_id() -> u64 {
     PENDING_CONTEXT_TOKEN_ID.fetch_add(1, Ordering::Relaxed)
 }
 
-fn draft_attachments_ready(
+fn ordered_draft_attachments_for_display(
+    draft: &str,
     attachments: &[luban_domain::DraftAttachment],
 ) -> Vec<luban_domain::DraftAttachment> {
-    attachments
-        .iter()
-        .filter(|a| a.path.is_some() && !a.failed)
-        .cloned()
-        .collect()
+    if attachments.len() <= 1 {
+        return attachments.to_vec();
+    }
+
+    let tokens = luban_domain::find_context_tokens(draft);
+    if tokens.is_empty() {
+        return attachments.to_vec();
+    }
+
+    let mut pending_by_id: HashMap<u64, luban_domain::DraftAttachment> = HashMap::new();
+    let mut ready_by_path: HashMap<PathBuf, luban_domain::DraftAttachment> = HashMap::new();
+    for attachment in attachments {
+        pending_by_id.insert(attachment.id, attachment.clone());
+        if let Some(path) = attachment.path.clone() {
+            ready_by_path.insert(path, attachment.clone());
+        }
+    }
+
+    let mut out: Vec<luban_domain::DraftAttachment> = Vec::new();
+    for token in tokens {
+        if let Some(raw) = token.path.to_str()
+            && let Some(id) = raw
+                .strip_prefix("pending/")
+                .and_then(|s| s.parse::<u64>().ok())
+        {
+            if let Some(attachment) = pending_by_id.remove(&id) {
+                out.push(attachment);
+            }
+            continue;
+        }
+
+        if let Some(attachment) = ready_by_path.remove(&token.path) {
+            out.push(attachment);
+        }
+    }
+
+    if out.len() == attachments.len() {
+        return out;
+    }
+
+    for attachment in attachments {
+        if out.iter().any(|a| a.id == attachment.id) {
+            continue;
+        }
+        out.push(attachment.clone());
+    }
+    out
 }
 
 fn compose_user_message_text(
     draft_text: &str,
     attachments: &[luban_domain::DraftAttachment],
 ) -> String {
-    let mut out = draft_text.trim().to_owned();
-    for attachment in draft_attachments_ready(attachments) {
-        let Some(path) = attachment.path else {
-            continue;
-        };
-        let token = match attachment.kind {
-            luban_domain::ContextTokenKind::Image => {
-                context_token("image", path.to_string_lossy().as_ref())
+    let mut out = draft_text.to_owned();
+    for attachment in attachments {
+        if attachment.failed || attachment.path.is_none() {
+            let kind = match attachment.kind {
+                luban_domain::ContextTokenKind::Image => "image",
+                luban_domain::ContextTokenKind::Text => "text",
+                luban_domain::ContextTokenKind::File => "file",
+            };
+            let pending = context_token(kind, format!("pending/{}", attachment.id).as_str());
+            if out.contains(&pending) {
+                out = out.replace(&pending, "");
             }
-            luban_domain::ContextTokenKind::Text | luban_domain::ContextTokenKind::File => {
-                context_token("text", path.to_string_lossy().as_ref())
-            }
-        };
 
-        if !out.is_empty() {
-            out.push('\n');
+            if let Some(path) = attachment.path.as_ref() {
+                let resolved = context_token(kind, path.to_string_lossy().as_ref());
+                if out.contains(&resolved) {
+                    out = out.replace(&resolved, "");
+                }
+            }
         }
-        out.push_str(&token);
+    }
+    out.trim().to_owned()
+}
+
+fn extract_context_token_strings_in_order(text: &str) -> Vec<String> {
+    luban_domain::find_context_tokens(text)
+        .into_iter()
+        .filter_map(|token| text.get(token.range).map(|s| s.to_owned()))
+        .collect()
+}
+
+fn canonical_to_display_draft(canonical: &str) -> String {
+    let tokens = luban_domain::find_context_tokens(canonical);
+    if tokens.is_empty() {
+        return canonical.to_owned();
+    }
+
+    let mut out = String::with_capacity(canonical.len());
+    let mut cursor = 0usize;
+    for token in tokens {
+        if token.range.start > cursor {
+            out.push_str(&canonical[cursor..token.range.start]);
+        }
+        out.push(CONTEXT_TOKEN_MARKER);
+        cursor = token.range.end;
+    }
+    if cursor < canonical.len() {
+        out.push_str(&canonical[cursor..]);
     }
     out
+}
+
+fn count_marker_bytes_in_prefix(text: &str, end: usize) -> usize {
+    if end == 0 {
+        return 0;
+    }
+
+    text[..end].match_indices(CONTEXT_TOKEN_MARKER_STR).count()
+}
+
+fn display_to_canonical_draft(display: &str, tokens: &[String]) -> String {
+    if !display.contains(CONTEXT_TOKEN_MARKER_STR) {
+        return display.to_owned();
+    }
+
+    let mut out = String::with_capacity(display.len());
+    let mut cursor = 0usize;
+    let mut token_iter = tokens.iter();
+
+    while let Some(rel) = display[cursor..].find(CONTEXT_TOKEN_MARKER_STR) {
+        let start = cursor + rel;
+        out.push_str(&display[cursor..start]);
+        if let Some(token) = token_iter.next() {
+            out.push_str(token);
+        }
+        cursor = start + CONTEXT_TOKEN_MARKER_STR.len();
+    }
+
+    if cursor < display.len() {
+        out.push_str(&display[cursor..]);
+    }
+
+    out
+}
+
+fn canonical_cursor_from_display_cursor(display: &str, cursor: usize, tokens: &[String]) -> usize {
+    if cursor == 0 || !display[..cursor].contains(CONTEXT_TOKEN_MARKER_STR) {
+        return cursor;
+    }
+
+    let marker_count = count_marker_bytes_in_prefix(display, cursor);
+    let replaced_bytes: usize = tokens
+        .iter()
+        .take(marker_count)
+        .map(|token| token.len())
+        .sum();
+
+    cursor - marker_count * CONTEXT_TOKEN_MARKER_STR.len() + replaced_bytes
 }
 
 fn should_inline_paste_text(text: &str) -> bool {
@@ -210,36 +333,73 @@ fn context_import_plan_from_clipboard(
 
 fn chat_composer_attachments_row(
     workspace_id: WorkspaceId,
+    draft: &str,
     attachments: &[luban_domain::DraftAttachment],
     view_handle: &gpui::WeakEntity<LubanRootView>,
+    input_state: gpui::Entity<InputState>,
     theme: &gpui_component::Theme,
 ) -> Option<AnyElement> {
     if attachments.is_empty() {
         return None;
     }
 
-    let items = attachments
+    let ordered = ordered_draft_attachments_for_display(draft, attachments);
+    let items = ordered
         .iter()
         .map(|attachment| {
             let id = attachment.id;
             let debug_id = format!("chat-composer-attachment-{id}");
             let view_handle = view_handle.clone();
+            let input_state = input_state.clone();
 
-            let remove = Button::new(format!("chat-composer-attachment-remove-{id}"))
-                .ghost()
-                .compact()
-                .icon(Icon::new(IconName::Close))
-                .on_click(move |_, _, app| {
-                    let _ = view_handle.update(app, |view, cx| {
-                        view.dispatch(Action::ChatDraftAttachmentRemoved { workspace_id, id }, cx);
-                    });
-                });
+            let remove_view_handle = view_handle.clone();
+            let remove_input_state = input_state.clone();
+            let remove = move || {
+                let view_handle = remove_view_handle.clone();
+                let input_state = remove_input_state.clone();
+
+                div()
+                    .id(format!("chat-composer-attachment-remove-{id}"))
+                    .w(px(18.0))
+                    .h(px(18.0))
+                    .rounded_full()
+                    .bg(gpui::rgba(0x0000_00dc))
+                    .text_color(gpui::rgb(0x00ff_ffff))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .cursor_pointer()
+                    .child(Icon::new(IconName::Close).with_size(Size::XSmall))
+                    .on_mouse_down(MouseButton::Left, move |_, window, app| {
+                        let result = view_handle.update(app, |view, cx| {
+                            view.dispatch(
+                                Action::ChatDraftAttachmentRemoved { workspace_id, id },
+                                cx,
+                            );
+                            let canonical = view
+                                .state
+                                .workspace_conversation(workspace_id)
+                                .map(|c| c.draft.clone())
+                                .unwrap_or_default();
+                            canonical_to_display_draft(&canonical)
+                        });
+                        let Ok(display) = result else {
+                            return;
+                        };
+
+                        input_state.update(app, |state, cx| {
+                            state.set_value(&display, window, cx);
+                            let end = state.text().offset_to_position(state.text().len());
+                            state.set_cursor_position(end, window, cx);
+                        });
+                    })
+            };
 
             let body = if attachment.failed {
                 div()
-                    .h(px(44.0))
-                    .px_2()
-                    .rounded_md()
+                    .h(px(72.0))
+                    .px_3()
+                    .rounded_xl()
                     .border_1()
                     .border_color(theme.danger_hover)
                     .bg(theme.danger)
@@ -248,14 +408,15 @@ fn chat_composer_attachments_row(
                     .items_center()
                     .gap_2()
                     .child(div().text_sm().child("Failed"))
-                    .child(remove)
+                    .child(div().flex_1())
+                    .child(remove())
                     .into_any_element()
             } else if attachment.path.is_none() {
                 div()
                     .relative()
-                    .w(px(44.0))
-                    .h(px(44.0))
-                    .rounded_md()
+                    .w(px(72.0))
+                    .h(px(72.0))
+                    .rounded_xl()
                     .border_1()
                     .border_color(theme.border)
                     .bg(theme.muted)
@@ -263,48 +424,48 @@ fn chat_composer_attachments_row(
                     .items_center()
                     .justify_center()
                     .child(Spinner::new().with_size(Size::Small))
-                    .child(div().absolute().top(px(2.0)).right(px(2.0)).child(remove))
+                    .child(div().absolute().top(px(6.0)).right(px(6.0)).child(remove()))
                     .into_any_element()
             } else {
                 let path = attachment.path.clone().unwrap_or_default();
                 match attachment.kind {
-	                    luban_domain::ContextTokenKind::Image => div()
-	                        .relative()
-	                        .w(px(44.0))
-	                        .h(px(44.0))
-	                        .child(
-	                            gpui::img(path)
-	                                .w_full()
-	                                .h_full()
-	                                .rounded_md()
-	                                .border_1()
-	                                .border_color(theme.border)
-	                                .object_fit(gpui::ObjectFit::Cover)
-	                                .with_loading(|| {
-	                                    Spinner::new().with_size(Size::Small).into_any_element()
-	                                })
-	                                .with_fallback({
-	                                    let border_color = theme.border;
-	                                    let muted = theme.muted;
-	                                    let muted_foreground = theme.muted_foreground;
-	                                    move || {
-	                                        div()
-	                                            .w_full()
-	                                            .h_full()
-	                                            .rounded_md()
-	                                            .border_1()
-	                                            .border_color(border_color)
-	                                            .bg(muted)
-	                                            .flex()
-	                                            .items_center()
-	                                            .justify_center()
-	                                            .text_color(muted_foreground)
-	                                            .child("Missing")
-	                                            .into_any_element()
-	                                    }
-	                                }),
-	                        )
-                        .child(div().absolute().top(px(2.0)).right(px(2.0)).child(remove))
+                    luban_domain::ContextTokenKind::Image => div()
+                        .relative()
+                        .w(px(72.0))
+                        .h(px(72.0))
+                        .child(
+                            gpui::img(path)
+                                .w_full()
+                                .h_full()
+                                .rounded_xl()
+                                .border_1()
+                                .border_color(theme.border)
+                                .object_fit(gpui::ObjectFit::Cover)
+                                .with_loading(|| {
+                                    Spinner::new().with_size(Size::Small).into_any_element()
+                                })
+                                .with_fallback({
+                                    let border_color = theme.border;
+                                    let muted = theme.muted;
+                                    let muted_foreground = theme.muted_foreground;
+                                    move || {
+                                        div()
+                                            .w_full()
+                                            .h_full()
+                                            .rounded_xl()
+                                            .border_1()
+                                            .border_color(border_color)
+                                            .bg(muted)
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .text_color(muted_foreground)
+                                            .child("Missing")
+                                            .into_any_element()
+                                    }
+                                }),
+                        )
+                        .child(div().absolute().top(px(6.0)).right(px(6.0)).child(remove()))
                         .into_any_element(),
                     luban_domain::ContextTokenKind::Text | luban_domain::ContextTokenKind::File => {
                         let filename = path
@@ -312,9 +473,9 @@ fn chat_composer_attachments_row(
                             .map(|s| s.to_string_lossy().to_string())
                             .unwrap_or_else(|| "attachment".to_owned());
                         div()
-                            .h(px(44.0))
-                            .px_2()
-                            .rounded_md()
+                            .h(px(72.0))
+                            .px_3()
+                            .rounded_xl()
                             .border_1()
                             .border_color(theme.border)
                             .bg(theme.muted)
@@ -324,7 +485,8 @@ fn chat_composer_attachments_row(
                             .gap_2()
                             .child(Icon::new(IconName::File).with_size(Size::Small))
                             .child(div().text_sm().truncate().child(filename))
-                            .child(remove)
+                            .child(div().flex_1())
+                            .child(remove())
                             .into_any_element()
                     }
                 }
@@ -344,7 +506,7 @@ fn chat_composer_attachments_row(
             .flex()
             .items_center()
             .flex_wrap()
-            .gap_2()
+            .gap_3()
             .px_3()
             .children(items)
             .into_any_element(),
@@ -566,6 +728,58 @@ impl LubanRootView {
             dashboard_scroll_wheel_events: 0,
             _subscriptions: Vec::new(),
         }
+    }
+
+    fn insert_context_tokens_into_chat_draft(
+        &mut self,
+        workspace_id: WorkspaceId,
+        display_before: &str,
+        cursor_display: usize,
+        inline_text: Option<&str>,
+        tokens_to_insert: &[String],
+        cx: &mut Context<Self>,
+    ) -> (String, usize) {
+        let existing = self
+            .state
+            .workspace_conversation(workspace_id)
+            .map(|c| c.draft.as_str())
+            .unwrap_or("");
+        let existing_tokens = extract_context_token_strings_in_order(existing);
+        let mut canonical = display_to_canonical_draft(display_before, &existing_tokens);
+
+        let canonical_cursor =
+            canonical_cursor_from_display_cursor(display_before, cursor_display, &existing_tokens);
+        let mut cursor_canonical = canonical_cursor;
+
+        if let Some(text) = inline_text
+            && !text.is_empty()
+        {
+            canonical.insert_str(cursor_canonical, text);
+            cursor_canonical += text.len();
+        }
+
+        for token in tokens_to_insert {
+            canonical.insert_str(cursor_canonical, token);
+            cursor_canonical += token.len();
+        }
+
+        self.dispatch(
+            Action::ChatDraftChanged {
+                workspace_id,
+                text: canonical.clone(),
+            },
+            cx,
+        );
+
+        let display_after = canonical_to_display_draft(&canonical);
+        let marker_bytes = CONTEXT_TOKEN_MARKER.len_utf8();
+        let inline_bytes = inline_text
+            .filter(|s| !s.is_empty())
+            .map(|s| s.len())
+            .unwrap_or(0);
+        let cursor_display_after =
+            cursor_display + inline_bytes + tokens_to_insert.len() * marker_bytes;
+        (display_after, cursor_display_after)
     }
 
     #[cfg(test)]
@@ -934,22 +1148,13 @@ impl LubanRootView {
         &mut self,
         workspace_id: WorkspaceId,
         id: u64,
-        kind: luban_domain::ContextTokenKind,
+        _kind: luban_domain::ContextTokenKind,
         spec: ContextImportSpec,
         cx: &mut Context<Self>,
     ) {
         let Some(agent_context) = workspace_agent_context(&self.state, workspace_id) else {
             return;
         };
-
-        self.dispatch(
-            Action::ChatDraftAttachmentAdded {
-                workspace_id,
-                id,
-                kind,
-            },
-            cx,
-        );
 
         *self
             .pending_context_imports
@@ -1912,12 +2117,13 @@ impl LubanRootView {
                         .set_offset(point(px(0.0), px(offset_y10 as f32 / 10.0)));
 
                     let saved_draft = conversation.map(|c| c.draft.clone()).unwrap_or_default();
+                    let saved_display = canonical_to_display_draft(&saved_draft);
                     let current_value = input_state.read(cx).value().to_owned();
-                    let should_move_cursor = !saved_draft.is_empty();
-                    if current_value != saved_draft.as_str() || should_move_cursor {
+                    let should_move_cursor = !saved_display.is_empty();
+                    if current_value != saved_display.as_str() || should_move_cursor {
                         input_state.update(cx, |state, cx| {
-                            if current_value != saved_draft.as_str() {
-                                state.set_value(&saved_draft, window, cx);
+                            if current_value != saved_display.as_str() {
+                                state.set_value(&saved_display, window, cx);
                             }
 
                             if should_move_cursor {
@@ -1932,21 +2138,17 @@ impl LubanRootView {
 
                 let theme = cx.theme();
 
-                let draft_raw = input_state.read(cx).value().to_owned();
-                let draft = draft_raw.trim().to_owned();
+                let draft_canonical = conversation.map(|c| c.draft.clone()).unwrap_or_default();
                 let draft_attachments: Vec<luban_domain::DraftAttachment> = conversation
                     .map(|c| c.draft_attachments.clone())
                     .unwrap_or_default();
-                let has_ready_attachments = draft_attachments
-                    .iter()
-                    .any(|a| a.path.is_some() && !a.failed);
+                let composed = compose_user_message_text(&draft_canonical, &draft_attachments);
                 let pending_context_imports = self
                     .pending_context_imports
                     .get(&workspace_id)
                     .copied()
                     .unwrap_or(0);
-                let send_disabled =
-                    pending_context_imports > 0 || (draft.is_empty() && !has_ready_attachments);
+                let send_disabled = pending_context_imports > 0 || composed.trim().is_empty();
                 let running_elapsed = if is_running {
                     self.running_turn_started_at
                         .get(&workspace_id)
@@ -2235,8 +2437,9 @@ impl LubanRootView {
                                         .icon(IconName::Replace)
                                         .tooltip("Move to input and remove from queue")
                                         .on_click(move |_, window, app| {
+                                            let display = canonical_to_display_draft(&text);
                                             input_state.update(app, |state, cx| {
-                                                state.set_value(&text, window, cx);
+                                                state.set_value(&display, window, cx);
                                             });
                                             let _ = view_handle_for_edit.update(app, |view, cx| {
                                                 view.dispatch(
@@ -2323,27 +2526,60 @@ impl LubanRootView {
 
                                         app.stop_propagation();
 
-                                        let inline_text_for_insert = inline_text.clone();
-                                        input_state.update(app, |state, cx| {
-                                            if let Some(text) = inline_text_for_insert
-                                                && !text.is_empty()
-                                            {
-                                                state.replace(text, window, cx);
-                                            }
-                                        });
+                                        let display_before =
+                                            input_state.read(app).value().to_owned();
+                                        let cursor_display = input_state.read(app).cursor();
 
+                                        let mut planned = Vec::new();
                                         for spec in imports {
                                             let id = next_pending_context_id();
                                             let kind = match &spec {
                                                 ContextImportSpec::Image { .. } => {
                                                     luban_domain::ContextTokenKind::Image
                                                 }
-                                                ContextImportSpec::Text { .. }
-                                                | ContextImportSpec::File { .. } => {
+                                                ContextImportSpec::Text { .. } => {
                                                     luban_domain::ContextTokenKind::Text
                                                 }
+                                                ContextImportSpec::File { .. } => {
+                                                    luban_domain::ContextTokenKind::File
+                                                }
                                             };
-                                            let _ = view_handle.update(app, move |view, cx| {
+                                            let kind_label = match kind {
+                                                luban_domain::ContextTokenKind::Image => "image",
+                                                luban_domain::ContextTokenKind::Text => "text",
+                                                luban_domain::ContextTokenKind::File => "file",
+                                            };
+                                            let pending_value = format!("pending/{id}");
+                                            let token = context_token(kind_label, &pending_value);
+                                            planned.push((id, kind, spec, token));
+                                        }
+
+                                        let result = view_handle.update(app, {
+                                            let planned = planned;
+                                            move |view, cx| {
+                                            let tokens_to_insert = planned
+                                                .iter()
+                                                .map(|(_, _, _, token)| token.clone())
+                                                .collect::<Vec<_>>();
+                                            let (display_after, cursor_after) =
+                                                view.insert_context_tokens_into_chat_draft(
+                                                    workspace_id,
+                                                    &display_before,
+                                                    cursor_display,
+                                                    inline_text.as_deref(),
+                                                    &tokens_to_insert,
+                                                    cx,
+                                                );
+
+                                            for (id, kind, spec, _) in planned {
+                                                view.dispatch(
+                                                    Action::ChatDraftAttachmentAdded {
+                                                        workspace_id,
+                                                        id,
+                                                        kind,
+                                                    },
+                                                    cx,
+                                                );
                                                 view.enqueue_context_import(
                                                     workspace_id,
                                                     id,
@@ -2351,14 +2587,28 @@ impl LubanRootView {
                                                     spec,
                                                     cx,
                                                 );
-                                            });
-                                        }
+                                            }
+
+                                            (display_after, cursor_after)
+                                        }});
+
+                                        let Ok((display_after, cursor_after)) = result else {
+                                            return;
+                                        };
+
+                                        input_state.update(app, |state, cx| {
+                                            state.set_value(&display_after, window, cx);
+                                            let cursor = cursor_after.min(state.text().len());
+                                            let pos = state.text().offset_to_position(cursor);
+                                            state.set_cursor_position(pos, window, cx);
+                                        });
                                     }
                                 })
                                 .on_drop({
                                     let view_handle = view_handle.clone();
                                     let pending_drop_paths = pending_drop_paths.clone();
-                                    move |event: &FileDropEvent, _window: &mut Window, app: &mut gpui::App| {
+                                    let input_state = input_state.clone();
+                                    move |event: &FileDropEvent, window: &mut Window, app: &mut gpui::App| {
                                         match event {
                                             FileDropEvent::Entered { paths, .. } => {
                                                 *pending_drop_paths.borrow_mut() = Some(
@@ -2388,18 +2638,66 @@ impl LubanRootView {
                                                     return;
                                                 }
 
+                                                let display_before =
+                                                    input_state.read(app).value().to_owned();
+                                                let cursor_display = input_state.read(app).cursor();
+                                                let mut planned = Vec::new();
                                                 for spec in imports {
                                                     let id = next_pending_context_id();
-                                                    let _ = view_handle.update(app, move |view, cx| {
+                                                    let kind = luban_domain::ContextTokenKind::File;
+                                                    let pending_value = format!("pending/{id}");
+                                                    let token = context_token("file", &pending_value);
+                                                    planned.push((id, kind, spec, token));
+                                                }
+
+                                                let result = view_handle.update(app, {
+                                                    let planned = planned;
+                                                    move |view, cx| {
+                                                    let tokens_to_insert = planned
+                                                        .iter()
+                                                        .map(|(_, _, _, token)| token.clone())
+                                                        .collect::<Vec<_>>();
+                                                    let (display_after, cursor_after) =
+                                                        view.insert_context_tokens_into_chat_draft(
+                                                            workspace_id,
+                                                            &display_before,
+                                                            cursor_display,
+                                                            None,
+                                                            &tokens_to_insert,
+                                                            cx,
+                                                        );
+
+                                                    for (id, kind, spec, _) in planned {
+                                                        view.dispatch(
+                                                            Action::ChatDraftAttachmentAdded {
+                                                                workspace_id,
+                                                                id,
+                                                                kind,
+                                                            },
+                                                            cx,
+                                                        );
                                                         view.enqueue_context_import(
                                                             workspace_id,
                                                             id,
-                                                            luban_domain::ContextTokenKind::Text,
+                                                            kind,
                                                             spec,
                                                             cx,
                                                         );
-                                                    });
-                                                }
+                                                    }
+
+                                                    (display_after, cursor_after)
+                                                }});
+
+                                                let Ok((display_after, cursor_after)) = result else {
+                                                    return;
+                                                };
+
+                                                input_state.update(app, |state, cx| {
+                                                    state.set_value(&display_after, window, cx);
+                                                    let cursor = cursor_after.min(state.text().len());
+                                                    let pos = state.text().offset_to_position(cursor);
+                                                    state.set_cursor_position(pos, window, cx);
+                                                });
                                             }
                                             FileDropEvent::Pending { .. } => {}
                                         }
@@ -2423,6 +2721,17 @@ impl LubanRootView {
                                             .flex()
                                             .flex_col()
                                             .gap_2()
+	                                            .when_some(
+	                                                chat_composer_attachments_row(
+	                                                    workspace_id,
+                                                        &draft_canonical,
+	                                                    &draft_attachments,
+	                                                    &view_handle,
+                                                        input_state.clone(),
+	                                                    theme,
+	                                                ),
+	                                                |s, row| s.child(row),
+	                                            )
 		                                            .child(
 		                                                div()
 		                                                    .w_full()
@@ -2433,15 +2742,6 @@ impl LubanRootView {
 		                                                            .with_size(Size::Large),
 		                                                    ),
 		                                            )
-	                                            .when_some(
-	                                                chat_composer_attachments_row(
-	                                                    workspace_id,
-	                                                    &draft_attachments,
-	                                                    &view_handle,
-	                                                    theme,
-	                                                ),
-	                                                |s, row| s.child(row),
-	                                            )
 	                                            .child({
 	                                                let view_handle = view_handle.clone();
 	                                                let current_model_id = model_id.clone();
@@ -2600,11 +2900,7 @@ impl LubanRootView {
                                                             .child({
                                                                 let view_handle = view_handle.clone();
                                                                 let input_state = input_state.clone();
-                                                                let draft = draft.clone();
-                                                                let composed = compose_user_message_text(
-                                                                    &draft,
-                                                                    &draft_attachments,
-                                                                );
+                                                                let composed = composed.clone();
                                                                 Button::new("chat-send-message")
                                                                     .primary()
                                                                     .compact()
@@ -5870,6 +6166,15 @@ mod tests {
             path: PathBuf::from("/tmp/missing.txt"),
         });
 
+        state.apply(Action::ChatDraftChanged {
+            workspace_id,
+            text: format!(
+                "{}{}",
+                context_token("text", "/tmp/missing.txt"),
+                context_token("image", "/tmp/missing.png"),
+            ),
+        });
+
         let (_view, window_cx) = cx.add_window_view(|window, cx| {
             let view = cx.new(|cx| LubanRootView::with_state(services, state, cx));
             gpui_component::Root::new(view, window, cx)
@@ -5885,10 +6190,10 @@ mod tests {
             .debug_bounds("chat-composer-attachments-row")
             .expect("missing chat composer attachments row");
         let first = window_cx
-            .debug_bounds("chat-composer-attachment-1")
+            .debug_bounds("chat-composer-attachment-2")
             .expect("missing first attachment item");
         let second = window_cx
-            .debug_bounds("chat-composer-attachment-2")
+            .debug_bounds("chat-composer-attachment-1")
             .expect("missing second attachment item");
 
         assert!(
@@ -5897,7 +6202,7 @@ mod tests {
         );
         assert!(
             first.left() < second.left(),
-            "expected attachments to render in insertion order: first={first:?} second={second:?}"
+            "expected attachments to render in token order: first={first:?} second={second:?}"
         );
     }
 
@@ -5947,6 +6252,15 @@ mod tests {
             id: 2,
             path: PathBuf::from("/tmp/b.txt"),
         });
+        let draft = format!(
+            "{}{}",
+            context_token("image", "/tmp/a.png"),
+            context_token("text", "/tmp/b.txt"),
+        );
+        state.apply(Action::ChatDraftChanged {
+            workspace_id,
+            text: draft.clone(),
+        });
 
         let view_slot: Arc<std::sync::Mutex<Option<gpui::Entity<LubanRootView>>>> =
             Arc::new(std::sync::Mutex::new(None));
@@ -5980,7 +6294,10 @@ mod tests {
                 .map(|c| c.draft_attachments.len())
                 .unwrap_or(0)
         });
-        assert_eq!(attachment_count, 0, "expected attachments to be cleared in state");
+        assert_eq!(
+            attachment_count, 0,
+            "expected attachments to be cleared in state"
+        );
 
         // `debug_bounds` can retain the last known bounds for removed elements. Prefer asserting on
         // state-level invariants for this behavior.
@@ -5991,11 +6308,6 @@ mod tests {
             };
             (conversation.entries.clone(), conversation.entries.len())
         });
-        let expected = format!(
-            "{}\n{}",
-            context_token("image", "/tmp/a.png"),
-            context_token("text", "/tmp/b.txt")
-        );
         let last_user = entries.iter().rev().find_map(|entry| {
             let luban_domain::ConversationEntry::UserMessage { text } = entry else {
                 return None;
@@ -6004,8 +6316,65 @@ mod tests {
         });
         assert_eq!(
             last_user.as_deref(),
-            Some(expected.as_str()),
+            Some(draft.as_str()),
             "expected latest user message to match (entries_len={entries_len})"
+        );
+    }
+
+    #[gpui::test]
+    async fn user_messages_render_context_tokens_in_order(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "abandon-about".to_owned(),
+            branch_name: "luban/abandon-about".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+        });
+        let workspace_id = workspace_id_by_name(&state, "abandon-about");
+        state.main_pane = MainPane::Workspace(workspace_id);
+
+        state.apply(Action::ConversationLoaded {
+            workspace_id,
+            snapshot: ConversationSnapshot {
+                thread_id: Some("thread-1".to_owned()),
+                entries: vec![ConversationEntry::UserMessage {
+                    text: format!(
+                        "before\n{}\nafter",
+                        context_token("image", "/tmp/missing.png")
+                    ),
+                }],
+            },
+        });
+
+        let (_view, window_cx) = cx.add_window_view(|window, cx| {
+            let view = cx.new(|cx| LubanRootView::with_state(services, state, cx));
+            gpui_component::Root::new(view, window, cx)
+        });
+        window_cx.simulate_resize(size(px(720.0), px(480.0)));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        let before = window_cx
+            .debug_bounds("user-message-0-seg-0-plain-text")
+            .expect("missing message segment before token");
+        let attachment = window_cx
+            .debug_bounds("conversation-user-attachment-0-0")
+            .expect("missing attachment element");
+        let after = window_cx
+            .debug_bounds("user-message-0-tail-plain-text")
+            .expect("missing message segment after token");
+
+        assert!(
+            before.top() < attachment.top() && attachment.top() < after.top(),
+            "expected segments and token to render in order: before={before:?} attachment={attachment:?} after={after:?}",
         );
     }
 

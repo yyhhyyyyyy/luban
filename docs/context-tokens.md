@@ -25,7 +25,7 @@ Where:
 - `kind` is one of:
   - `image`
   - `text`
-  - `file` (reserved; not required for the initial implementation)
+  - `file`
 - `absolute_path` points to a file stored inside the workspace context directory.
 
 ### Why tokens
@@ -72,7 +72,9 @@ Dropping files onto the composer imports them into `context/blobs/` (text-like a
 
 The composer input remains a plain text editor. Attachments are shown as thumbnails/chips inside the same input surface (below the text area). Tokens are not shown in the editor.
 
-On send, the final user message text is composed by appending context tokens (in attachment insertion order) after the typed text.
+When an attachment is inserted, the composer inserts a context token at the current cursor position in the underlying draft text. The editor view hides the raw token string by replacing it with an invisible marker character, while a separate attachments strip renders the thumbnails.
+
+On send, the final user message text is the current draft text (including tokens) after filtering out unresolved or failed attachments.
 
 ## Message rendering (B1)
 

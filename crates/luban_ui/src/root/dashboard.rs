@@ -410,12 +410,13 @@ impl LubanRootView {
                 .set_offset(point(px(0.0), px(offset_y10 as f32 / 10.0)));
 
             let saved_draft = conversation.map(|c| c.draft.clone()).unwrap_or_default();
+            let saved_display = canonical_to_display_draft(&saved_draft);
             let current_value = input_state.read(cx).value().to_owned();
-            let should_move_cursor = !saved_draft.is_empty();
-            if current_value != saved_draft.as_str() || should_move_cursor {
+            let should_move_cursor = !saved_display.is_empty();
+            if current_value != saved_display.as_str() || should_move_cursor {
                 input_state.update(cx, |state, cx| {
-                    if current_value != saved_draft.as_str() {
-                        state.set_value(&saved_draft, window, cx);
+                    if current_value != saved_display.as_str() {
+                        state.set_value(&saved_display, window, cx);
                     }
 
                     if should_move_cursor {
@@ -430,21 +431,17 @@ impl LubanRootView {
 
         let theme = cx.theme();
 
-        let draft_raw = input_state.read(cx).value().to_owned();
-        let draft = draft_raw.trim().to_owned();
+        let draft_canonical = conversation.map(|c| c.draft.clone()).unwrap_or_default();
         let draft_attachments: Vec<luban_domain::DraftAttachment> = conversation
             .map(|c| c.draft_attachments.clone())
             .unwrap_or_default();
-        let has_ready_attachments = draft_attachments
-            .iter()
-            .any(|a| a.path.is_some() && !a.failed);
+        let composed = compose_user_message_text(&draft_canonical, &draft_attachments);
         let pending_context_imports = self
             .pending_context_imports
             .get(&workspace_id)
             .copied()
             .unwrap_or(0);
-        let send_disabled =
-            pending_context_imports > 0 || (draft.is_empty() && !has_ready_attachments);
+        let send_disabled = pending_context_imports > 0 || composed.trim().is_empty();
         let running_elapsed = if is_running {
             self.running_turn_started_at
                 .get(&workspace_id)
@@ -730,8 +727,9 @@ impl LubanRootView {
                                 .icon(IconName::Replace)
                                 .tooltip("Move to input and remove from queue")
                                 .on_click(move |_, window, app| {
+                                    let display = canonical_to_display_draft(&text);
                                     input_state.update(app, |state, cx| {
-                                        state.set_value(&text, window, cx);
+                                        state.set_value(&display, window, cx);
                                     });
                                     let _ = view_handle_for_edit.update(app, |view, cx| {
                                         view.dispatch(
@@ -908,6 +906,17 @@ impl LubanRootView {
                                     .flex()
                                     .flex_col()
                                     .gap_2()
+                                    .when_some(
+                                        chat_composer_attachments_row(
+                                            workspace_id,
+                                            &draft_canonical,
+                                            &draft_attachments,
+                                            &view_handle,
+                                            input_state.clone(),
+                                            theme,
+                                        ),
+                                        |s, row| s.child(row),
+                                    )
                                     .child(
                                         div().w_full().child(
                                             Input::new(&input_state)
@@ -915,15 +924,6 @@ impl LubanRootView {
                                                 .appearance(false)
                                                 .with_size(Size::Large),
                                         ),
-                                    )
-                                    .when_some(
-                                        chat_composer_attachments_row(
-                                            workspace_id,
-                                            &draft_attachments,
-                                            &view_handle,
-                                            theme,
-                                        ),
-                                        |s, row| s.child(row),
                                     )
                                     .child({
                                         let view_handle = view_handle.clone();
@@ -1093,9 +1093,7 @@ impl LubanRootView {
                                                     .child({
 	                                                        let view_handle = view_handle.clone();
 	                                                        let input_state = input_state.clone();
-	                                                        let draft = draft.clone();
-	                                                        let composed =
-	                                                            compose_user_message_text(&draft, &draft_attachments);
+	                                                        let composed = composed.clone();
 	                                                        Button::new("chat-send-message")
 	                                                            .primary()
 	                                                            .compact()

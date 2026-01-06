@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     path::PathBuf,
 };
 
@@ -298,6 +298,49 @@ pub struct DraftAttachment {
     pub kind: ContextTokenKind,
     pub path: Option<PathBuf>,
     pub failed: bool,
+}
+
+fn draft_context_token(kind: ContextTokenKind, value: &str) -> String {
+    let label = match kind {
+        ContextTokenKind::Image => "image",
+        ContextTokenKind::Text => "text",
+        ContextTokenKind::File => "file",
+    };
+    format!("<<context:{label}:{value}>>>")
+}
+
+fn pending_context_value(id: u64) -> String {
+    format!("pending/{id}")
+}
+
+fn retain_draft_attachments_referenced_in_draft(conversation: &mut WorkspaceConversation) {
+    let tokens = find_context_tokens(&conversation.draft);
+
+    let mut pending_ids: HashSet<u64> = HashSet::new();
+    let mut paths: HashSet<PathBuf> = HashSet::new();
+
+    for token in tokens {
+        let raw = token.path.to_string_lossy();
+        if let Some(id) = raw
+            .strip_prefix("pending/")
+            .and_then(|s| s.parse::<u64>().ok())
+        {
+            pending_ids.insert(id);
+        } else {
+            paths.insert(token.path);
+        }
+    }
+
+    conversation.draft_attachments.retain(|attachment| {
+        if pending_ids.contains(&attachment.id) {
+            return true;
+        }
+
+        attachment
+            .path
+            .as_ref()
+            .is_some_and(|path| paths.contains(path))
+    });
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -973,6 +1016,7 @@ impl AppState {
                     }
                 });
                 conversation.draft = text;
+                retain_draft_attachments_referenced_in_draft(conversation);
                 Vec::new()
             }
             Action::ChatDraftAttachmentAdded {
@@ -1016,6 +1060,14 @@ impl AppState {
                     .iter_mut()
                     .find(|a| a.id == id)
                 {
+                    let pending_token =
+                        draft_context_token(attachment.kind, &pending_context_value(id));
+                    let resolved_token =
+                        draft_context_token(attachment.kind, path.to_string_lossy().as_ref());
+                    if conversation.draft.contains(&pending_token) {
+                        conversation.draft =
+                            conversation.draft.replace(&pending_token, &resolved_token);
+                    }
                     attachment.path = Some(path);
                     attachment.failed = false;
                 }
@@ -1038,6 +1090,25 @@ impl AppState {
                 let Some(conversation) = self.conversations.get_mut(&workspace_id) else {
                     return Vec::new();
                 };
+                let info = conversation
+                    .draft_attachments
+                    .iter()
+                    .find(|a| a.id == id)
+                    .map(|a| (a.kind, a.path.clone()));
+                if let Some((kind, path)) = info {
+                    let pending_token = draft_context_token(kind, &pending_context_value(id));
+                    if conversation.draft.contains(&pending_token) {
+                        conversation.draft = conversation.draft.replace(&pending_token, "");
+                    }
+
+                    if let Some(path) = path {
+                        let resolved_token =
+                            draft_context_token(kind, path.to_string_lossy().as_ref());
+                        if conversation.draft.contains(&resolved_token) {
+                            conversation.draft = conversation.draft.replace(&resolved_token, "");
+                        }
+                    }
+                }
                 conversation.draft_attachments.retain(|a| a.id != id);
                 Vec::new()
             }

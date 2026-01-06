@@ -26,17 +26,19 @@ impl LubanRootView {
                         _ => None,
                     };
                     if let Some(workspace_id) = workspace_id {
-                        let text = input_state.read(cx).value().to_owned();
+                        let display = input_state.read(cx).value().to_owned();
                         let existing = this
                             .state
                             .workspace_conversation(workspace_id)
                             .map(|c| c.draft.as_str())
                             .unwrap_or("");
-                        if text != existing {
+                        let tokens = extract_context_token_strings_in_order(existing);
+                        let canonical = display_to_canonical_draft(&display, &tokens);
+                        if canonical != existing {
                             this.dispatch(
                                 Action::ChatDraftChanged {
                                     workspace_id,
-                                    text: text.to_string(),
+                                    text: canonical,
                                 },
                                 cx,
                             );
@@ -45,7 +47,7 @@ impl LubanRootView {
                     cx.notify();
                 }
                 InputEvent::PressEnter { secondary: true } => {
-                    let draft_text = input_state.read(cx).value().to_owned();
+                    let display = input_state.read(cx).value().to_owned();
                     let workspace_id = match this.state.main_pane {
                         MainPane::Workspace(workspace_id) => Some(workspace_id),
                         MainPane::Dashboard => this.state.dashboard_preview_workspace_id,
@@ -68,7 +70,14 @@ impl LubanRootView {
                         .workspace_conversation(workspace_id)
                         .map(|c| c.draft_attachments.clone())
                         .unwrap_or_default();
-                    let composed = compose_user_message_text(&draft_text, &draft_attachments);
+                    let existing = this
+                        .state
+                        .workspace_conversation(workspace_id)
+                        .map(|c| c.draft.as_str())
+                        .unwrap_or("");
+                    let tokens = extract_context_token_strings_in_order(existing);
+                    let canonical = display_to_canonical_draft(&display, &tokens);
+                    let composed = compose_user_message_text(&canonical, &draft_attachments);
                     if composed.trim().is_empty() {
                         return;
                     }
