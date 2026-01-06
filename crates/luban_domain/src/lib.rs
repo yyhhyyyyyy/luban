@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, HashMap},
     path::PathBuf,
 };
 
@@ -296,51 +296,50 @@ pub struct WorkspaceConversation {
 pub struct DraftAttachment {
     pub id: u64,
     pub kind: ContextTokenKind,
+    pub anchor: usize,
     pub path: Option<PathBuf>,
     pub failed: bool,
 }
 
-fn draft_context_token(kind: ContextTokenKind, value: &str) -> String {
-    let label = match kind {
-        ContextTokenKind::Image => "image",
-        ContextTokenKind::Text => "text",
-        ContextTokenKind::File => "file",
-    };
-    format!("<<context:{label}:{value}>>>")
-}
-
-fn pending_context_value(id: u64) -> String {
-    format!("pending/{id}")
-}
-
-fn retain_draft_attachments_referenced_in_draft(conversation: &mut WorkspaceConversation) {
-    let tokens = find_context_tokens(&conversation.draft);
-
-    let mut pending_ids: HashSet<u64> = HashSet::new();
-    let mut paths: HashSet<PathBuf> = HashSet::new();
-
-    for token in tokens {
-        let raw = token.path.to_string_lossy();
-        if let Some(id) = raw
-            .strip_prefix("pending/")
-            .and_then(|s| s.parse::<u64>().ok())
-        {
-            pending_ids.insert(id);
-        } else {
-            paths.insert(token.path);
-        }
+fn apply_draft_text_diff(conversation: &mut WorkspaceConversation, new_text: &str) {
+    let old_text = conversation.draft.as_str();
+    if old_text == new_text {
+        return;
     }
 
-    conversation.draft_attachments.retain(|attachment| {
-        if pending_ids.contains(&attachment.id) {
-            return true;
-        }
+    let old_bytes = old_text.as_bytes();
+    let new_bytes = new_text.as_bytes();
 
-        attachment
-            .path
-            .as_ref()
-            .is_some_and(|path| paths.contains(path))
-    });
+    let mut start = 0usize;
+    let min_len = old_bytes.len().min(new_bytes.len());
+    while start < min_len && old_bytes[start] == new_bytes[start] {
+        start += 1;
+    }
+
+    let mut old_end = old_bytes.len();
+    let mut new_end = new_bytes.len();
+    while old_end > start && new_end > start && old_bytes[old_end - 1] == new_bytes[new_end - 1] {
+        old_end -= 1;
+        new_end -= 1;
+    }
+
+    let delta = new_end as isize - old_end as isize;
+    for attachment in &mut conversation.draft_attachments {
+        let anchor = attachment.anchor;
+        if anchor <= start {
+            continue;
+        }
+        if anchor >= old_end {
+            let shifted = anchor as isize + delta;
+            attachment.anchor = shifted.max(0) as usize;
+        } else {
+            // Preference A: snap to the start of the deleted/replaced region.
+            attachment.anchor = start;
+        }
+        attachment.anchor = attachment.anchor.min(new_text.len());
+    }
+
+    conversation.draft = new_text.to_owned();
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -505,6 +504,7 @@ pub enum Action {
         workspace_id: WorkspaceId,
         id: u64,
         kind: ContextTokenKind,
+        anchor: usize,
     },
     ChatDraftAttachmentResolved {
         workspace_id: WorkspaceId,
@@ -1015,14 +1015,14 @@ impl AppState {
                         queue_paused: false,
                     }
                 });
-                conversation.draft = text;
-                retain_draft_attachments_referenced_in_draft(conversation);
+                apply_draft_text_diff(conversation, &text);
                 Vec::new()
             }
             Action::ChatDraftAttachmentAdded {
                 workspace_id,
                 id,
                 kind,
+                anchor,
             } => {
                 let conversation = self.conversations.entry(workspace_id).or_insert_with(|| {
                     WorkspaceConversation {
@@ -1042,6 +1042,7 @@ impl AppState {
                 conversation.draft_attachments.push(DraftAttachment {
                     id,
                     kind,
+                    anchor,
                     path: None,
                     failed: false,
                 });
@@ -1060,14 +1061,6 @@ impl AppState {
                     .iter_mut()
                     .find(|a| a.id == id)
                 {
-                    let pending_token =
-                        draft_context_token(attachment.kind, &pending_context_value(id));
-                    let resolved_token =
-                        draft_context_token(attachment.kind, path.to_string_lossy().as_ref());
-                    if conversation.draft.contains(&pending_token) {
-                        conversation.draft =
-                            conversation.draft.replace(&pending_token, &resolved_token);
-                    }
                     attachment.path = Some(path);
                     attachment.failed = false;
                 }
@@ -1090,25 +1083,6 @@ impl AppState {
                 let Some(conversation) = self.conversations.get_mut(&workspace_id) else {
                     return Vec::new();
                 };
-                let info = conversation
-                    .draft_attachments
-                    .iter()
-                    .find(|a| a.id == id)
-                    .map(|a| (a.kind, a.path.clone()));
-                if let Some((kind, path)) = info {
-                    let pending_token = draft_context_token(kind, &pending_context_value(id));
-                    if conversation.draft.contains(&pending_token) {
-                        conversation.draft = conversation.draft.replace(&pending_token, "");
-                    }
-
-                    if let Some(path) = path {
-                        let resolved_token =
-                            draft_context_token(kind, path.to_string_lossy().as_ref());
-                        if conversation.draft.contains(&resolved_token) {
-                            conversation.draft = conversation.draft.replace(&resolved_token, "");
-                        }
-                    }
-                }
                 conversation.draft_attachments.retain(|a| a.id != id);
                 Vec::new()
             }
@@ -2133,6 +2107,78 @@ mod tests {
             },
         });
         assert_eq!(state.workspace_conversation(w1).unwrap().draft, "draft-1");
+    }
+
+    #[test]
+    fn chat_draft_edits_update_attachment_anchors_without_removing() {
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+        });
+        let project_id = state.projects[0].id;
+
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "w1".to_owned(),
+            branch_name: "repo/w1".to_owned(),
+            worktree_path: PathBuf::from("/tmp/repo/worktrees/w1"),
+        });
+        let w1 = workspace_id_by_name(&state, "w1");
+
+        state.apply(Action::ChatDraftChanged {
+            workspace_id: w1,
+            text: "0123456789".to_owned(),
+        });
+        state.apply(Action::ChatDraftAttachmentAdded {
+            workspace_id: w1,
+            id: 1,
+            kind: ContextTokenKind::Image,
+            anchor: 8,
+        });
+        state.apply(Action::ChatDraftAttachmentResolved {
+            workspace_id: w1,
+            id: 1,
+            path: PathBuf::from("/tmp/a.png"),
+        });
+        state.apply(Action::ChatDraftAttachmentAdded {
+            workspace_id: w1,
+            id: 2,
+            kind: ContextTokenKind::Text,
+            anchor: 5,
+        });
+        state.apply(Action::ChatDraftAttachmentResolved {
+            workspace_id: w1,
+            id: 2,
+            path: PathBuf::from("/tmp/b.txt"),
+        });
+
+        // Delete bytes [3,7): "3456" -> "012789".
+        state.apply(Action::ChatDraftChanged {
+            workspace_id: w1,
+            text: "012789".to_owned(),
+        });
+
+        let conversation = state
+            .workspace_conversation(w1)
+            .expect("missing conversation");
+        assert_eq!(conversation.draft, "012789");
+        assert_eq!(conversation.draft_attachments.len(), 2);
+
+        let a = conversation
+            .draft_attachments
+            .iter()
+            .find(|a| a.id == 1)
+            .expect("missing attachment 1");
+        let b = conversation
+            .draft_attachments
+            .iter()
+            .find(|a| a.id == 2)
+            .expect("missing attachment 2");
+
+        // Anchor 8 shifts by -4 -> 4.
+        assert_eq!(a.anchor, 4);
+        // Anchor 5 is inside the deleted range -> snaps to start (3).
+        assert_eq!(b.anchor, 3);
     }
 
     #[test]

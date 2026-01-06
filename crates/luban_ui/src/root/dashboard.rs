@@ -410,13 +410,12 @@ impl LubanRootView {
                 .set_offset(point(px(0.0), px(offset_y10 as f32 / 10.0)));
 
             let saved_draft = conversation.map(|c| c.draft.clone()).unwrap_or_default();
-            let saved_display = canonical_to_display_draft(&saved_draft);
             let current_value = input_state.read(cx).value().to_owned();
-            let should_move_cursor = !saved_display.is_empty();
-            if current_value != saved_display.as_str() || should_move_cursor {
+            let should_move_cursor = !saved_draft.is_empty();
+            if current_value != saved_draft.as_str() || should_move_cursor {
                 input_state.update(cx, |state, cx| {
-                    if current_value != saved_display.as_str() {
-                        state.set_value(&saved_display, window, cx);
+                    if current_value != saved_draft.as_str() {
+                        state.set_value(&saved_draft, window, cx);
                     }
 
                     if should_move_cursor {
@@ -431,11 +430,11 @@ impl LubanRootView {
 
         let theme = cx.theme();
 
-        let draft_canonical = conversation.map(|c| c.draft.clone()).unwrap_or_default();
+        let draft_text = conversation.map(|c| c.draft.clone()).unwrap_or_default();
         let draft_attachments: Vec<luban_domain::DraftAttachment> = conversation
             .map(|c| c.draft_attachments.clone())
             .unwrap_or_default();
-        let composed = compose_user_message_text(&draft_canonical, &draft_attachments);
+        let composed = compose_user_message_text(&draft_text, &draft_attachments);
         let pending_context_imports = self
             .pending_context_imports
             .get(&workspace_id)
@@ -727,11 +726,61 @@ impl LubanRootView {
                                 .icon(IconName::Replace)
                                 .tooltip("Move to input and remove from queue")
                                 .on_click(move |_, window, app| {
-                                    let display = canonical_to_display_draft(&text);
+                                    let (draft_text, attachments) =
+                                        draft_text_and_attachments_from_message_text(&text);
                                     input_state.update(app, |state, cx| {
-                                        state.set_value(&display, window, cx);
+                                        state.set_value(&draft_text, window, cx);
+                                        let end =
+                                            state.text().offset_to_position(state.text().len());
+                                        state.set_cursor_position(end, window, cx);
                                     });
                                     let _ = view_handle_for_edit.update(app, |view, cx| {
+                                        let existing_ids = view
+                                            .state
+                                            .workspace_conversation(workspace_id)
+                                            .map(|c| {
+                                                c.draft_attachments
+                                                    .iter()
+                                                    .map(|a| a.id)
+                                                    .collect::<Vec<_>>()
+                                            })
+                                            .unwrap_or_default();
+                                        for id in existing_ids {
+                                            view.dispatch(
+                                                Action::ChatDraftAttachmentRemoved {
+                                                    workspace_id,
+                                                    id,
+                                                },
+                                                cx,
+                                            );
+                                        }
+                                        view.dispatch(
+                                            Action::ChatDraftChanged {
+                                                workspace_id,
+                                                text: draft_text.clone(),
+                                            },
+                                            cx,
+                                        );
+                                        for (kind, anchor, path) in attachments {
+                                            let id = next_pending_context_id();
+                                            view.dispatch(
+                                                Action::ChatDraftAttachmentAdded {
+                                                    workspace_id,
+                                                    id,
+                                                    kind,
+                                                    anchor,
+                                                },
+                                                cx,
+                                            );
+                                            view.dispatch(
+                                                Action::ChatDraftAttachmentResolved {
+                                                    workspace_id,
+                                                    id,
+                                                    path,
+                                                },
+                                                cx,
+                                            );
+                                        }
                                         view.dispatch(
                                             Action::RemoveQueuedPrompt {
                                                 workspace_id,
@@ -811,34 +860,55 @@ impl LubanRootView {
 
                                 app.stop_propagation();
 
-	                                let inline_text_for_insert = inline_text.clone();
-	                                input_state.update(app, |state, cx| {
-	                                    if let Some(text) = inline_text_for_insert && !text.is_empty()
-	                                    {
-	                                        state.replace(text, window, cx);
-	                                    }
-	                                });
-
-	                                for spec in imports {
-	                                    let id = next_pending_context_id();
-	                                    let kind = match &spec {
-	                                        ContextImportSpec::Image { .. } => {
-	                                            luban_domain::ContextTokenKind::Image
-	                                        }
-	                                        ContextImportSpec::Text { .. }
-	                                        | ContextImportSpec::File { .. } => {
-	                                            luban_domain::ContextTokenKind::Text
-	                                        }
-	                                    };
-	                                    let _ = view_handle.update(app, move |view, cx| {
-	                                        view.enqueue_context_import(workspace_id, id, kind, spec, cx);
+	                                if let Some(text) = inline_text.as_deref() && !text.is_empty() {
+	                                    let inline_insert = text.to_owned();
+	                                    input_state.update(app, move |state, cx| {
+	                                        state.replace(&inline_insert, window, cx);
 	                                    });
 	                                }
+
+                                    let draft_text = input_state.read(app).value().to_owned();
+                                    let anchor = input_state.read(app).cursor();
+                                    let _ = view_handle.update(app, move |view, cx| {
+                                        view.dispatch(
+                                            Action::ChatDraftChanged {
+                                                workspace_id,
+                                                text: draft_text.to_string(),
+                                            },
+                                            cx,
+                                        );
+
+                                        for spec in imports {
+                                            let id = next_pending_context_id();
+                                            let kind = match &spec {
+                                                ContextImportSpec::Image { .. } => {
+                                                    luban_domain::ContextTokenKind::Image
+                                                }
+                                                ContextImportSpec::Text { .. } => {
+                                                    luban_domain::ContextTokenKind::Text
+                                                }
+                                                ContextImportSpec::File { .. } => {
+                                                    luban_domain::ContextTokenKind::File
+                                                }
+                                            };
+                                            view.dispatch(
+                                                Action::ChatDraftAttachmentAdded {
+                                                    workspace_id,
+                                                    id,
+                                                    kind,
+                                                    anchor,
+                                                },
+                                                cx,
+                                            );
+                                            view.enqueue_context_import(workspace_id, id, kind, spec, cx);
+                                        }
+                                    });
 	                            }
 	                        })
 	                        .on_drop({
 	                            let view_handle = view_handle.clone();
 	                            let pending_drop_paths = pending_drop_paths.clone();
+                                let input_state = input_state.clone();
 	                            move |event: &gpui::FileDropEvent,
 	                                  _window: &mut Window,
 	                                  app: &mut gpui::App| {
@@ -871,18 +941,36 @@ impl LubanRootView {
                                             return;
                                         }
 
-	                                        for spec in imports {
-	                                            let id = next_pending_context_id();
-	                                            let _ = view_handle.update(app, move |view, cx| {
-	                                                view.enqueue_context_import(
-	                                                    workspace_id,
-	                                                    id,
-	                                                    luban_domain::ContextTokenKind::Text,
-	                                                    spec,
-	                                                    cx,
-	                                                );
-	                                            });
-	                                        }
+                                        let draft_text = input_state.read(app).value().to_owned();
+                                        let anchor = input_state.read(app).cursor();
+                                        let _ = view_handle.update(app, move |view, cx| {
+                                            view.dispatch(
+                                                Action::ChatDraftChanged {
+                                                    workspace_id,
+                                                    text: draft_text.to_string(),
+                                                },
+                                                cx,
+                                            );
+                                            for spec in imports {
+                                                let id = next_pending_context_id();
+                                                view.dispatch(
+                                                    Action::ChatDraftAttachmentAdded {
+                                                        workspace_id,
+                                                        id,
+                                                        kind: luban_domain::ContextTokenKind::File,
+                                                        anchor,
+                                                    },
+                                                    cx,
+                                                );
+                                                view.enqueue_context_import(
+                                                    workspace_id,
+                                                    id,
+                                                    luban_domain::ContextTokenKind::File,
+                                                    spec,
+                                                    cx,
+                                                );
+                                            }
+                                        });
 	                                    }
                                     gpui::FileDropEvent::Pending { .. } => {}
                                 }
@@ -909,10 +997,8 @@ impl LubanRootView {
                                     .when_some(
                                         chat_composer_attachments_row(
                                             workspace_id,
-                                            &draft_canonical,
                                             &draft_attachments,
                                             &view_handle,
-                                            input_state.clone(),
                                             theme,
                                         ),
                                         |s, row| s.child(row),

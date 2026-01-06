@@ -72,9 +72,14 @@ Dropping files onto the composer imports them into `context/blobs/` (text-like a
 
 The composer input remains a plain text editor. Attachments are shown as thumbnails/chips inside the same input surface (below the text area). Tokens are not shown in the editor.
 
-When an attachment is inserted, the composer inserts a context token at the current cursor position in the underlying draft text. The editor view hides the raw token string by replacing it with an invisible marker character, while a separate attachments strip renders the thumbnails.
+When an attachment is inserted, the composer records an **anchor byte offset** (the cursor offset in UTF-8 bytes) into the current draft text. The attachment is stored separately from the draft text and only removed when the user clicks the attachment's `X` button.
 
-On send, the final user message text is the current draft text (including tokens) after filtering out unresolved or failed attachments.
+When the draft text changes, attachment anchors are updated by applying a simple diff (common prefix/suffix):
+
+- Anchors after the edited range shift by the byte-length delta.
+- Anchors inside a deleted/replaced range snap to the start of that range.
+
+On send, the final user message text is composed by injecting context tokens at the recorded anchor positions (preserving relative order), and filtering out unresolved or failed attachments.
 
 ## Message rendering (B1)
 
