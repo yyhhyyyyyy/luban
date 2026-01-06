@@ -52,6 +52,8 @@ const RIGHT_PANE_CONTENT_PADDING: f32 = 8.0;
 const TITLEBAR_HEIGHT: f32 = 44.0;
 const MAX_INLINE_PASTE_CHARS: usize = 8_000;
 const MAX_INLINE_PASTE_LINES: usize = 200;
+const CHAT_ATTACHMENT_THUMBNAIL_SIZE: f32 = 72.0;
+const CHAT_ATTACHMENT_FILE_WIDTH: f32 = CHAT_ATTACHMENT_THUMBNAIL_SIZE * 2.0;
 
 static PENDING_CONTEXT_TOKEN_ID: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(1);
@@ -217,6 +219,21 @@ fn image_format_extension(format: gpui::ImageFormat) -> Option<&'static str> {
     }
 }
 
+fn attachment_title_and_icon(
+    kind: luban_domain::ContextTokenKind,
+    path: &std::path::Path,
+) -> (String, IconName, &'static str) {
+    let filename = path
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "attachment".to_owned());
+    match kind {
+        luban_domain::ContextTokenKind::Image => (filename, IconName::GalleryVerticalEnd, "Image"),
+        luban_domain::ContextTokenKind::Text => (filename, IconName::BookOpen, "Text"),
+        luban_domain::ContextTokenKind::File => (filename, IconName::File, "File"),
+    }
+}
+
 fn context_import_plan_from_clipboard(
     clipboard: &gpui::ClipboardItem,
 ) -> (Option<String>, Vec<ContextImportSpec>) {
@@ -308,44 +325,116 @@ fn chat_composer_attachments_row(
             };
 
             let body = if attachment.failed {
-                div()
-                    .h(px(72.0))
-                    .px_3()
-                    .rounded_xl()
-                    .border_1()
-                    .border_color(theme.danger_hover)
-                    .bg(theme.danger)
-                    .text_color(theme.danger_foreground)
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(div().text_sm().child("Failed"))
-                    .child(div().flex_1())
-                    .child(remove())
-                    .into_any_element()
+                match attachment.kind {
+                    luban_domain::ContextTokenKind::Image => div()
+                        .relative()
+                        .w(px(CHAT_ATTACHMENT_THUMBNAIL_SIZE))
+                        .h(px(CHAT_ATTACHMENT_THUMBNAIL_SIZE))
+                        .rounded_xl()
+                        .border_1()
+                        .border_color(theme.danger_hover)
+                        .bg(theme.danger)
+                        .text_color(theme.danger_foreground)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(div().text_sm().child("Failed"))
+                        .child(div().absolute().top(px(6.0)).right(px(6.0)).child(remove()))
+                        .into_any_element(),
+                    luban_domain::ContextTokenKind::Text | luban_domain::ContextTokenKind::File => {
+                        div()
+                            .relative()
+                            .h(px(CHAT_ATTACHMENT_THUMBNAIL_SIZE))
+                            .w(px(CHAT_ATTACHMENT_FILE_WIDTH))
+                            .pl_3()
+                            .pr(px(42.0))
+                            .rounded_xl()
+                            .border_1()
+                            .border_color(theme.danger_hover)
+                            .bg(theme.danger)
+                            .text_color(theme.danger_foreground)
+                            .flex()
+                            .items_center()
+                            .gap_3()
+                            .child(div().text_sm().child("Failed"))
+                            .child(div().absolute().top(px(6.0)).right(px(6.0)).child(remove()))
+                            .into_any_element()
+                    }
+                }
             } else if attachment.path.is_none() {
-                div()
-                    .relative()
-                    .w(px(72.0))
-                    .h(px(72.0))
-                    .rounded_xl()
-                    .border_1()
-                    .border_color(theme.border)
-                    .bg(theme.muted)
-                    .overflow_hidden()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(Spinner::new().with_size(Size::Small))
-                    .child(div().absolute().top(px(6.0)).right(px(6.0)).child(remove()))
-                    .into_any_element()
+                match attachment.kind {
+                    luban_domain::ContextTokenKind::Image => div()
+                        .relative()
+                        .w(px(CHAT_ATTACHMENT_THUMBNAIL_SIZE))
+                        .h(px(CHAT_ATTACHMENT_THUMBNAIL_SIZE))
+                        .rounded_xl()
+                        .border_1()
+                        .border_color(theme.border)
+                        .bg(theme.muted)
+                        .overflow_hidden()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(Spinner::new().with_size(Size::Small))
+                        .child(div().absolute().top(px(6.0)).right(px(6.0)).child(remove()))
+                        .into_any_element(),
+                    luban_domain::ContextTokenKind::Text | luban_domain::ContextTokenKind::File => {
+                        let (icon_name, subtitle) = match attachment.kind {
+                            luban_domain::ContextTokenKind::Text => (IconName::BookOpen, "Text"),
+                            luban_domain::ContextTokenKind::File => (IconName::File, "File"),
+                            luban_domain::ContextTokenKind::Image => unreachable!(),
+                        };
+                        div()
+                            .relative()
+                            .h(px(CHAT_ATTACHMENT_THUMBNAIL_SIZE))
+                            .w(px(CHAT_ATTACHMENT_FILE_WIDTH))
+                            .pl_3()
+                            .pr(px(42.0))
+                            .rounded_xl()
+                            .border_1()
+                            .border_color(theme.border)
+                            .bg(theme.muted)
+                            .flex()
+                            .items_center()
+                            .gap_3()
+                            .child(
+                                div()
+                                    .w(px(36.0))
+                                    .h(px(36.0))
+                                    .rounded_md()
+                                    .bg(theme.background)
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .text_color(theme.muted_foreground)
+                                    .child(Icon::new(icon_name).with_size(Size::Small)),
+                            )
+                            .child(min_width_zero(
+                                div()
+                                    .flex_1()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_0()
+                                    .text_color(theme.foreground)
+                                    .child(div().text_sm().truncate().child("Importing…"))
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(theme.muted_foreground)
+                                            .child(subtitle),
+                                    ),
+                            ))
+                            .child(div().absolute().top(px(6.0)).right(px(6.0)).child(remove()))
+                            .into_any_element()
+                    }
+                }
             } else {
                 let path = attachment.path.clone().unwrap_or_default();
                 match attachment.kind {
                     luban_domain::ContextTokenKind::Image => div()
                         .relative()
-                        .w(px(72.0))
-                        .h(px(72.0))
+                        .w(px(CHAT_ATTACHMENT_THUMBNAIL_SIZE))
+                        .h(px(CHAT_ATTACHMENT_THUMBNAIL_SIZE))
                         .rounded_xl()
                         .border_1()
                         .border_color(theme.border)
@@ -379,13 +468,14 @@ fn chat_composer_attachments_row(
                         .child(div().absolute().top(px(6.0)).right(px(6.0)).child(remove()))
                         .into_any_element(),
                     luban_domain::ContextTokenKind::Text | luban_domain::ContextTokenKind::File => {
-                        let filename = path
-                            .file_name()
-                            .map(|s| s.to_string_lossy().to_string())
-                            .unwrap_or_else(|| "attachment".to_owned());
+                        let (filename, icon_name, subtitle) =
+                            attachment_title_and_icon(attachment.kind, &path);
                         div()
-                            .h(px(72.0))
-                            .px_3()
+                            .relative()
+                            .h(px(CHAT_ATTACHMENT_THUMBNAIL_SIZE))
+                            .w(px(CHAT_ATTACHMENT_FILE_WIDTH))
+                            .pl_3()
+                            .pr(px(42.0))
                             .rounded_xl()
                             .border_1()
                             .border_color(theme.border)
@@ -393,11 +483,35 @@ fn chat_composer_attachments_row(
                             .text_color(theme.muted_foreground)
                             .flex()
                             .items_center()
-                            .gap_2()
-                            .child(Icon::new(IconName::File).with_size(Size::Small))
-                            .child(div().text_sm().truncate().child(filename))
-                            .child(div().flex_1())
-                            .child(remove())
+                            .gap_3()
+                            .child(
+                                div()
+                                    .w(px(36.0))
+                                    .h(px(36.0))
+                                    .rounded_md()
+                                    .bg(theme.background)
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .text_color(theme.muted_foreground)
+                                    .child(Icon::new(icon_name).with_size(Size::Small)),
+                            )
+                            .child(min_width_zero(
+                                div()
+                                    .flex_1()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_0()
+                                    .text_color(theme.foreground)
+                                    .child(div().text_sm().truncate().child(filename))
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(theme.muted_foreground)
+                                            .child(subtitle),
+                                    ),
+                            ))
+                            .child(div().absolute().top(px(6.0)).right(px(6.0)).child(remove()))
                             .into_any_element()
                     }
                 }
@@ -405,6 +519,7 @@ fn chat_composer_attachments_row(
 
             div()
                 .debug_selector(move || debug_id.clone())
+                .flex_shrink_0()
                 .child(body)
                 .into_any_element()
         })
@@ -414,14 +529,19 @@ fn chat_composer_attachments_row(
         div()
             .debug_selector(|| "chat-composer-attachments-row".to_owned())
             .w_full()
-            .flex()
-            .items_center()
-            .flex_wrap()
-            .gap_3()
+            .h(px(CHAT_ATTACHMENT_THUMBNAIL_SIZE + 20.0))
             .px_4()
             .pt_2()
             .pb_1()
-            .children(items)
+            .overflow_x_scrollbar()
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap_3()
+                    .children(items),
+            )
             .into_any_element(),
     )
 }
@@ -6059,6 +6179,16 @@ mod tests {
         assert!(
             first.left() < second.left(),
             "expected attachments to render in anchor order: first={first:?} second={second:?}"
+        );
+        assert!(
+            first.size.width >= px(CHAT_ATTACHMENT_FILE_WIDTH - 4.0)
+                && first.size.width <= px(CHAT_ATTACHMENT_FILE_WIDTH + 4.0),
+            "expected file attachment card to have fixed width: first={first:?}",
+        );
+        assert!(
+            second.size.width >= px(CHAT_ATTACHMENT_THUMBNAIL_SIZE - 4.0)
+                && second.size.width <= px(CHAT_ATTACHMENT_THUMBNAIL_SIZE + 4.0),
+            "expected image attachment thumbnail to have fixed width: second={second:?}",
         );
 
         let top_inset = first.top() - surface.top();
