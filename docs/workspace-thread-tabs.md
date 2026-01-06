@@ -41,11 +41,17 @@ A tab is an opened view of a thread. Tabs are not durable objects; they are deri
 
 Workspace state stores:
 
-- `open_tabs: Vec<WorkspaceThreadId>`: at most 3 items.
+- `open_tabs: Vec<WorkspaceThreadId>`: the visible tab strip order (user-defined).
+- `archived_tabs: Vec<WorkspaceThreadId>`: closed tabs that can be restored.
 - `active_tab: WorkspaceThreadId`: the currently selected thread.
-- `tab_lru: Vec<WorkspaceThreadId>`: most-recent-first ordering for auto-eviction.
 
-Closing a tab removes it from `open_tabs` but does not delete the thread.
+Closing a tab archives it:
+
+- Remove from `open_tabs`.
+- Append to `archived_tabs` (no duplicates).
+- Select a neighbor tab as the next active tab when possible.
+
+Archiving does not delete the thread. Messages and drafts remain durable.
 
 ## UI
 
@@ -62,19 +68,27 @@ The tab strip is rendered inside the chat pane:
 - `+` creates a new thread, appends a tab at the end, and activates it.
 - A `v` dropdown button opens the Threads menu (all threads in this workspace).
 - Activating a thread does not reorder the tab strip. Users reorder tabs by dragging.
-- The tab strip does not horizontally scroll. Tabs compress to fit; use the dropdown to access any
-  thread when tabs become too narrow.
+- The tab strip does not horizontally scroll. Tabs compress to fit (min/max width per tab).
+  Use the dropdown menu when tabs become too narrow.
 - Tabs show:
   - Title (derived from thread title)
   - Dirty indicator when the thread has a non-empty draft or draft attachments
   - Running indicator when the thread has an active turn
-- Optional: `x` close button on hover (close only, no confirmation; state preserved).
+- `x` close button on hover archives the tab (no confirmation).
 
 ### Threads menu (overflow)
 
-The menu lists all threads sorted by `last_active_at` descending:
+The menu renders two sections:
 
-- Clicking an item activates the thread and ensures it is in `open_tabs` (subject to the 3-tab cap).
+- **Active**: threads currently in `open_tabs`
+- **Archived**: threads in `archived_tabs` (this section is hidden when empty)
+
+Rules:
+
+- The menu supports vertical scrolling with a scrollbar when needed.
+- Clicking an item activates the thread and ensures it is in `open_tabs`.
+- Active rows can be archived from the menu (disabled when it would leave zero open tabs).
+- Archived rows can be restored from the menu.
 
 Future (not implemented in the initial delivery):
 
@@ -106,7 +120,7 @@ If a thread has `remote_thread_id = None`, the first turn starts a new remote th
 
 Persisted app state includes:
 
-- Per-workspace: `open_tabs`, `active_tab`, and `tab_lru`.
+- Per-workspace: `open_tabs`, `archived_tabs`, and `active_tab`.
 - Per-thread: draft text, draft attachments, scroll position, run config, and conversation entries.
 
 We keep attachments on disk at the workspace-level context directory; threads only reference paths.
@@ -114,10 +128,10 @@ We keep attachments on disk at the workspace-level context directory; threads on
 ## Test strategy
 
 - Domain tests:
-  - Opening/closing/activating tabs keeps `open_tabs` <= 3 and maintains LRU eviction.
-  - Closing tabs does not delete thread state (draft/messages preserved).
+  - Closing tabs archives them and preserves thread state (draft/messages preserved).
+  - Restoring an archived tab returns it to `open_tabs`.
   - Concurrent turns are isolated per thread.
 - UI tests (GPUI inspector bounds):
   - Tab strip renders in both workspace and dashboard preview.
-  - Only 3 tabs visible; overflow menu exists.
+  - Overflow menu separates Active/Archived and hides Archived when empty.
   - Active tab changes update the visible conversation and terminal selection.
