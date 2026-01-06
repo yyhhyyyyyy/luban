@@ -1852,6 +1852,21 @@ impl LubanRootView {
                             let archive_id =
                                 format!("workspace-thread-tabs-menu-active-archive-{idx}");
                             let view_handle_archive = view_handle_for_overflow.clone();
+                            let row_bg = if selected {
+                                theme.sidebar_accent
+                            } else {
+                                theme.transparent
+                            };
+                            let hover_bg = if selected {
+                                theme.sidebar_accent
+                            } else {
+                                theme.list_hover
+                            };
+                            let row_fg = if selected {
+                                theme.sidebar_accent_foreground
+                            } else {
+                                theme.foreground
+                            };
 
                             div()
                                 .h(px(32.0))
@@ -1863,7 +1878,10 @@ impl LubanRootView {
                                 .justify_between()
                                 .cursor_pointer()
                                 .debug_selector(move || row_id.clone())
-                                .hover(move |s| s.bg(theme.list_hover))
+                                .bg(row_bg)
+                                .text_color(row_fg)
+                                .when(selected, |s| s.font_semibold())
+                                .hover(move |s| s.bg(hover_bg))
                                 .on_mouse_down(MouseButton::Left, move |_, window, app| {
                                     let _ = view_handle.update(app, |view, cx| {
                                         view.dispatch(
@@ -1885,50 +1903,37 @@ impl LubanRootView {
                                         .child(title.clone()),
                                 )
                                 .child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .gap_1()
-                                        .child(
-                                            Button::new(archive_id.clone())
-                                                .ghost()
-                                                .compact()
-                                                .with_size(Size::Small)
-                                                .disabled(!allow_close)
-                                                .icon(Icon::new(IconName::Close))
-                                                .tooltip("Archive tab")
-                                                .on_click(move |_, window, app| {
-                                                    if !allow_close {
-                                                        return;
-                                                    }
-                                                    let _ = view_handle_archive.update(
-                                                        app,
-                                                        |view, cx| {
-                                                            view.dispatch(
-                                                                Action::CloseWorkspaceThreadTab {
-                                                                    workspace_id,
-                                                                    thread_id,
-                                                                },
-                                                                cx,
-                                                            );
-                                                        },
-                                                    );
-                                                    popover_handle_for_archive.update(
-                                                        app,
-                                                        |state, cx| {
-                                                            state.dismiss(window, cx);
-                                                        },
-                                                    );
-                                                })
-                                                .into_any_element(),
-                                        )
-                                        .when(selected, |s| {
-                                            s.child(
-                                                Icon::new(IconName::Check)
-                                                    .with_size(Size::Small)
-                                                    .text_color(theme.muted_foreground),
-                                            )
-                                        }),
+                                    div().flex().items_center().gap_1().child(
+                                        Button::new(archive_id.clone())
+                                            .ghost()
+                                            .compact()
+                                            .with_size(Size::Small)
+                                            .disabled(!allow_close)
+                                            .icon(Icon::new(IconName::Close))
+                                            .tooltip("Archive tab")
+                                            .on_click(move |_, window, app| {
+                                                if !allow_close {
+                                                    return;
+                                                }
+                                                let _ =
+                                                    view_handle_archive.update(app, |view, cx| {
+                                                        view.dispatch(
+                                                            Action::CloseWorkspaceThreadTab {
+                                                                workspace_id,
+                                                                thread_id,
+                                                            },
+                                                            cx,
+                                                        );
+                                                    });
+                                                popover_handle_for_archive.update(
+                                                    app,
+                                                    |state, cx| {
+                                                        state.dismiss(window, cx);
+                                                    },
+                                                );
+                                            })
+                                            .into_any_element(),
+                                    ),
                                 )
                                 .into_any_element()
                         });
