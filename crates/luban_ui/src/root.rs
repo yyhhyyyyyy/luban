@@ -332,6 +332,7 @@ fn chat_composer_attachments_row(
                     .border_1()
                     .border_color(theme.border)
                     .bg(theme.muted)
+                    .overflow_hidden()
                     .flex()
                     .items_center()
                     .justify_center()
@@ -345,28 +346,26 @@ fn chat_composer_attachments_row(
                         .relative()
                         .w(px(72.0))
                         .h(px(72.0))
+                        .rounded_xl()
+                        .border_1()
+                        .border_color(theme.border)
+                        .bg(theme.muted)
+                        .overflow_hidden()
                         .child(
                             gpui::img(path)
                                 .w_full()
                                 .h_full()
-                                .rounded_xl()
-                                .border_1()
-                                .border_color(theme.border)
                                 .object_fit(gpui::ObjectFit::Cover)
                                 .with_loading(|| {
                                     Spinner::new().with_size(Size::Small).into_any_element()
                                 })
                                 .with_fallback({
-                                    let border_color = theme.border;
                                     let muted = theme.muted;
                                     let muted_foreground = theme.muted_foreground;
                                     move || {
                                         div()
                                             .w_full()
                                             .h_full()
-                                            .rounded_xl()
-                                            .border_1()
-                                            .border_color(border_color)
                                             .bg(muted)
                                             .flex()
                                             .items_center()
