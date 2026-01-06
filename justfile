@@ -26,7 +26,13 @@ test-fast:
 run:
   cargo run -p luban_app
 
-build:
-  cargo build -p luban_app
+build profile="debug":
+  if [ "{{profile}}" = "release" ]; then \
+    cargo build -p luban_app --release; \
+  elif [ "{{profile}}" = "debug" ] || [ "{{profile}}" = "dev" ]; then \
+    cargo build -p luban_app; \
+  else \
+    cargo build -p luban_app --profile "{{profile}}"; \
+  fi
 
 ci: fmt lint test
