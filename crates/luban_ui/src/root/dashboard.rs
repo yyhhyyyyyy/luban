@@ -856,7 +856,7 @@ impl LubanRootView {
                                 };
 
 	                                let (inline_text, imports) =
-	                                    context_import_plan_from_clipboard(&clipboard);
+	                                    chat::composer::context_import_plan_from_clipboard(&clipboard);
 	                                if imports.is_empty() {
 	                                    return;
 	                                }
@@ -885,13 +885,13 @@ impl LubanRootView {
                                         for spec in imports {
                                             let id = next_pending_context_id();
                                             let kind = match &spec {
-                                                ContextImportSpec::Image { .. } => {
+                                                chat::composer::ContextImportSpec::Image { .. } => {
                                                     luban_domain::ContextTokenKind::Image
                                                 }
-                                                ContextImportSpec::Text { .. } => {
+                                                chat::composer::ContextImportSpec::Text { .. } => {
                                                     luban_domain::ContextTokenKind::Text
                                                 }
-                                                ContextImportSpec::File { .. } => {
+                                                chat::composer::ContextImportSpec::File { .. } => {
                                                     luban_domain::ContextTokenKind::File
                                                 }
                                             };
@@ -943,10 +943,10 @@ impl LubanRootView {
 
 	                                        let mut imports = Vec::new();
 	                                        for path in paths {
-	                                            if !is_text_like_extension(&path) {
+	                                            if !chat::composer::is_text_like_extension(&path) {
 	                                                continue;
 	                                            }
-	                                            imports.push(ContextImportSpec::File { source_path: path });
+	                                            imports.push(chat::composer::ContextImportSpec::File { source_path: path });
 	                                        }
 
                                         if imports.is_empty() {
