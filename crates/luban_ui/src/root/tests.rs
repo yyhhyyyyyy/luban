@@ -579,6 +579,15 @@ async fn terminal_title_is_rendered_in_titlebar_when_visible(cx: &mut gpui::Test
         "expected divider to be visible: {divider:?}"
     );
 
+    let resizer = window_cx
+        .debug_bounds("terminal-pane-resizer")
+        .expect("missing terminal pane resizer bounds");
+    let divider_dx = (divider.origin.x - resizer.right()).abs();
+    assert!(
+        divider_dx <= px(1.0),
+        "expected terminal divider to align with resizer: divider={divider:?} resizer={resizer:?}"
+    );
+
     window_cx.update(|_, app| {
         view.update(app, |view, cx| {
             view.dispatch(Action::ToggleTerminalPane, cx);

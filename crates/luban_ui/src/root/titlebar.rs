@@ -67,11 +67,7 @@ pub(super) fn render_titlebar(
     } else {
         theme.title_bar
     };
-    let titlebar_border = if state.main_pane == MainPane::Dashboard {
-        theme.sidebar_border
-    } else {
-        theme.title_bar_border
-    };
+    let titlebar_border = theme.border;
 
     let TitlebarContext {
         branch_label,
