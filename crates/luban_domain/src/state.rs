@@ -1,4 +1,4 @@
-use crate::{CodexThreadItem, CodexUsage, ContextTokenKind, ThinkingEffort, codex_item_id};
+use crate::{CodexThreadItem, CodexUsage, ContextTokenKind, ThinkingEffort};
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
     path::PathBuf,
@@ -58,6 +58,19 @@ pub enum ConversationEntry {
     TurnDuration { duration_ms: u64 },
     TurnCanceled,
     TurnError { message: String },
+}
+
+pub(crate) fn codex_item_id(item: &CodexThreadItem) -> &str {
+    match item {
+        CodexThreadItem::AgentMessage { id, .. } => id,
+        CodexThreadItem::Reasoning { id, .. } => id,
+        CodexThreadItem::CommandExecution { id, .. } => id,
+        CodexThreadItem::FileChange { id, .. } => id,
+        CodexThreadItem::McpToolCall { id, .. } => id,
+        CodexThreadItem::WebSearch { id, .. } => id,
+        CodexThreadItem::TodoList { id, .. } => id,
+        CodexThreadItem::Error { id, .. } => id,
+    }
 }
 
 fn entry_is_same_codex_item(entry: &ConversationEntry, item: &CodexThreadItem) -> bool {
