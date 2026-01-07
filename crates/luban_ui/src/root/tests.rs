@@ -972,8 +972,8 @@ async fn main_workspace_row_is_rendered_and_is_not_archivable(cx: &mut gpui::Tes
         "main workspace should not render a separate badge label"
     );
     assert!(
-        window_cx.debug_bounds("workspace-main-icon-0").is_some(),
-        "main workspace should render a leading icon"
+        window_cx.debug_bounds("workspace-main-icon-0").is_none(),
+        "main workspace should not render a leading icon"
     );
     assert!(
         window_cx.debug_bounds("workspace-row-0-0").is_none(),
@@ -3213,14 +3213,14 @@ async fn workspace_icons_are_vertically_centered_in_rows(cx: &mut gpui::TestAppC
     let main_row = window_cx
         .debug_bounds("workspace-main-row-0")
         .expect("missing main workspace row");
-    let main_icon = window_cx
-        .debug_bounds("workspace-main-icon-0")
-        .expect("missing main workspace icon");
-    let main_dy = (main_icon.center().y - main_row.center().y).abs();
+    let main_status_container = window_cx
+        .debug_bounds("workspace-main-status-container-0")
+        .expect("missing main workspace status container");
+    let main_dy = (main_status_container.center().y - main_row.center().y).abs();
     assert!(
         main_dy <= px(2.0),
-        "main icon should be vertically centered: icon={:?} row={:?}",
-        main_icon,
+        "main status container should be vertically centered: icon={:?} row={:?}",
+        main_status_container,
         main_row
     );
 

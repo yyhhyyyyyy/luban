@@ -777,16 +777,6 @@ fn render_main_workspace_row(
                     )
                 }),
         )
-        .child(
-            div()
-                .debug_selector(move || format!("workspace-main-icon-{project_index}"))
-                .child(
-                    Icon::empty()
-                        .path("icons/house.svg")
-                        .with_size(Size::Small)
-                        .text_color(theme.muted_foreground),
-                ),
-        )
         .child(min_width_zero(
             div()
                 .flex_1()
