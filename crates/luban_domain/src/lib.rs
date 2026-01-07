@@ -35,6 +35,7 @@ pub use dashboard::{
     dashboard_cards, dashboard_preview,
 };
 
+mod persistence;
 mod state;
 pub use state::*;
 

@@ -1,0 +1,234 @@
+use crate::{
+    AppState, Effect, MainPane, OperationStatus, PersistedAppState, PersistedProject,
+    PersistedWorkspace, Project, ProjectId, RightPane, Workspace, WorkspaceId, WorkspaceStatus,
+    WorkspaceTabs, WorkspaceThreadId,
+};
+use std::collections::HashMap;
+use std::time::{Duration, UNIX_EPOCH};
+
+pub(crate) fn apply_persisted_app_state(
+    state: &mut AppState,
+    persisted: PersistedAppState,
+) -> Vec<Effect> {
+    if !state.projects.is_empty() {
+        return Vec::new();
+    }
+
+    state.projects = persisted
+        .projects
+        .into_iter()
+        .map(|p| Project {
+            id: ProjectId(p.id),
+            name: p.name,
+            path: p.path,
+            slug: p.slug,
+            expanded: p.expanded,
+            create_workspace_status: OperationStatus::Idle,
+            workspaces: p
+                .workspaces
+                .into_iter()
+                .map(|w| Workspace {
+                    id: WorkspaceId(w.id),
+                    workspace_name: w.workspace_name,
+                    branch_name: w.branch_name,
+                    worktree_path: w.worktree_path,
+                    status: w.status,
+                    last_activity_at: w
+                        .last_activity_at_unix_seconds
+                        .map(|secs| UNIX_EPOCH + Duration::from_secs(secs)),
+                    archive_status: OperationStatus::Idle,
+                })
+                .collect(),
+        })
+        .collect();
+    state.sidebar_width = persisted.sidebar_width;
+    state.terminal_pane_width = persisted.terminal_pane_width;
+    state.last_open_workspace_id = persisted.last_open_workspace_id.map(WorkspaceId);
+    state.workspace_tabs = HashMap::new();
+    state.conversations = HashMap::new();
+
+    for workspace in state.projects.iter().flat_map(|p| &p.workspaces) {
+        let workspace_id = workspace.id;
+        let active = persisted
+            .workspace_active_thread_id
+            .get(&workspace_id.0)
+            .copied()
+            .map(WorkspaceThreadId)
+            .unwrap_or(WorkspaceThreadId(1));
+
+        let mut open_tabs = persisted
+            .workspace_open_tabs
+            .get(&workspace_id.0)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(WorkspaceThreadId)
+            .collect::<Vec<_>>();
+        let mut archived_tabs = persisted
+            .workspace_archived_tabs
+            .get(&workspace_id.0)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(WorkspaceThreadId)
+            .collect::<Vec<_>>();
+        archived_tabs.retain(|id| !open_tabs.contains(id));
+        if open_tabs.is_empty() {
+            open_tabs.push(active);
+        }
+        if !open_tabs.contains(&active) {
+            open_tabs.push(active);
+        }
+        archived_tabs.retain(|id| *id != active);
+
+        let next_thread_id = persisted
+            .workspace_next_thread_id
+            .get(&workspace_id.0)
+            .copied()
+            .unwrap_or(active.0 + 1);
+
+        state.workspace_tabs.insert(
+            workspace_id,
+            WorkspaceTabs {
+                open_tabs: open_tabs.clone(),
+                archived_tabs,
+                active_tab: active,
+                next_thread_id,
+            },
+        );
+
+        for thread_id in open_tabs {
+            state.conversations.insert(
+                (workspace_id, thread_id),
+                AppState::default_conversation(thread_id),
+            );
+        }
+    }
+
+    state.workspace_chat_scroll_y10 = persisted
+        .workspace_chat_scroll_y10
+        .into_iter()
+        .map(|((workspace_id, thread_id), offset)| {
+            (
+                (WorkspaceId(workspace_id), WorkspaceThreadId(thread_id)),
+                offset,
+            )
+        })
+        .collect();
+
+    let max_project_id = state.projects.iter().map(|p| p.id.0).max().unwrap_or(0);
+    let max_workspace_id = state
+        .projects
+        .iter()
+        .flat_map(|p| &p.workspaces)
+        .map(|w| w.id.0)
+        .max()
+        .unwrap_or(0);
+
+    state.next_project_id = max_project_id + 1;
+    state.next_workspace_id = max_workspace_id + 1;
+    state.main_pane = MainPane::None;
+    state.right_pane = RightPane::None;
+    state.dashboard_preview_workspace_id = None;
+
+    let upgraded = state.ensure_main_workspaces();
+    let mut effects = if upgraded {
+        vec![Effect::SaveAppState]
+    } else {
+        Vec::new()
+    };
+
+    let restored_workspace_id = state.last_open_workspace_id.and_then(|workspace_id| {
+        state
+            .workspace(workspace_id)
+            .filter(|w| w.status == WorkspaceStatus::Active)
+            .map(|_| workspace_id)
+    });
+
+    if let Some(workspace_id) = restored_workspace_id {
+        state.main_pane = MainPane::Workspace(workspace_id);
+        state.right_pane = RightPane::Terminal;
+        let thread_id = state
+            .workspace_tabs
+            .get(&workspace_id)
+            .map(|tabs| tabs.active_tab)
+            .unwrap_or(WorkspaceThreadId(1));
+        effects.push(Effect::LoadWorkspaceThreads { workspace_id });
+        effects.push(Effect::LoadConversation {
+            workspace_id,
+            thread_id,
+        });
+    }
+
+    effects
+}
+
+pub(crate) fn to_persisted_app_state(state: &AppState) -> PersistedAppState {
+    PersistedAppState {
+        projects: state
+            .projects
+            .iter()
+            .map(|p| PersistedProject {
+                id: p.id.0,
+                name: p.name.clone(),
+                path: p.path.clone(),
+                slug: p.slug.clone(),
+                expanded: p.expanded,
+                workspaces: p
+                    .workspaces
+                    .iter()
+                    .map(|w| PersistedWorkspace {
+                        id: w.id.0,
+                        workspace_name: w.workspace_name.clone(),
+                        branch_name: w.branch_name.clone(),
+                        worktree_path: w.worktree_path.clone(),
+                        status: w.status,
+                        last_activity_at_unix_seconds: w
+                            .last_activity_at
+                            .and_then(|t| t.duration_since(UNIX_EPOCH).ok().map(|d| d.as_secs())),
+                    })
+                    .collect(),
+            })
+            .collect(),
+        sidebar_width: state.sidebar_width,
+        terminal_pane_width: state.terminal_pane_width,
+        last_open_workspace_id: state.last_open_workspace_id.map(|id| id.0),
+        workspace_active_thread_id: state
+            .workspace_tabs
+            .iter()
+            .map(|(workspace_id, tabs)| (workspace_id.0, tabs.active_tab.0))
+            .collect(),
+        workspace_open_tabs: state
+            .workspace_tabs
+            .iter()
+            .map(|(workspace_id, tabs)| {
+                (
+                    workspace_id.0,
+                    tabs.open_tabs.iter().map(|id| id.0).collect(),
+                )
+            })
+            .collect(),
+        workspace_archived_tabs: state
+            .workspace_tabs
+            .iter()
+            .map(|(workspace_id, tabs)| {
+                (
+                    workspace_id.0,
+                    tabs.archived_tabs.iter().map(|id| id.0).collect(),
+                )
+            })
+            .collect(),
+        workspace_next_thread_id: state
+            .workspace_tabs
+            .iter()
+            .map(|(workspace_id, tabs)| (workspace_id.0, tabs.next_thread_id))
+            .collect(),
+        workspace_chat_scroll_y10: state
+            .workspace_chat_scroll_y10
+            .iter()
+            .map(|((workspace_id, thread_id), offset_y10)| {
+                ((workspace_id.0, thread_id.0), *offset_y10)
+            })
+            .collect(),
+    }
+}

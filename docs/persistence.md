@@ -1,4 +1,21 @@
-## SQLite persistence and migrations design
+# Persistence (SQLite + domain mapping)
+
+This document describes the implemented persistence model and how it is versioned and migrated.
+Some older sections are kept for historical context, but the **Current implementation** section
+is the source of truth.
+
+## Current implementation
+
+- SQLite is the durable store for projects/workspaces and app-level settings.
+- Conversations are persisted via:
+  - SQLite tables (`conversation_entries`, `conversations`)
+  - Workspace-local `context/` files for attachment blobs
+- Schema migrations are versioned via `PRAGMA user_version` and applied in
+  `crates/luban_app/src/sqlite_store.rs`.
+- The mapping between `PersistedAppState` (adapter boundary) and `AppState` (domain state) is
+  centralized in `crates/luban_domain/src/persistence.rs`.
+
+## Historical notes: SQLite persistence and migrations design
 
 ### Goals
 
@@ -21,8 +38,9 @@
 - Conversations are persisted under `~/luban/conversations/<project_slug>/<workspace_name>/`:
   - `conversation.json` (meta; includes `version` and `thread_id`)
   - `events.jsonl` (append-only JSON Lines of `ConversationEntry`)
-- Projects/workspaces exist only in memory (`luban_domain::AppState`) and are lost on restart.
-- IO is already correctly executed off the UI thread via `background_spawn` in `luban_ui`.
+- Projects/workspaces and conversations are loaded from SQLite on startup and persisted back via
+  explicit `Effect`s.
+- All IO runs off the UI thread via adapter implementations in `luban_app`.
 
 ---
 
