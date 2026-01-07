@@ -27,6 +27,8 @@ pub use chat_draft::{
 };
 mod actions;
 pub use actions::Action;
+mod effects;
+pub use effects::Effect;
 mod agent_settings;
 pub mod paths;
 pub use agent_settings::{
@@ -415,44 +417,6 @@ pub struct PersistedWorkspace {
     pub worktree_path: PathBuf,
     pub status: WorkspaceStatus,
     pub last_activity_at_unix_seconds: Option<u64>,
-}
-
-#[derive(Clone, Debug)]
-pub enum Effect {
-    LoadAppState,
-    SaveAppState,
-
-    CreateWorkspace {
-        project_id: ProjectId,
-    },
-    OpenWorkspaceInIde {
-        workspace_id: WorkspaceId,
-    },
-    ArchiveWorkspace {
-        workspace_id: WorkspaceId,
-    },
-    EnsureConversation {
-        workspace_id: WorkspaceId,
-        thread_id: WorkspaceThreadId,
-    },
-    LoadConversation {
-        workspace_id: WorkspaceId,
-        thread_id: WorkspaceThreadId,
-    },
-    RunAgentTurn {
-        workspace_id: WorkspaceId,
-        thread_id: WorkspaceThreadId,
-        text: String,
-        run_config: AgentRunConfig,
-    },
-    CancelAgentTurn {
-        workspace_id: WorkspaceId,
-        thread_id: WorkspaceThreadId,
-    },
-
-    LoadWorkspaceThreads {
-        workspace_id: WorkspaceId,
-    },
 }
 
 impl AppState {
