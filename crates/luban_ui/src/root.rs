@@ -2147,6 +2147,12 @@ fn render_conversation_entry(
                 theme.foreground,
                 theme.border,
             );
+            let copy_text = text.to_owned();
+            let copy_button = copy_to_clipboard_button(
+                format!("conversation-user-copy-button-{entry_index}"),
+                copy_text,
+                theme,
+            );
             let bubble = min_width_zero(
                 div()
                     .max_w(bubble_max_w)
@@ -2170,8 +2176,22 @@ fn render_conversation_entry(
                 .flex_row()
                 .justify_end()
                 .child(
-                    bubble
-                        .debug_selector(move || format!("conversation-user-bubble-{entry_index}")),
+                    div()
+                        .max_w(bubble_max_w)
+                        .flex()
+                        .flex_col()
+                        .items_end()
+                        .child(bubble.debug_selector(move || {
+                            format!("conversation-user-bubble-{entry_index}")
+                        }))
+                        .child(
+                            div()
+                                .pt_1()
+                                .flex()
+                                .items_center()
+                                .justify_end()
+                                .child(copy_button),
+                        ),
                 )
                 .into_any_element()
         }
@@ -2225,6 +2245,31 @@ fn render_conversation_entry(
             .child(div().child(message.clone()))
             .into_any_element(),
     }
+}
+
+fn copy_to_clipboard_button(
+    debug_id: String,
+    copy_text: String,
+    theme: &gpui_component::Theme,
+) -> AnyElement {
+    let icon = Icon::new(IconName::Copy)
+        .with_size(Size::Small)
+        .text_color(theme.muted_foreground);
+
+    let debug_id_for_render = debug_id.clone();
+    div()
+        .debug_selector(move || debug_id_for_render.clone())
+        .w(px(24.0))
+        .h(px(24.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .cursor_pointer()
+        .on_mouse_down(MouseButton::Left, move |_, _, app| {
+            app.write_to_clipboard(gpui::ClipboardItem::new_string(copy_text.clone()));
+        })
+        .child(icon)
+        .into_any_element()
 }
 
 fn user_message_view_with_context_tokens(
@@ -2605,61 +2650,78 @@ fn build_workspace_history_children(
     let mut children = Vec::new();
     let mut turn_index = 0usize;
     let mut current_turn: Option<TurnAccumulator<'_>> = None;
+    let mut pending_turn_agent_copy: Option<(String, String)> = None;
 
     let flush_turn =
         |turn: TurnAccumulator<'_>, children: &mut Vec<AnyElement>, in_progress: bool| {
             if !in_progress && turn.summary_items.is_empty() && turn.agent_messages.is_empty() {
-                return;
+                return None;
             }
 
-            let turn_container_id = turn.id.clone();
             let turn_id = turn.id.clone();
-            let allow_toggle = !in_progress;
-            let expanded = in_progress || expanded_turns.contains(&turn.id);
-            let header = render_agent_turn_summary_row(
-                &turn.id,
-                TurnSummaryCounts {
-                    tool_calls: turn.tool_calls,
-                    reasonings: turn.reasonings,
-                },
-                !turn.summary_items.is_empty() || in_progress,
-                expanded,
-                in_progress,
-                allow_toggle,
-                theme,
-                view_handle,
-            );
-            let mut summary_children = Vec::with_capacity(turn.summary_items.len());
-            for item in turn.summary_items {
-                summary_children.push(render_tool_summary_item(
-                    &turn_id,
-                    item,
+            if in_progress || !turn.summary_items.is_empty() {
+                let turn_container_id = turn.id.clone();
+                let allow_toggle = !in_progress;
+                let expanded = in_progress || expanded_turns.contains(&turn.id);
+                let header = render_agent_turn_summary_row(
+                    &turn.id,
+                    TurnSummaryCounts {
+                        tool_calls: turn.tool_calls,
+                        reasonings: turn.reasonings,
+                    },
+                    true,
+                    expanded,
+                    in_progress,
+                    allow_toggle,
                     theme,
-                    expanded_items,
-                    chat_column_width,
                     view_handle,
-                ));
-            }
-            let content = div()
-                .pl_4()
-                .flex()
-                .flex_col()
-                .gap_2()
-                .children(summary_children);
+                );
+                let mut summary_children = Vec::with_capacity(turn.summary_items.len());
+                for item in turn.summary_items {
+                    summary_children.push(render_tool_summary_item(
+                        &turn_id,
+                        item,
+                        theme,
+                        expanded_items,
+                        chat_column_width,
+                        view_handle,
+                    ));
+                }
+                let content = div()
+                    .pl_4()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .children(summary_children);
 
-            children.push(
-                div()
-                    .id(format!("conversation-turn-{turn_container_id}"))
-                    .w_full()
-                    .child(
-                        Collapsible::new()
-                            .open(expanded)
-                            .w_full()
-                            .child(header)
-                            .content(content),
-                    )
-                    .into_any_element(),
-            );
+                children.push(
+                    div()
+                        .id(format!("conversation-turn-{turn_container_id}"))
+                        .w_full()
+                        .child(
+                            Collapsible::new()
+                                .open(expanded)
+                                .w_full()
+                                .child(header)
+                                .content(content),
+                        )
+                        .into_any_element(),
+                );
+            }
+
+            let pending_agent_copy = (!in_progress)
+                .then(|| {
+                    let last = turn.agent_messages.last()?;
+                    let CodexThreadItem::AgentMessage { text, .. } = last else {
+                        return None;
+                    };
+                    let render_id = format!("{}-{}", turn_id, codex_item_id(last));
+                    Some((
+                        format!("conversation-agent-copy-button-{render_id}"),
+                        text.to_owned(),
+                    ))
+                })
+                .flatten();
 
             for item in turn.agent_messages {
                 children.push(render_codex_item(
@@ -2672,14 +2734,17 @@ fn build_workspace_history_children(
                     view_handle,
                 ));
             }
+
+            pending_agent_copy
         };
 
     for (entry_index, entry) in entries.iter().enumerate() {
         match entry {
             luban_domain::ConversationEntry::UserMessage { text: _ } => {
                 if let Some(turn) = current_turn.take() {
-                    flush_turn(turn, &mut children, false);
+                    let _ = flush_turn(turn, &mut children, false);
                 }
+                pending_turn_agent_copy = None;
 
                 children.push(render_conversation_entry(
                     entry_index,
@@ -2741,23 +2806,42 @@ fn build_workspace_history_children(
             }
             luban_domain::ConversationEntry::TurnUsage { .. } => {
                 if let Some(turn) = current_turn.take() {
-                    flush_turn(turn, &mut children, false);
+                    let _ = flush_turn(turn, &mut children, false);
                 }
+                pending_turn_agent_copy = None;
             }
             luban_domain::ConversationEntry::TurnDuration { .. }
             | luban_domain::ConversationEntry::TurnCanceled
             | luban_domain::ConversationEntry::TurnError { .. } => {
                 if let Some(turn) = current_turn.take() {
-                    flush_turn(turn, &mut children, false);
+                    pending_turn_agent_copy = flush_turn(turn, &mut children, false);
                 }
-                children.push(render_conversation_entry(
-                    entry_index,
-                    entry,
-                    theme,
-                    expanded_items,
-                    chat_column_width,
-                    view_handle,
-                ));
+                if let luban_domain::ConversationEntry::TurnDuration { duration_ms } = entry {
+                    let elapsed = Duration::from_millis(*duration_ms);
+                    let duration_row = render_turn_duration_row_for_agent_turn(
+                        theme,
+                        elapsed,
+                        false,
+                        pending_turn_agent_copy.take(),
+                    );
+                    children.push(
+                        div()
+                            .debug_selector(move || format!("turn-duration-{entry_index}"))
+                            .id(format!("conversation-duration-{entry_index}"))
+                            .child(duration_row)
+                            .into_any_element(),
+                    );
+                } else {
+                    pending_turn_agent_copy = None;
+                    children.push(render_conversation_entry(
+                        entry_index,
+                        entry,
+                        theme,
+                        expanded_items,
+                        chat_column_width,
+                        view_handle,
+                    ));
+                }
             }
         }
     }
@@ -2782,10 +2866,53 @@ fn build_workspace_history_children(
             }
         }
 
-        flush_turn(turn, &mut children, force_expand_current_turn);
+        let _ = flush_turn(turn, &mut children, force_expand_current_turn);
     }
 
     children
+}
+
+fn render_turn_duration_row_for_agent_turn(
+    theme: &gpui_component::Theme,
+    elapsed: Duration,
+    in_progress: bool,
+    agent_copy: Option<(String, String)>,
+) -> AnyElement {
+    let icon = if in_progress {
+        Spinner::new()
+            .with_size(Size::Small)
+            .color(theme.muted_foreground)
+            .into_any_element()
+    } else {
+        Icon::empty()
+            .path("icons/timer.svg")
+            .with_size(Size::Small)
+            .text_color(theme.muted_foreground)
+            .into_any_element()
+    };
+
+    let mut row = div()
+        .h(px(24.0))
+        .w_full()
+        .px_2()
+        .flex()
+        .items_center()
+        .gap_2()
+        .text_color(theme.muted_foreground)
+        .child(icon)
+        .child(div().truncate().child(format_duration_compact(elapsed)));
+
+    if let Some((debug_id, copy_text)) = agent_copy {
+        let dot = Icon::empty()
+            .path("icons/circle-dot.svg")
+            .with_size(Size::XSmall)
+            .text_color(theme.muted_foreground);
+        row = row
+            .child(dot)
+            .child(copy_to_clipboard_button(debug_id, copy_text, theme));
+    }
+
+    row.into_any_element()
 }
 
 #[allow(clippy::too_many_arguments)]
