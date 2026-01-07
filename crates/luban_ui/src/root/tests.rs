@@ -484,6 +484,52 @@ async fn titlebar_buttons_keep_terminal_toggle_on_far_right(cx: &mut gpui::TestA
 }
 
 #[gpui::test]
+async fn titlebar_segments_are_adjacent_without_gaps(cx: &mut gpui::TestAppContext) {
+    cx.update(gpui_component::init);
+
+    let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+    let mut state = AppState::new();
+    state.apply(Action::AddProject {
+        path: PathBuf::from("/tmp/repo"),
+    });
+    let project_id = state.projects[0].id;
+    state.apply(Action::WorkspaceCreated {
+        project_id,
+        workspace_name: "abandon-about".to_owned(),
+        branch_name: "main".to_owned(),
+        worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+    });
+    let workspace_id = workspace_id_by_name(&state, "abandon-about");
+    state.apply(Action::OpenWorkspace { workspace_id });
+
+    let (_view, window_cx) =
+        cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+    window_cx.simulate_resize(size(px(900.0), px(240.0)));
+    window_cx.run_until_parked();
+    window_cx.refresh().unwrap();
+
+    let titlebar = window_cx
+        .debug_bounds("titlebar")
+        .expect("missing titlebar bounds");
+    let sidebar = window_cx
+        .debug_bounds("titlebar-sidebar")
+        .expect("missing sidebar titlebar bounds");
+    let main = window_cx
+        .debug_bounds("titlebar-main")
+        .expect("missing main titlebar bounds");
+
+    assert!(
+        (titlebar.origin.x - px(0.0)).abs() <= px(0.5),
+        "expected titlebar to start at window origin: {titlebar:?}"
+    );
+    assert!(
+        (sidebar.right() - main.origin.x).abs() <= px(1.0),
+        "expected titlebar segments to be adjacent: sidebar={sidebar:?} main={main:?}"
+    );
+}
+
+#[gpui::test]
 async fn terminal_title_is_rendered_in_titlebar_when_visible(cx: &mut gpui::TestAppContext) {
     cx.update(gpui_component::init);
 
