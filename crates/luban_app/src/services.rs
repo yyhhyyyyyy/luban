@@ -405,6 +405,7 @@ impl ProjectWorkspaceService for GitWorkspaceService {
             &workspace_name,
             &image.bytes,
             &image.extension,
+            "image",
         );
         result.map_err(|e| format!("{e:#}"))
     }
@@ -416,8 +417,13 @@ impl ProjectWorkspaceService for GitWorkspaceService {
         text: String,
         extension: String,
     ) -> Result<PathBuf, String> {
-        let result: anyhow::Result<PathBuf> =
-            self.store_context_bytes(&project_slug, &workspace_name, text.as_bytes(), &extension);
+        let result: anyhow::Result<PathBuf> = self.store_context_bytes(
+            &project_slug,
+            &workspace_name,
+            text.as_bytes(),
+            &extension,
+            "text",
+        );
         result.map_err(|e| format!("{e:#}"))
     }
 
@@ -1130,6 +1136,146 @@ mod tests {
         )
         .expect("archive_workspace should remove dirty worktree with --force");
         assert!(!worktree_path.exists(), "worktree path should be removed");
+
+        drop(service);
+        let _ = std::fs::remove_dir_all(&base_dir);
+    }
+
+    fn assert_timestamped_basename(file_name: &str, expected_base: &str, expected_ext: &str) {
+        let expected_prefix = format!("{expected_base}-");
+        assert!(
+            file_name.starts_with(&expected_prefix),
+            "expected filename to start with {expected_prefix:?}, got {file_name:?}"
+        );
+        assert!(
+            file_name.ends_with(expected_ext),
+            "expected filename to end with {expected_ext:?}, got {file_name:?}"
+        );
+
+        let mid = &file_name[expected_prefix.len()..file_name.len() - expected_ext.len()];
+        let mut parts = mid.split('-');
+        let date = parts
+            .next()
+            .unwrap_or_else(|| panic!("expected timestamp suffix in filename: {file_name:?}"));
+        let time = parts
+            .next()
+            .unwrap_or_else(|| panic!("expected timestamp suffix in filename: {file_name:?}"));
+        let rest = parts.next().unwrap_or("");
+        assert!(
+            parts.next().is_none(),
+            "unexpected extra '-' segments in filename: {file_name:?}"
+        );
+
+        assert_eq!(
+            date.len(),
+            8,
+            "expected YYYYMMDD date segment in filename: {file_name:?}"
+        );
+        assert!(
+            date.chars().all(|c| c.is_ascii_digit()),
+            "expected numeric YYYYMMDD date segment in filename: {file_name:?}"
+        );
+        assert_eq!(
+            time.len(),
+            6,
+            "expected HHMMSS time segment in filename: {file_name:?}"
+        );
+        assert!(
+            time.chars().all(|c| c.is_ascii_digit()),
+            "expected numeric HHMMSS time segment in filename: {file_name:?}"
+        );
+
+        if !rest.is_empty() {
+            assert!(
+                rest.chars().all(|c| c.is_ascii_digit()),
+                "expected numeric collision suffix in filename: {file_name:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn context_files_keep_original_name_with_timestamp_suffix() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be valid")
+            .as_nanos();
+        let base_dir = std::env::temp_dir().join(format!(
+            "luban-context-file-name-{}-{}",
+            std::process::id(),
+            unique
+        ));
+
+        std::fs::create_dir_all(&base_dir).expect("temp dir should be created");
+
+        let sqlite =
+            SqliteStore::new(paths::sqlite_path(&base_dir)).expect("sqlite init should work");
+        let service = GitWorkspaceService {
+            worktrees_root: paths::worktrees_root(&base_dir),
+            conversations_root: paths::conversations_root(&base_dir),
+            sqlite,
+        };
+
+        let source = base_dir.join("abc.png");
+        std::fs::write(&source, b"not-a-real-png").expect("write should succeed");
+
+        let stored = ProjectWorkspaceService::store_context_file(
+            &service,
+            "proj".to_owned(),
+            "main".to_owned(),
+            source,
+        )
+        .expect("store_context_file should succeed");
+
+        let file_name = stored
+            .file_name()
+            .and_then(|s| s.to_str())
+            .expect("stored path should be utf-8");
+        assert_timestamped_basename(file_name, "abc", ".png");
+        assert!(stored.exists(), "stored path should exist");
+
+        drop(service);
+        let _ = std::fs::remove_dir_all(&base_dir);
+    }
+
+    #[test]
+    fn context_images_use_timestamped_names() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be valid")
+            .as_nanos();
+        let base_dir = std::env::temp_dir().join(format!(
+            "luban-context-image-name-{}-{}",
+            std::process::id(),
+            unique
+        ));
+
+        std::fs::create_dir_all(&base_dir).expect("temp dir should be created");
+
+        let sqlite =
+            SqliteStore::new(paths::sqlite_path(&base_dir)).expect("sqlite init should work");
+        let service = GitWorkspaceService {
+            worktrees_root: paths::worktrees_root(&base_dir),
+            conversations_root: paths::conversations_root(&base_dir),
+            sqlite,
+        };
+
+        let stored = ProjectWorkspaceService::store_context_image(
+            &service,
+            "proj".to_owned(),
+            "main".to_owned(),
+            ContextImage {
+                extension: "png".to_owned(),
+                bytes: b"not-a-real-png".to_vec(),
+            },
+        )
+        .expect("store_context_image should succeed");
+
+        let file_name = stored
+            .file_name()
+            .and_then(|s| s.to_str())
+            .expect("stored path should be utf-8");
+        assert_timestamped_basename(file_name, "image", ".png");
+        assert!(stored.exists(), "stored path should exist");
 
         drop(service);
         let _ = std::fs::remove_dir_all(&base_dir);
