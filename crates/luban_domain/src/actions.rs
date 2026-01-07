@@ -56,6 +56,12 @@ pub enum Action {
     OpenWorkspacePullRequestFailed {
         message: String,
     },
+    OpenWorkspacePullRequestFailedAction {
+        workspace_id: WorkspaceId,
+    },
+    OpenWorkspacePullRequestFailedActionFailed {
+        message: String,
+    },
     ArchiveWorkspace {
         workspace_id: WorkspaceId,
     },
