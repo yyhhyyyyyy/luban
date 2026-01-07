@@ -39,7 +39,7 @@ use crate::selectable_text::SelectablePlainText;
 use crate::terminal_panel::{WorkspaceTerminal, spawn_workspace_terminal, terminal_cell_metrics};
 
 mod attachments;
-mod chat_input;
+mod chat;
 mod dashboard;
 mod gh;
 mod layout;
