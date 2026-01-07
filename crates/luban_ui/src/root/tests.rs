@@ -1869,6 +1869,60 @@ async fn chat_surface_does_not_shift_horizontally_on_wide_window_resize(
 }
 
 #[gpui::test]
+async fn chat_history_is_not_pushed_down_by_scroll_padding(cx: &mut gpui::TestAppContext) {
+    cx.update(gpui_component::init);
+
+    let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+    let mut state = AppState::new();
+    state.apply(Action::AddProject {
+        path: PathBuf::from("/tmp/repo"),
+    });
+    let project_id = state.projects[0].id;
+    state.apply(Action::WorkspaceCreated {
+        project_id,
+        workspace_name: "abandon-about".to_owned(),
+        branch_name: "luban/abandon-about".to_owned(),
+        worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+    });
+    let workspace_id = workspace_id_by_name(&state, "abandon-about");
+    state.main_pane = MainPane::Workspace(workspace_id);
+
+    state.apply(Action::ConversationLoaded {
+        workspace_id,
+        thread_id: default_thread_id(),
+        snapshot: ConversationSnapshot {
+            thread_id: Some("thread-1".to_owned()),
+            entries: vec![ConversationEntry::UserMessage {
+                text: "Hello".to_owned(),
+            }],
+        },
+    });
+
+    let (_view, window_cx) =
+        cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+
+    window_cx.simulate_resize(size(px(900.0), px(500.0)));
+    for _ in 0..3 {
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+    }
+
+    let scroll = window_cx
+        .debug_bounds("workspace-chat-scroll")
+        .expect("missing debug bounds for workspace-chat-scroll");
+    let column = window_cx
+        .debug_bounds("workspace-chat-column")
+        .expect("missing debug bounds for workspace-chat-column");
+
+    let dy = (column.origin.y - scroll.origin.y).abs();
+    assert!(
+        dy <= px(1.0),
+        "expected chat history to start at top of scroll container: dy={dy:?} scroll={scroll:?} column={column:?}"
+    );
+}
+
+#[gpui::test]
 async fn long_user_message_bubble_keeps_right_gutter(cx: &mut gpui::TestAppContext) {
     cx.update(gpui_component::init);
 

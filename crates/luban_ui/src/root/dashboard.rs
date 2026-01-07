@@ -578,6 +578,7 @@ impl LubanRootView {
             div()
                 .flex_1()
                 .id("workspace-chat-scroll")
+                .debug_selector(|| "workspace-chat-scroll".to_owned())
                 .overflow_scroll()
                 .track_scroll(&self.chat_scroll_handle)
                 .overflow_x_hidden()
@@ -592,7 +593,7 @@ impl LubanRootView {
                 })
                 .w_full()
                 .px_4()
-                .py_3()
+                .pb_3()
                 .child(min_width_zero(
                     div()
                         .debug_selector(|| "workspace-chat-column".to_owned())
