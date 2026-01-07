@@ -1400,10 +1400,75 @@ impl gpui::Render for LubanRootView {
         let content = if is_dashboard {
             min_height_zero(div().flex_1().flex().child(self.render_main(window, cx)))
         } else {
-            min_height_zero(
+            let sidebar_resizer = div()
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .left(sidebar_width_for_layout)
+                .w(px(SIDEBAR_RESIZER_WIDTH))
+                .cursor(CursorStyle::ResizeLeftRight)
+                .id("sidebar-resizer")
+                .debug_selector(|| "sidebar-resizer".to_owned())
+                .bg(transparent)
+                .hover(move |s| s.bg(muted))
+                .on_drag(SidebarResizeDrag, {
+                    let view_handle = view_handle.clone();
+                    move |_, _offset, window, app| {
+                        let start_mouse_x = window.mouse_position().x;
+                        let start_width = sidebar_width_for_layout;
+                        let _ = view_handle.update(app, |view, cx| {
+                            view.sidebar_resize = Some(SidebarResizeState {
+                                start_mouse_x,
+                                start_width,
+                            });
+                            view.sidebar_width_preview = Some(start_width);
+                            cx.notify();
+                        });
+                        app.new(|_| SidebarResizeGhost)
+                    }
+                })
+                .on_drag_move::<SidebarResizeDrag>({
+                    let view_handle = view_handle.clone();
+                    move |event, window, app| {
+                        let mouse_x = event.event.position.x;
+                        let viewport_width = window.viewport_size().width;
+                        let _ = view_handle.update(app, |view, cx| {
+                            let Some(state) = view.sidebar_resize else {
+                                return;
+                            };
+                            let desired = state.start_width + (mouse_x - state.start_mouse_x);
+                            let clamped = view.clamp_sidebar_width(desired, viewport_width);
+                            view.sidebar_width_preview = Some(clamped);
+                            cx.notify();
+                        });
+                    }
+                })
+                .on_mouse_up(MouseButton::Left, {
+                    let view_handle = view_handle.clone();
+                    move |_, window, app| {
+                        let viewport_width = window.viewport_size().width;
+                        let _ = view_handle.update(app, |view, cx| {
+                            view.finish_sidebar_resize(viewport_width, cx);
+                            view.resize_workspace_terminals(window, cx);
+                        });
+                    }
+                })
+                .on_mouse_up_out(MouseButton::Left, {
+                    let view_handle = view_handle.clone();
+                    move |_, window, app| {
+                        let viewport_width = window.viewport_size().width;
+                        let _ = view_handle.update(app, |view, cx| {
+                            view.finish_sidebar_resize(viewport_width, cx);
+                            view.resize_workspace_terminals(window, cx);
+                        });
+                    }
+                });
+
+            let main_split = min_width_zero(
                 div()
                     .flex_1()
                     .flex()
+                    .relative()
                     .child(render_sidebar(
                         cx,
                         &self.state,
@@ -1412,152 +1477,92 @@ impl gpui::Render for LubanRootView {
                         &self.projects_scroll_handle,
                         self.debug_scrollbar_enabled,
                     ))
-                    .child(
-                        div()
-                            .w(px(SIDEBAR_RESIZER_WIDTH))
-                            .h_full()
-                            .flex_shrink_0()
-                            .cursor(CursorStyle::ResizeLeftRight)
-                            .id("sidebar-resizer")
-                            .debug_selector(|| "sidebar-resizer".to_owned())
-                            .bg(transparent)
-                            .hover(move |s| s.bg(muted))
-                            .on_drag(SidebarResizeDrag, {
-                                let view_handle = view_handle.clone();
-                                move |_, _offset, window, app| {
-                                    let start_mouse_x = window.mouse_position().x;
-                                    let start_width = sidebar_width_for_layout;
-                                    let _ = view_handle.update(app, |view, cx| {
-                                        view.sidebar_resize = Some(SidebarResizeState {
-                                            start_mouse_x,
-                                            start_width,
-                                        });
-                                        view.sidebar_width_preview = Some(start_width);
-                                        cx.notify();
-                                    });
-                                    app.new(|_| SidebarResizeGhost)
-                                }
-                            })
-                            .on_drag_move::<SidebarResizeDrag>({
-                                let view_handle = view_handle.clone();
-                                move |event, window, app| {
-                                    let mouse_x = event.event.position.x;
-                                    let viewport_width = window.viewport_size().width;
-                                    let _ = view_handle.update(app, |view, cx| {
-                                        let Some(state) = view.sidebar_resize else {
-                                            return;
-                                        };
-                                        let desired =
-                                            state.start_width + (mouse_x - state.start_mouse_x);
-                                        let clamped =
-                                            view.clamp_sidebar_width(desired, viewport_width);
-                                        view.sidebar_width_preview = Some(clamped);
-                                        cx.notify();
-                                    });
-                                }
-                            })
-                            .on_mouse_up(MouseButton::Left, {
-                                let view_handle = view_handle.clone();
-                                move |_, window, app| {
-                                    let viewport_width = window.viewport_size().width;
-                                    let _ = view_handle.update(app, |view, cx| {
-                                        view.finish_sidebar_resize(viewport_width, cx);
-                                        view.resize_workspace_terminals(window, cx);
-                                    });
-                                }
-                            })
-                            .on_mouse_up_out(MouseButton::Left, {
-                                let view_handle = view_handle.clone();
-                                move |_, window, app| {
-                                    let viewport_width = window.viewport_size().width;
-                                    let _ = view_handle.update(app, |view, cx| {
-                                        view.finish_sidebar_resize(viewport_width, cx);
-                                        view.resize_workspace_terminals(window, cx);
-                                    });
-                                }
-                            }),
-                    )
                     .child(self.render_main(window, cx))
-                    .when(should_render_right_pane, |s| {
-                        let resizer = div()
-                            .w(px(TERMINAL_PANE_RESIZER_WIDTH))
-                            .h_full()
-                            .flex_shrink_0()
-                            .cursor(CursorStyle::ResizeLeftRight)
-                            .id("terminal-pane-resizer")
-                            .debug_selector(|| "terminal-pane-resizer".to_owned())
-                            .bg(transparent)
-                            .hover(move |s| s.bg(muted))
-                            .on_drag(TerminalPaneResizeDrag, {
-                                let view_handle = view_handle.clone();
-                                move |_, _offset, window, app| {
-                                    let start_mouse_x = window.mouse_position().x;
-                                    let start_width = right_pane_width;
-                                    let _ = view_handle.update(app, |view, cx| {
-                                        view.terminal_pane_resize = Some(TerminalPaneResizeState {
-                                            start_mouse_x,
-                                            start_width,
-                                        });
-                                        view.terminal_pane_width_preview = Some(start_width);
-                                        cx.notify();
-                                    });
-                                    app.new(|_| TerminalPaneResizeGhost)
-                                }
-                            })
-                            .on_drag_move::<TerminalPaneResizeDrag>({
-                                let view_handle = view_handle.clone();
-                                move |event, window, app| {
-                                    let mouse_x = event.event.position.x;
-                                    let viewport_width = window.viewport_size().width;
-                                    let _ = view_handle.update(app, |view, cx| {
-                                        let Some(state) = view.terminal_pane_resize else {
-                                            return;
-                                        };
-                                        let desired =
-                                            state.start_width - (mouse_x - state.start_mouse_x);
-                                        let clamped = view.clamp_terminal_pane_width(
-                                            desired,
-                                            viewport_width,
-                                            sidebar_width,
-                                        );
-                                        view.terminal_pane_width_preview = Some(clamped);
-                                        cx.notify();
-                                    });
-                                }
-                            })
-                            .on_mouse_up(MouseButton::Left, {
-                                let view_handle = view_handle.clone();
-                                move |_, window, app| {
-                                    let viewport_width = window.viewport_size().width;
-                                    let _ = view_handle.update(app, |view, cx| {
-                                        view.finish_terminal_pane_resize(
-                                            viewport_width,
-                                            sidebar_width,
-                                            cx,
-                                        );
-                                        view.resize_workspace_terminals(window, cx);
-                                    });
-                                }
-                            })
-                            .on_mouse_up_out(MouseButton::Left, {
-                                let view_handle = view_handle.clone();
-                                move |_, window, app| {
-                                    let viewport_width = window.viewport_size().width;
-                                    let _ = view_handle.update(app, |view, cx| {
-                                        view.finish_terminal_pane_resize(
-                                            viewport_width,
-                                            sidebar_width,
-                                            cx,
-                                        );
-                                        view.resize_workspace_terminals(window, cx);
-                                    });
-                                }
-                            });
+                    .child(sidebar_resizer),
+            );
 
-                        s.child(resizer)
-                            .child(self.render_right_pane(right_pane_width, window, cx))
-                    }),
-            )
+            min_height_zero(div().flex_1().flex().child(main_split).when(
+                should_render_right_pane,
+                |s| {
+                    let resizer = div()
+                        .w(px(TERMINAL_PANE_RESIZER_WIDTH))
+                        .h_full()
+                        .flex_shrink_0()
+                        .cursor(CursorStyle::ResizeLeftRight)
+                        .id("terminal-pane-resizer")
+                        .debug_selector(|| "terminal-pane-resizer".to_owned())
+                        .bg(transparent)
+                        .hover(move |s| s.bg(muted))
+                        .on_drag(TerminalPaneResizeDrag, {
+                            let view_handle = view_handle.clone();
+                            move |_, _offset, window, app| {
+                                let start_mouse_x = window.mouse_position().x;
+                                let start_width = right_pane_width;
+                                let _ = view_handle.update(app, |view, cx| {
+                                    view.terminal_pane_resize = Some(TerminalPaneResizeState {
+                                        start_mouse_x,
+                                        start_width,
+                                    });
+                                    view.terminal_pane_width_preview = Some(start_width);
+                                    cx.notify();
+                                });
+                                app.new(|_| TerminalPaneResizeGhost)
+                            }
+                        })
+                        .on_drag_move::<TerminalPaneResizeDrag>({
+                            let view_handle = view_handle.clone();
+                            move |event, window, app| {
+                                let mouse_x = event.event.position.x;
+                                let viewport_width = window.viewport_size().width;
+                                let _ = view_handle.update(app, |view, cx| {
+                                    let Some(state) = view.terminal_pane_resize else {
+                                        return;
+                                    };
+                                    let desired =
+                                        state.start_width - (mouse_x - state.start_mouse_x);
+                                    let clamped = view.clamp_terminal_pane_width(
+                                        desired,
+                                        viewport_width,
+                                        sidebar_width,
+                                    );
+                                    view.terminal_pane_width_preview = Some(clamped);
+                                    cx.notify();
+                                });
+                            }
+                        })
+                        .on_mouse_up(MouseButton::Left, {
+                            let view_handle = view_handle.clone();
+                            move |_, window, app| {
+                                let viewport_width = window.viewport_size().width;
+                                let _ = view_handle.update(app, |view, cx| {
+                                    view.finish_terminal_pane_resize(
+                                        viewport_width,
+                                        sidebar_width,
+                                        cx,
+                                    );
+                                    view.resize_workspace_terminals(window, cx);
+                                });
+                            }
+                        })
+                        .on_mouse_up_out(MouseButton::Left, {
+                            let view_handle = view_handle.clone();
+                            move |_, window, app| {
+                                let viewport_width = window.viewport_size().width;
+                                let _ = view_handle.update(app, |view, cx| {
+                                    view.finish_terminal_pane_resize(
+                                        viewport_width,
+                                        sidebar_width,
+                                        cx,
+                                    );
+                                    view.resize_workspace_terminals(window, cx);
+                                });
+                            }
+                        });
+
+                    s.child(resizer)
+                        .child(self.render_right_pane(right_pane_width, window, cx))
+                },
+            ))
         };
 
         div()

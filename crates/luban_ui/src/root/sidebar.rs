@@ -64,7 +64,7 @@ pub(super) fn render_sidebar(
                         .top_0()
                         .right_0()
                         .bottom_0()
-                        .w(px(12.0))
+                        .w(px(8.0))
                         .debug_selector(|| "projects-scrollbar".to_owned())
                         .child(
                             Scrollbar::vertical(&projects_scroll_handle)

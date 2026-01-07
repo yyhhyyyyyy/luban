@@ -4420,6 +4420,53 @@ async fn sidebar_can_be_resized_by_dragging_divider(cx: &mut gpui::TestAppContex
 }
 
 #[gpui::test]
+async fn sidebar_resizer_does_not_create_layout_gap(cx: &mut gpui::TestAppContext) {
+    cx.update(gpui_component::init);
+
+    let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+    let mut state = AppState::new();
+    state.apply(Action::AddProject {
+        path: PathBuf::from("/tmp/repo"),
+    });
+    let project_id = state.projects[0].id;
+    state.apply(Action::ToggleProjectExpanded { project_id });
+    state.apply(Action::WorkspaceCreated {
+        project_id,
+        workspace_name: "abandon-about".to_owned(),
+        branch_name: "luban/abandon-about".to_owned(),
+        worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+    });
+    let workspace_id = workspace_id_by_name(&state, "abandon-about");
+    state.main_pane = MainPane::Workspace(workspace_id);
+
+    let (_view, window_cx) =
+        cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+    window_cx.simulate_resize(size(px(900.0), px(240.0)));
+    for _ in 0..3 {
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+    }
+
+    let sidebar = window_cx
+        .debug_bounds("sidebar")
+        .expect("missing debug bounds for sidebar");
+    let main = window_cx
+        .debug_bounds("main-pane")
+        .expect("missing debug bounds for main-pane");
+    let gap = main.origin.x - sidebar.right();
+    assert!(
+        gap <= px(2.0),
+        "expected sidebar and main to be adjacent without a visible gap: gap={gap:?} sidebar={sidebar:?} main={main:?}"
+    );
+
+    assert!(
+        window_cx.debug_bounds("sidebar-resizer").is_some(),
+        "expected sidebar resizer to still be present"
+    );
+}
+
+#[gpui::test]
 async fn sidebar_projects_list_renders_scrollbar_when_overflowing(cx: &mut gpui::TestAppContext) {
     cx.update(gpui_component::init);
 
