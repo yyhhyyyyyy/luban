@@ -3218,6 +3218,90 @@ async fn chat_scroll_position_is_saved_and_restored(cx: &mut gpui::TestAppContex
 }
 
 #[gpui::test]
+async fn virtualized_chat_renders_messages_when_scrolled(cx: &mut gpui::TestAppContext) {
+    cx.update(gpui_component::init);
+
+    let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+    let mut state = AppState::new();
+    state.apply(Action::AddProject {
+        path: PathBuf::from("/tmp/repo"),
+    });
+    let project_id = state.projects[0].id;
+    state.apply(Action::WorkspaceCreated {
+        project_id,
+        workspace_name: "abandon-about".to_owned(),
+        branch_name: "luban/abandon-about".to_owned(),
+        worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+    });
+    let workspace_id = workspace_id_by_name(&state, "abandon-about");
+    state.main_pane = MainPane::Workspace(workspace_id);
+
+    let entries = (0..900)
+        .map(|idx| ConversationEntry::UserMessage {
+            text: format!("Message {idx} {}", "x".repeat(40)),
+        })
+        .collect::<Vec<_>>();
+    state.apply(Action::ConversationLoaded {
+        workspace_id,
+        thread_id: default_thread_id(),
+        snapshot: ConversationSnapshot {
+            thread_id: Some("thread-1".to_owned()),
+            entries,
+        },
+    });
+
+    let (view, window_cx) =
+        cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+
+    window_cx.simulate_resize(size(px(900.0), px(420.0)));
+    for _ in 0..6 {
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+    }
+
+    let max_y10 = view.read_with(window_cx, |v, _| v.debug_chat_scroll_max_offset_y10());
+    assert!(max_y10 > 0, "expected virtualized chat to be scrollable");
+
+    window_cx.update(|_, app| {
+        view.update(app, |view, cx| {
+            view.chat_scroll_handle
+                .set_offset(point(px(0.0), px(-(max_y10 as f32) / 10.0)));
+            cx.notify();
+        });
+    });
+    for _ in 0..6 {
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+    }
+
+    assert!(
+        window_cx
+            .debug_bounds("conversation-user-bubble-899")
+            .is_some(),
+        "expected last message bubble to be rendered when scrolled to bottom"
+    );
+
+    window_cx.update(|_, app| {
+        view.update(app, |view, cx| {
+            view.chat_scroll_handle.set_offset(point(px(0.0), px(0.0)));
+            cx.notify();
+        });
+    });
+    for _ in 0..3 {
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+    }
+
+    assert!(
+        window_cx
+            .debug_bounds("conversation-user-bubble-0")
+            .is_some(),
+        "expected first message bubble to be rendered when scrolled to top"
+    );
+}
+
+#[gpui::test]
 async fn chat_auto_scroll_follows_tail_on_new_entries(cx: &mut gpui::TestAppContext) {
     cx.update(gpui_component::init);
 

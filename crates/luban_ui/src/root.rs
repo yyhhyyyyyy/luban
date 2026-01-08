@@ -3020,7 +3020,9 @@ fn build_chat_history_children_maybe_virtualized(
     let viewport_h = chat_history_viewport_height
         .unwrap_or_else(|| window.viewport_size().height)
         .max(px(1.0));
-    let scroll_offset = chat_scroll_handle.offset().y.max(px(0.0));
+    // gpui scroll offsets are negative when scrolling down; convert to a positive distance from
+    // the top of the content for virtualization math.
+    let scroll_offset = (px(0.0) - chat_scroll_handle.offset().y).max(px(0.0));
 
     let mut block_starts = Vec::with_capacity(blocks.len());
     let mut total_height = px(0.0);
