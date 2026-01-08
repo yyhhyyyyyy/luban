@@ -649,6 +649,8 @@ impl LubanRootView {
                 PendingChatScrollToBottom {
                     saved_offset_y10: pending_saved_offset_y10,
                     last_observed_column_width: None,
+                    last_observed_max_y10: None,
+                    stable_max_samples: 0,
                 },
             );
         }

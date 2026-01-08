@@ -78,6 +78,8 @@ const AGENT_EVENT_FLUSH_INTERVAL: Duration = Duration::from_millis(33);
 struct PendingChatScrollToBottom {
     saved_offset_y10: Option<i32>,
     last_observed_column_width: Option<Pixels>,
+    last_observed_max_y10: Option<i32>,
+    stable_max_samples: u8,
 }
 
 #[derive(Clone, Debug)]
@@ -393,24 +395,15 @@ impl LubanRootView {
         chat_key: WorkspaceThreadKey,
         cx: &mut Context<Self>,
     ) {
-        if !self.should_chat_follow_tail(chat_key) {
-            self.pending_chat_scroll_to_bottom.remove(&chat_key);
-            return;
-        }
+        let follow_tail = self
+            .chat_follow_tail
+            .get(&chat_key)
+            .copied()
+            .unwrap_or(true);
 
         use std::collections::hash_map::Entry;
         let Entry::Occupied(mut entry) = self.pending_chat_scroll_to_bottom.entry(chat_key) else {
             return;
-        };
-
-        let (saved_offset_y10, width_stable) = {
-            let pending = entry.get_mut();
-            let width_stable = match (pending.last_observed_column_width, self.chat_column_width) {
-                (Some(prev), Some(cur)) => (prev - cur).abs() <= px(0.5),
-                _ => false,
-            };
-            pending.last_observed_column_width = self.chat_column_width;
-            (pending.saved_offset_y10, width_stable)
         };
 
         let offset_y10 = quantize_pixels_y10(self.chat_scroll_handle.offset().y);
@@ -418,6 +411,55 @@ impl LubanRootView {
         if max_y10 <= 0 {
             return;
         }
+
+        let near_bottom = Self::is_chat_near_bottom(offset_y10, max_y10);
+        let saved_offset_y10 = entry.get().saved_offset_y10;
+        if follow_tail && saved_offset_y10.is_none() && !near_bottom && offset_y10 != 0 {
+            self.chat_follow_tail.insert(chat_key, false);
+            self.chat_last_observed_scroll_offset_y10
+                .insert(chat_key, offset_y10);
+            entry.remove();
+            self.pending_chat_scroll_restore.remove(&chat_key);
+            return;
+        }
+
+        update_chat_follow_state(
+            chat_key,
+            &self.chat_scroll_handle,
+            &mut self.chat_follow_tail,
+            &mut self.chat_last_observed_scroll_offset_y10,
+        );
+
+        let follow_tail = self
+            .chat_follow_tail
+            .get(&chat_key)
+            .copied()
+            .unwrap_or(true);
+        if !follow_tail {
+            entry.remove();
+            return;
+        }
+
+        let (saved_offset_y10, width_stable, max_stable) = {
+            let pending = entry.get_mut();
+            let width_stable = match (pending.last_observed_column_width, self.chat_column_width) {
+                (Some(prev), Some(cur)) => (prev - cur).abs() <= px(0.5),
+                _ => false,
+            };
+            pending.last_observed_column_width = self.chat_column_width;
+
+            if let Some(prev) = pending.last_observed_max_y10
+                && (prev - max_y10).abs() <= 10
+            {
+                pending.stable_max_samples = pending.stable_max_samples.saturating_add(1);
+            } else {
+                pending.stable_max_samples = 0;
+            }
+            pending.last_observed_max_y10 = Some(max_y10);
+            let max_stable = pending.stable_max_samples >= 10;
+
+            (pending.saved_offset_y10, width_stable, max_stable)
+        };
 
         if saved_offset_y10
             .map(|saved| !Self::is_chat_near_bottom(saved, max_y10))
@@ -427,12 +469,16 @@ impl LubanRootView {
             return;
         }
 
-        if Self::is_chat_near_bottom(offset_y10, max_y10) && width_stable {
+        if Self::is_chat_near_bottom(offset_y10, max_y10) && width_stable && max_stable {
             entry.remove();
             return;
         }
 
         self.chat_scroll_handle.scroll_to_bottom();
+        self.chat_last_observed_scroll_offset_y10.insert(
+            chat_key,
+            quantize_pixels_y10(self.chat_scroll_handle.offset().y),
+        );
         cx.notify();
     }
 
@@ -2330,6 +2376,8 @@ impl LubanRootView {
                         PendingChatScrollToBottom {
                             saved_offset_y10: pending_saved_offset_y10,
                             last_observed_column_width: None,
+                            last_observed_max_y10: None,
+                            stable_max_samples: 0,
                         },
                     );
                 }
@@ -3070,7 +3118,7 @@ fn update_chat_follow_state(
         let user_scrolled_up = previous_offset_y10
             .map(|prev| offset_y10 > prev + CHAT_SCROLL_USER_SCROLL_UP_THRESHOLD_Y10)
             .unwrap_or(false);
-        if user_scrolled_up && !near_bottom {
+        if user_scrolled_up && (max_y10 <= 0 || !near_bottom) {
             chat_follow_tail.insert(chat_key, false);
         } else {
             chat_follow_tail.insert(chat_key, true);
@@ -3503,15 +3551,16 @@ fn build_workspace_history_children(
             let turn_id = turn.id.clone();
             if in_progress || !turn.summary_items.is_empty() {
                 let turn_container_id = turn.id.clone();
-                let allow_toggle = !in_progress;
-                let expanded = in_progress || expanded_turns.contains(&turn.id);
+                let allow_toggle = true;
+                let expanded = expanded_turns.contains(&turn.id);
+                let has_ops = !turn.summary_items.is_empty();
                 let header = render_agent_turn_summary_row(
                     &turn.id,
                     TurnSummaryCounts {
                         tool_calls: turn.tool_calls,
                         reasonings: turn.reasonings,
                     },
-                    true,
+                    has_ops,
                     expanded,
                     in_progress,
                     allow_toggle,
@@ -4279,7 +4328,7 @@ fn render_codex_item_details(
         }
         CodexThreadItem::Reasoning { id: _, text } => {
             let wrap_width = chat_column_width.map(|w| (w - px(80.0)).max(px(0.0)));
-            let message = chat_message_view(
+            let message = chat_plain_text_view(
                 &format!("reasoning-{render_id}-details"),
                 text,
                 wrap_width,
@@ -4313,14 +4362,12 @@ fn render_codex_item_details(
                     .w_full()
                     .overflow_x_hidden()
                     .whitespace_normal()
-                    .child(
-                        chat_markdown_view(
-                            &format!("command-{render_id}-details"),
-                            &fenced_code_block("sh", command),
-                            chat_column_width.map(|w| (w - px(80.0)).max(px(0.0))),
-                        )
-                        .text_color(theme.foreground),
-                    ),
+                    .child(chat_plain_code_view(
+                        &format!("command-{render_id}-details"),
+                        command,
+                        chat_column_width.map(|w| (w - px(80.0)).max(px(0.0))),
+                        theme.foreground,
+                    )),
             ))
             .when(!aggregated_output.trim().is_empty(), |s| {
                 s.child(min_width_zero(
@@ -4328,14 +4375,12 @@ fn render_codex_item_details(
                         .w_full()
                         .overflow_x_hidden()
                         .whitespace_normal()
-                        .child(
-                            chat_markdown_view(
-                                &format!("command-{render_id}-output"),
-                                &fenced_code_block("", aggregated_output),
-                                chat_column_width.map(|w| (w - px(80.0)).max(px(0.0))),
-                            )
-                            .text_color(theme.muted_foreground),
-                        ),
+                        .child(chat_plain_code_view(
+                            &format!("command-{render_id}-output"),
+                            aggregated_output,
+                            chat_column_width.map(|w| (w - px(80.0)).max(px(0.0))),
+                            theme.muted_foreground,
+                        )),
                 ))
             })
             .when_some(*exit_code, |s, code| {
@@ -4363,7 +4408,7 @@ fn render_codex_item_details(
                             .w_full()
                             .overflow_x_hidden()
                             .whitespace_normal()
-                            .child(chat_message_view(
+                            .child(chat_plain_text_view(
                                 &format!("file-change-{render_id}-{idx}"),
                                 &format!("{:?}: {}", change.kind, change.path),
                                 wrap_width,
@@ -4390,7 +4435,7 @@ fn render_codex_item_details(
                             .w_full()
                             .overflow_x_hidden()
                             .whitespace_normal()
-                            .child(chat_message_view(
+                            .child(chat_plain_text_view(
                                 &format!("todo-{render_id}-{idx}"),
                                 &format!("{prefix} {}", item.text),
                                 wrap_width,
@@ -4469,54 +4514,67 @@ fn chat_markdown_view(id: &str, source: &str, wrap_width: Option<Pixels>) -> Tex
     }
 }
 
-fn fenced_code_block(lang: &str, code: &str) -> String {
-    let mut max_ticks = 0usize;
-    let mut current = 0usize;
-    for ch in code.chars() {
-        if ch == '`' {
-            current += 1;
-            max_ticks = max_ticks.max(current);
-        } else {
-            current = 0;
-        }
-    }
-
-    let fence_len = (max_ticks + 1).max(3);
-    let fence = "`".repeat(fence_len);
-
-    if lang.is_empty() {
-        format!("{fence}\n{code}\n{fence}")
-    } else {
-        format!("{fence}{lang}\n{code}\n{fence}")
-    }
-}
-
 fn chat_message_view(
     id: &str,
     source: &str,
     wrap_width: Option<Pixels>,
     text_color: gpui::Hsla,
 ) -> AnyElement {
-    let markdown_like = source.contains("```")
-        || source.contains("**")
-        || source.contains('`')
-        || source.contains("](")
-        || source
-            .lines()
-            .any(|line| line.starts_with("# ") || line.starts_with("- ") || line.starts_with("* "));
+    let plain_debug_selector = format!("{id}-plain-text");
+    let mut container = div()
+        .debug_selector(move || plain_debug_selector.clone())
+        .id(ElementId::Name(SharedString::from(format!("{id}-text"))))
+        .child(
+            chat_markdown_view(id, source, None)
+                .text_color(text_color)
+                .into_any_element(),
+        );
 
-    if markdown_like {
-        return chat_markdown_view(id, source, wrap_width)
-            .text_color(text_color)
-            .into_any_element();
+    if let Some(wrap_width) = wrap_width {
+        container = container.w(wrap_width);
     }
 
+    container.into_any_element()
+}
+
+fn chat_plain_text_view(
+    id: &str,
+    source: &str,
+    wrap_width: Option<Pixels>,
+    text_color: gpui::Hsla,
+) -> AnyElement {
     let plain_debug_selector = format!("{id}-plain-text");
     let mut container = div()
         .debug_selector(move || plain_debug_selector.clone())
         .id(ElementId::Name(SharedString::from(format!("{id}-text"))))
         .text_size(px(16.0))
         .whitespace_normal()
+        .text_color(text_color)
+        .child(SelectablePlainText::new(
+            SharedString::from(format!("{id}-plain")),
+            source.to_owned(),
+        ));
+
+    if let Some(wrap_width) = wrap_width {
+        container = container.w(wrap_width);
+    }
+
+    container.into_any_element()
+}
+
+fn chat_plain_code_view(
+    id: &str,
+    source: &str,
+    wrap_width: Option<Pixels>,
+    text_color: gpui::Hsla,
+) -> AnyElement {
+    let plain_debug_selector = format!("{id}-plain-text");
+    let mut container = div()
+        .debug_selector(move || plain_debug_selector.clone())
+        .id(ElementId::Name(SharedString::from(format!("{id}-text"))))
+        .text_size(px(16.0))
+        .whitespace_normal()
+        .font_family("monospace")
         .text_color(text_color)
         .child(SelectablePlainText::new(
             SharedString::from(format!("{id}-plain")),
@@ -4602,12 +4660,39 @@ fn codex_item_summary(item: &CodexThreadItem, in_progress: bool) -> (&'static st
 }
 
 fn collapse_inline_markdown_for_summary(text: &str) -> String {
-    text.replace("**", "")
-        .replace("__", "")
-        .replace("`", "")
-        .replace('*', "")
-        .trim()
-        .to_owned()
+    let mut out = String::with_capacity(text.len());
+    let mut started = false;
+    let mut last_non_ws_len = 0usize;
+
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '*' | '`' => continue,
+            '_' => {
+                if matches!(chars.peek(), Some('_')) {
+                    let _ = chars.next();
+                    continue;
+                }
+            }
+            _ => {}
+        }
+
+        if ch.is_whitespace() {
+            if !started {
+                continue;
+            }
+            out.push(ch);
+        } else {
+            started = true;
+            out.push(ch);
+            last_non_ws_len = out.len();
+        }
+    }
+
+    if started {
+        out.truncate(last_non_ws_len);
+    }
+    out
 }
 
 fn codex_item_compact_summary(item: &CodexThreadItem) -> (&'static str, String) {

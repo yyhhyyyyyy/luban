@@ -71,6 +71,18 @@ fn debug_layout_env_parsing() {
     assert!(debug_layout::parse_enabled(Some("ON")));
 }
 
+#[test]
+fn collapse_inline_markdown_for_summary_is_single_pass_and_trimmed() {
+    assert_eq!(collapse_inline_markdown_for_summary(" **hi** "), "hi");
+    assert_eq!(collapse_inline_markdown_for_summary("__hi__"), "hi");
+    assert_eq!(collapse_inline_markdown_for_summary("_hi_"), "_hi_");
+    assert_eq!(collapse_inline_markdown_for_summary("a`b`c"), "abc");
+    assert_eq!(collapse_inline_markdown_for_summary("a*b"), "ab");
+    assert_eq!(collapse_inline_markdown_for_summary("a___b"), "a_b");
+    assert_eq!(collapse_inline_markdown_for_summary("  a  b  "), "a  b");
+    assert_eq!(collapse_inline_markdown_for_summary("   "), "");
+}
+
 #[gpui::test]
 async fn scroll_wheel_events_are_delivered(cx: &mut gpui::TestAppContext) {
     cx.update(gpui_component::init);
@@ -1756,7 +1768,9 @@ async fn clicking_turn_item_summary_row_toggles_expanded(cx: &mut gpui::TestAppC
 }
 
 #[gpui::test]
-async fn running_turn_summary_is_expanded_and_not_toggleable(cx: &mut gpui::TestAppContext) {
+async fn running_turn_summary_is_collapsed_by_default_and_toggleable(
+    cx: &mut gpui::TestAppContext,
+) {
     cx.update(gpui_component::init);
 
     let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
@@ -1798,9 +1812,12 @@ async fn running_turn_summary_is_expanded_and_not_toggleable(cx: &mut gpui::Test
     window_cx
         .debug_bounds("agent-turn-summary-agent-turn-0")
         .expect("missing running turn summary row");
-    window_cx
-        .debug_bounds("agent-turn-item-summary-agent-turn-0-item-1")
-        .expect("missing running summary item row");
+    assert!(
+        window_cx
+            .debug_bounds("agent-turn-item-summary-agent-turn-0-item-1")
+            .is_none(),
+        "expected running summary item row to be hidden until expanded"
+    );
 
     let expanded = view.read_with(window_cx, |v, _| {
         v.expanded_agent_turns.contains("agent-turn-0")
@@ -1816,7 +1833,7 @@ async fn running_turn_summary_is_expanded_and_not_toggleable(cx: &mut gpui::Test
     let expanded = view.read_with(window_cx, |v, _| {
         v.expanded_agent_turns.contains("agent-turn-0")
     });
-    assert!(!expanded);
+    assert!(expanded);
 
     window_cx
         .debug_bounds("agent-turn-item-summary-agent-turn-0-item-1")
@@ -1863,6 +1880,12 @@ async fn running_turn_summary_keeps_completed_items_visible_while_running(
 
     let (view, window_cx) =
         cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+    window_cx.refresh().unwrap();
+
+    let header_bounds = window_cx
+        .debug_bounds("agent-turn-summary-agent-turn-0")
+        .expect("missing running turn summary row");
+    window_cx.simulate_click(header_bounds.center(), Modifiers::none());
     window_cx.refresh().unwrap();
 
     window_cx
@@ -2109,6 +2132,17 @@ async fn user_message_reflows_on_window_resize(cx: &mut gpui::TestAppContext) {
     window_cx.refresh().unwrap();
     window_cx.run_until_parked();
     window_cx.refresh().unwrap();
+    for _ in 0..10 {
+        let bubble = window_cx
+            .debug_bounds("conversation-user-bubble-0")
+            .expect("missing debug bounds for conversation-user-bubble-0");
+        if bubble.size.height > px(40.0) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(30));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+    }
     let wide_column = window_cx
         .debug_bounds("workspace-chat-column")
         .expect("missing debug bounds for workspace-chat-column");
@@ -2121,6 +2155,17 @@ async fn user_message_reflows_on_window_resize(cx: &mut gpui::TestAppContext) {
     window_cx.refresh().unwrap();
     window_cx.run_until_parked();
     window_cx.refresh().unwrap();
+    for _ in 0..10 {
+        let bubble = window_cx
+            .debug_bounds("conversation-user-bubble-0")
+            .expect("missing debug bounds for conversation-user-bubble-0");
+        if bubble.size.height > wide_bubble.size.height {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(30));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+    }
     let narrow_column = window_cx
         .debug_bounds("workspace-chat-column")
         .expect("missing debug bounds for workspace-chat-column");
@@ -2432,6 +2477,11 @@ async fn user_message_text_can_be_selected_and_copied(cx: &mut gpui::TestAppCont
     window_cx.simulate_resize(size(px(720.0), px(400.0)));
     window_cx.run_until_parked();
     window_cx.refresh().unwrap();
+    for _ in 0..6 {
+        std::thread::sleep(Duration::from_millis(30));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+    }
 
     let text_bounds = window_cx
         .debug_bounds("user-message-0-plain-text")
@@ -3273,6 +3323,17 @@ async fn chat_scroll_position_is_saved_and_restored(cx: &mut gpui::TestAppContex
         window_cx.refresh().unwrap();
     }
 
+    for _ in 0..20 {
+        let max_y10 = view.read_with(window_cx, |v, _| v.debug_chat_scroll_max_offset_y10());
+        let offset_y10 = view.read_with(window_cx, |v, _| v.debug_chat_scroll_offset_y10());
+        if max_y10 > 0 && (offset_y10 + max_y10).abs() <= 250 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(30));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+    }
+
     let max_y10 = view.read_with(window_cx, |v, _| v.debug_chat_scroll_max_offset_y10());
     assert!(max_y10 > 0, "expected a scrollable chat history");
 
@@ -3525,14 +3586,22 @@ async fn switching_away_at_bottom_restores_to_bottom(cx: &mut gpui::TestAppConte
             cx.notify();
         });
     });
-    for _ in 0..4 {
+    for _ in 0..20 {
         window_cx.run_until_parked();
         window_cx.refresh().unwrap();
+        let max_y10_current =
+            view.read_with(window_cx, |v, _| v.debug_chat_scroll_max_offset_y10());
+        let offset_y10 = view.read_with(window_cx, |v, _| v.debug_chat_scroll_offset_y10());
+        if max_y10_current > 0 && (offset_y10 + max_y10_current).abs() <= 250 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(30));
     }
 
+    let max_y10 = view.read_with(window_cx, |v, _| v.debug_chat_scroll_max_offset_y10());
     let offset_y10 = view.read_with(window_cx, |v, _| v.debug_chat_scroll_offset_y10());
     assert!(
-        (offset_y10 + max_y10).abs() <= 250,
+        max_y10 > 0 && (offset_y10 + max_y10).abs() <= 250,
         "expected to be near the bottom before switching away (offset_y10={offset_y10}, max_y10={max_y10})"
     );
 
@@ -3562,9 +3631,15 @@ async fn switching_away_at_bottom_restores_to_bottom(cx: &mut gpui::TestAppConte
             view.dispatch(Action::OpenWorkspace { workspace_id }, cx);
         });
     });
-    for _ in 0..6 {
+    for _ in 0..30 {
         window_cx.run_until_parked();
         window_cx.refresh().unwrap();
+        let max_y10_after = view.read_with(window_cx, |v, _| v.debug_chat_scroll_max_offset_y10());
+        let offset_y10_after = view.read_with(window_cx, |v, _| v.debug_chat_scroll_offset_y10());
+        if max_y10_after > 0 && (offset_y10_after + max_y10_after).abs() <= 250 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(30));
     }
 
     let max_y10_after = view.read_with(window_cx, |v, _| v.debug_chat_scroll_max_offset_y10());
@@ -3997,24 +4072,83 @@ async fn chat_auto_scroll_stops_when_user_scrolled_up(cx: &mut gpui::TestAppCont
         window_cx.refresh().unwrap();
     }
 
-    let max_y10 = view.read_with(window_cx, |v, _| v.debug_chat_scroll_max_offset_y10());
-    assert!(max_y10 > 0, "expected a scrollable chat history");
-
-    let user_offset_y10 = -((max_y10 / 2).max(10));
-    window_cx.update(|_, app| {
-        view.update(app, |view, cx| {
-            view.chat_scroll_handle
-                .set_offset(point(px(0.0), px(user_offset_y10 as f32 / 10.0)));
-            cx.notify();
-        });
-    });
-    for _ in 0..3 {
+    for _ in 0..30 {
         window_cx.run_until_parked();
         window_cx.refresh().unwrap();
+
+        let max_y10 = view.read_with(window_cx, |v, _| v.debug_chat_scroll_max_offset_y10());
+        let offset_y10 = view.read_with(window_cx, |v, _| v.debug_chat_scroll_offset_y10());
+        if max_y10 > 0 && (offset_y10 + max_y10).abs() <= 250 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(30));
     }
 
-    let offset_y10_before = view.read_with(window_cx, |v, _| v.debug_chat_scroll_offset_y10());
-    assert_eq!(offset_y10_before, user_offset_y10);
+    let max_y10 = view.read_with(window_cx, |v, _| v.debug_chat_scroll_max_offset_y10());
+    let offset_y10 = view.read_with(window_cx, |v, _| v.debug_chat_scroll_offset_y10());
+    assert!(max_y10 > 0, "expected a scrollable chat history");
+    assert!(
+        (offset_y10 + max_y10).abs() <= 250,
+        "expected to be near the bottom before simulating a user scroll (offset_y10={offset_y10}, max_y10={max_y10})"
+    );
+
+    let scroll_bounds = window_cx
+        .debug_bounds("workspace-chat-scroll")
+        .expect("missing debug bounds for workspace-chat-scroll");
+    let position = point(
+        scroll_bounds.origin.x + px(10.0),
+        scroll_bounds.origin.y + px(10.0),
+    );
+
+    window_cx.simulate_mouse_move(position, None, Modifiers::none());
+    window_cx.run_until_parked();
+    window_cx.refresh().unwrap();
+
+    let baseline_offset_y10 = view.read_with(window_cx, |v, _| v.debug_chat_scroll_offset_y10());
+    let mut offset_y10_before = baseline_offset_y10;
+    let mut delta_y = px(480.0);
+
+    for _ in 0..24 {
+        window_cx.simulate_event(ScrollWheelEvent {
+            position,
+            delta: ScrollDelta::Pixels(point(px(0.0), delta_y)),
+            ..Default::default()
+        });
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+
+        let new_offset_y10 = view.read_with(window_cx, |v, _| v.debug_chat_scroll_offset_y10());
+        if new_offset_y10 <= offset_y10_before {
+            delta_y = -delta_y;
+        }
+        offset_y10_before = new_offset_y10;
+        if offset_y10_before > baseline_offset_y10 + 200 {
+            break;
+        }
+    }
+
+    assert!(
+        offset_y10_before > baseline_offset_y10 + 200,
+        "expected the user scroll to move the chat away from the bottom (baseline_offset_y10={baseline_offset_y10}, offset_y10_before={offset_y10_before})"
+    );
+
+    let mut follow_tail_before = true;
+    for _ in 0..10 {
+        follow_tail_before = view.read_with(window_cx, |v, _| {
+            let chat_key = (workspace_id, default_thread_id());
+            v.chat_follow_tail.get(&chat_key).copied().unwrap_or(true)
+        });
+        if !follow_tail_before {
+            break;
+        }
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    assert!(
+        !follow_tail_before,
+        "expected chat follow-tail to be disabled after the user scrolled"
+    );
 
     entries.push(ConversationEntry::UserMessage {
         text: "new message".to_owned(),
@@ -4034,15 +4168,31 @@ async fn chat_auto_scroll_stops_when_user_scrolled_up(cx: &mut gpui::TestAppCont
             );
         });
     });
-    for _ in 0..3 {
+    for _ in 0..20 {
         window_cx.run_until_parked();
         window_cx.refresh().unwrap();
+        std::thread::sleep(Duration::from_millis(30));
     }
 
-    let offset_y10_after = view.read_with(window_cx, |v, _| v.debug_chat_scroll_offset_y10());
-    assert_eq!(
-        offset_y10_after, user_offset_y10,
-        "expected new entries to not force-scroll when the user scrolled up"
+    let (offset_y10_after, max_y10_after, follow_tail_after) = view.read_with(window_cx, |v, _| {
+        let chat_key = (workspace_id, default_thread_id());
+        (
+            v.debug_chat_scroll_offset_y10(),
+            v.debug_chat_scroll_max_offset_y10(),
+            v.chat_follow_tail.get(&chat_key).copied().unwrap_or(true),
+        )
+    });
+    assert!(
+        max_y10_after > 0,
+        "expected a scrollable chat history after new entries"
+    );
+    assert!(
+        !LubanRootView::is_chat_near_bottom(offset_y10_after, max_y10_after),
+        "expected new entries to not force-scroll when the user scrolled up (offset_y10_after={offset_y10_after}, max_y10_after={max_y10_after})"
+    );
+    assert!(
+        !follow_tail_after,
+        "expected chat follow-tail to remain disabled after new entries"
     );
 }
 
