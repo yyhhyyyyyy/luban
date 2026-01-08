@@ -407,7 +407,14 @@ impl ProjectWorkspaceService for GitWorkspaceService {
             &image.extension,
             "image",
         );
-        result.map_err(|e| format!("{e:#}"))
+        let stored = result.map_err(|e| format!("{e:#}"))?;
+        let _ = self.maybe_store_context_image_thumbnail(
+            &project_slug,
+            &workspace_name,
+            &stored,
+            &image.bytes,
+        );
+        Ok(stored)
     }
 
     fn store_context_text(
@@ -1276,6 +1283,76 @@ mod tests {
             .expect("stored path should be utf-8");
         assert_timestamped_basename(file_name, "image", ".png");
         assert!(stored.exists(), "stored path should exist");
+
+        drop(service);
+        let _ = std::fs::remove_dir_all(&base_dir);
+    }
+
+    #[test]
+    fn context_images_store_thumbnail_alongside_original() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be valid")
+            .as_nanos();
+        let base_dir = std::env::temp_dir().join(format!(
+            "luban-context-image-thumb-{}-{}",
+            std::process::id(),
+            unique
+        ));
+
+        std::fs::create_dir_all(&base_dir).expect("temp dir should be created");
+
+        let sqlite =
+            SqliteStore::new(paths::sqlite_path(&base_dir)).expect("sqlite init should work");
+        let service = GitWorkspaceService {
+            worktrees_root: paths::worktrees_root(&base_dir),
+            conversations_root: paths::conversations_root(&base_dir),
+            sqlite,
+        };
+
+        let img = image::RgbImage::from_fn(1200, 800, |x, y| {
+            image::Rgb([(x % 256) as u8, (y % 256) as u8, ((x + y) % 256) as u8])
+        });
+        let mut png = Vec::new();
+        image::DynamicImage::ImageRgb8(img)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .expect("encode png");
+
+        let stored = ProjectWorkspaceService::store_context_image(
+            &service,
+            "proj".to_owned(),
+            "main".to_owned(),
+            ContextImage {
+                extension: "png".to_owned(),
+                bytes: png,
+            },
+        )
+        .expect("store_context_image should succeed");
+
+        let stem = stored
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .expect("stored path should be utf-8");
+        let thumb = stored.with_file_name(format!("{stem}-thumb.png"));
+
+        assert!(stored.exists(), "stored path should exist");
+        assert!(thumb.exists(), "thumbnail path should exist");
+
+        let thumb_bytes = std::fs::read(&thumb).expect("read thumbnail");
+        let thumb_img = image::load_from_memory(&thumb_bytes).expect("decode thumbnail");
+        assert!(
+            thumb_img.width() <= 360 && thumb_img.height() <= 220,
+            "expected thumbnail to be constrained: {}x{}",
+            thumb_img.width(),
+            thumb_img.height()
+        );
+
+        let stored_len = std::fs::metadata(&stored).expect("stat stored").len();
+        let thumb_len = std::fs::metadata(&thumb).expect("stat thumb").len();
+        assert!(
+            thumb_len <= stored_len,
+            "expected thumbnail to not exceed original size (thumb={thumb_len}, stored={stored_len})"
+        );
 
         drop(service);
         let _ = std::fs::remove_dir_all(&base_dir);

@@ -3210,6 +3210,7 @@ dependencies = [
  "gpui-component",
  "gpui-component-assets",
  "gpui_ghostty_terminal",
+ "image",
  "luban_domain",
  "luban_ui",
  "rand 0.8.5",

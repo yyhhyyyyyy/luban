@@ -2581,19 +2581,17 @@ async fn chat_copy_buttons_copy_user_and_agent_messages(cx: &mut gpui::TestAppCo
         ),
         "expected user and agent copy buttons to have distinct bounds"
     );
-    let agent_click = point(agent_copy.left() + px(1.0), agent_copy.top() + px(1.0));
-    window_cx.simulate_mouse_down(agent_click, MouseButton::Left, Modifiers::none());
-    window_cx.simulate_mouse_up(agent_click, MouseButton::Left, Modifiers::none());
+    window_cx.simulate_click(agent_copy.center(), Modifiers::none());
     window_cx.run_until_parked();
+    window_cx.refresh().unwrap();
     assert_eq!(
         window_cx.read_from_clipboard().and_then(|item| item.text()),
         Some(agent_message)
     );
 
-    let user_click = point(user_copy.left() + px(1.0), user_copy.top() + px(1.0));
-    window_cx.simulate_mouse_down(user_click, MouseButton::Left, Modifiers::none());
-    window_cx.simulate_mouse_up(user_click, MouseButton::Left, Modifiers::none());
+    window_cx.simulate_click(user_copy.center(), Modifiers::none());
     window_cx.run_until_parked();
+    window_cx.refresh().unwrap();
     assert_eq!(
         window_cx.read_from_clipboard().and_then(|item| item.text()),
         Some(user_message)
@@ -2906,6 +2904,10 @@ async fn user_message_inline_images_are_constrained_and_clickable(cx: &mut gpui:
         image_bounds.size.height <= px(CHAT_INLINE_IMAGE_MAX_HEIGHT + 24.0),
         "expected inline image height to be constrained: bounds={image_bounds:?}",
     );
+    assert!(
+        image_bounds.size.height >= px(CHAT_INLINE_IMAGE_MAX_HEIGHT - 2.0),
+        "expected inline image placeholder to reserve height to avoid scroll jumps: bounds={image_bounds:?}",
+    );
 
     window_cx.simulate_click(image_bounds.center(), Modifiers::none());
     for _ in 0..6 {
@@ -3187,8 +3189,11 @@ async fn user_messages_render_context_tokens_in_order(cx: &mut gpui::TestAppCont
         gpui_component::Root::new(view, window, cx)
     });
     window_cx.simulate_resize(size(px(720.0), px(480.0)));
-    window_cx.run_until_parked();
-    window_cx.refresh().unwrap();
+    for _ in 0..6 {
+        std::thread::sleep(Duration::from_millis(30));
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+    }
 
     let before = window_cx
         .debug_bounds("user-message-0-seg-0-plain-text")

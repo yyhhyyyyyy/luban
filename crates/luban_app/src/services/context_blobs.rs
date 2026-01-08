@@ -1,10 +1,14 @@
 use super::GitWorkspaceService;
 use anyhow::{Context as _, anyhow};
+use image::ImageFormat;
 use std::{
     io::{Read as _, Write as _},
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
+
+const CONTEXT_IMAGE_THUMB_MAX_WIDTH: u32 = 360;
+const CONTEXT_IMAGE_THUMB_MAX_HEIGHT: u32 = 220;
 
 impl GitWorkspaceService {
     pub(super) fn context_root_dir(&self, project_slug: &str, workspace_name: &str) -> PathBuf {
@@ -190,6 +194,63 @@ impl GitWorkspaceService {
         Err(anyhow!(
             "failed to find a unique destination for context blob"
         ))
+    }
+
+    pub(super) fn maybe_store_context_image_thumbnail(
+        &self,
+        project_slug: &str,
+        workspace_name: &str,
+        original_path: &Path,
+        bytes: &[u8],
+    ) -> anyhow::Result<Option<PathBuf>> {
+        let thumbnail_path = Self::context_image_thumbnail_path(original_path);
+        if thumbnail_path.exists() {
+            return Ok(Some(thumbnail_path));
+        }
+
+        let decoded = match image::load_from_memory(bytes) {
+            Ok(image) => image,
+            Err(_) => return Ok(None),
+        };
+        let thumbnail = decoded.thumbnail(
+            CONTEXT_IMAGE_THUMB_MAX_WIDTH,
+            CONTEXT_IMAGE_THUMB_MAX_HEIGHT,
+        );
+
+        let tmp_dir = self.context_tmp_dir(project_slug, workspace_name);
+        std::fs::create_dir_all(&tmp_dir)
+            .with_context(|| format!("failed to create {}", tmp_dir.display()))?;
+        let tmp = tmp_dir.join(format!("thumb-{}", rand::random::<u64>()));
+
+        thumbnail
+            .save_with_format(&tmp, ImageFormat::Png)
+            .with_context(|| format!("failed to write thumbnail {}", tmp.display()))?;
+
+        match std::fs::rename(&tmp, &thumbnail_path) {
+            Ok(()) => Ok(Some(thumbnail_path)),
+            Err(err) if thumbnail_path.exists() => {
+                let _ = std::fs::remove_file(&tmp);
+                Ok(Some(thumbnail_path))
+            }
+            Err(err) => {
+                let _ = std::fs::remove_file(&tmp);
+                Err(err).with_context(|| {
+                    format!(
+                        "failed to move thumbnail {} -> {}",
+                        tmp.display(),
+                        thumbnail_path.display()
+                    )
+                })
+            }
+        }
+    }
+
+    fn context_image_thumbnail_path(original_path: &Path) -> PathBuf {
+        let stem = original_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("image");
+        original_path.with_file_name(format!("{stem}-thumb.png"))
     }
 
     pub(super) fn store_context_file_internal(

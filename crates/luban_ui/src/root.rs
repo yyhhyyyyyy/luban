@@ -28,7 +28,7 @@ use luban_domain::{
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
-    path::PathBuf,
+    path::{Path, PathBuf},
     rc::Rc,
     sync::atomic::{AtomicBool, Ordering},
     sync::{Arc, Mutex},
@@ -2747,8 +2747,12 @@ fn user_message_view_with_context_tokens(
         let attachment = match token.kind {
             luban_domain::ContextTokenKind::Image => {
                 let path = token.path;
+                let original_path = path.clone();
                 let open_path = path.clone();
+                let thumbnail_path = context_image_thumbnail_path(&path);
                 let view_handle = view_handle.clone();
+                let max_w = px(CHAT_INLINE_IMAGE_MAX_WIDTH);
+                let max_h = px(CHAT_INLINE_IMAGE_MAX_HEIGHT);
 
                 div()
                     .debug_selector(move || {
@@ -2756,8 +2760,9 @@ fn user_message_view_with_context_tokens(
                             "conversation-user-attachment-image-{entry_index}-{attachment_index}"
                         )
                     })
-                    .max_w(px(CHAT_INLINE_IMAGE_MAX_WIDTH))
-                    .max_h(px(CHAT_INLINE_IMAGE_MAX_HEIGHT))
+                    .w_full()
+                    .max_w(max_w)
+                    .h(max_h)
                     .cursor_pointer()
                     .on_mouse_down(MouseButton::Left, move |_, _, app| {
                         app.stop_propagation();
@@ -2766,24 +2771,45 @@ fn user_message_view_with_context_tokens(
                             view.open_image_viewer(path, cx);
                         });
                     })
+                    .rounded_md()
+                    .border_1()
+                    .border_color(border_color)
+                    .overflow_hidden()
                     .child(
-                        gpui::img(path)
-                            .max_w(px(CHAT_INLINE_IMAGE_MAX_WIDTH))
-                            .max_h(px(CHAT_INLINE_IMAGE_MAX_HEIGHT))
-                            .rounded_md()
-                            .border_1()
-                            .border_color(border_color)
+                        gpui::img(thumbnail_path)
+                            .size_full()
                             .object_fit(gpui::ObjectFit::Contain)
                             .with_loading(|| {
-                                Spinner::new().with_size(Size::Small).into_any_element()
-                            })
-                            .with_fallback(|| {
                                 div()
-                                    .px_2()
-                                    .py_2()
-                                    .rounded_md()
-                                    .border_1()
-                                    .child("Missing image")
+                                    .size_full()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .child(Spinner::new().with_size(Size::Small))
+                                    .into_any_element()
+                            })
+                            .with_fallback(move || {
+                                gpui::img(original_path.clone())
+                                    .size_full()
+                                    .object_fit(gpui::ObjectFit::Contain)
+                                    .with_loading(|| {
+                                        div()
+                                            .size_full()
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .child(Spinner::new().with_size(Size::Small))
+                                            .into_any_element()
+                                    })
+                                    .with_fallback(|| {
+                                        div()
+                                            .size_full()
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .child("Missing image")
+                                            .into_any_element()
+                                    })
                                     .into_any_element()
                             }),
                     )
@@ -2850,6 +2876,11 @@ fn min_height_zero<E: gpui::Styled>(mut element: E) -> E {
 
 fn quantize_pixels_y10(pixels: Pixels) -> i32 {
     (f32::from(pixels) * 10.0).round() as i32
+}
+
+fn context_image_thumbnail_path(path: &Path) -> PathBuf {
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("image");
+    path.with_file_name(format!("{stem}-thumb.png"))
 }
 
 fn update_chat_follow_state(
@@ -4201,20 +4232,11 @@ fn chat_message_view(
     text_color: gpui::Hsla,
 ) -> AnyElement {
     let plain_debug_selector = format!("{id}-plain-text");
-    let mut container = div()
+    div()
         .debug_selector(move || plain_debug_selector.clone())
         .id(ElementId::Name(SharedString::from(format!("{id}-text"))))
-        .child(
-            chat_markdown_view(id, source, None)
-                .text_color(text_color)
-                .into_any_element(),
-        );
-
-    if let Some(wrap_width) = wrap_width {
-        container = container.w(wrap_width);
-    }
-
-    container.into_any_element()
+        .child(chat_markdown_view(id, source, wrap_width).text_color(text_color))
+        .into_any_element()
 }
 
 fn chat_plain_text_view(
