@@ -149,6 +149,7 @@ pub struct LubanRootView {
     chat_follow_tail: HashMap<WorkspaceThreadKey, bool>,
     chat_last_observed_scroll_offset_y10: HashMap<WorkspaceThreadKey, i32>,
     chat_last_observed_scroll_max_y10: HashMap<WorkspaceThreadKey, i32>,
+    chat_last_observed_scroll_max_y10_at_offset_change: HashMap<WorkspaceThreadKey, i32>,
     image_viewer_path: Option<PathBuf>,
     projects_scroll_handle: gpui::ScrollHandle,
     last_chat_workspace_id: Option<WorkspaceThreadKey>,
@@ -214,6 +215,7 @@ impl LubanRootView {
             chat_follow_tail: HashMap::new(),
             chat_last_observed_scroll_offset_y10: HashMap::new(),
             chat_last_observed_scroll_max_y10: HashMap::new(),
+            chat_last_observed_scroll_max_y10_at_offset_change: HashMap::new(),
             image_viewer_path: None,
             projects_scroll_handle: gpui::ScrollHandle::new(),
             last_chat_workspace_id: None,
@@ -290,6 +292,7 @@ impl LubanRootView {
             chat_follow_tail: HashMap::new(),
             chat_last_observed_scroll_offset_y10: HashMap::new(),
             chat_last_observed_scroll_max_y10: HashMap::new(),
+            chat_last_observed_scroll_max_y10_at_offset_change: HashMap::new(),
             image_viewer_path: None,
             projects_scroll_handle: gpui::ScrollHandle::new(),
             last_chat_workspace_id: None,
@@ -428,6 +431,7 @@ impl LubanRootView {
             &self.chat_scroll_handle,
             &mut self.chat_follow_tail,
             &mut self.chat_last_observed_scroll_offset_y10,
+            &mut self.chat_last_observed_scroll_max_y10_at_offset_change,
         );
 
         let follow_tail = self
@@ -475,9 +479,12 @@ impl LubanRootView {
         }
 
         self.chat_scroll_handle.scroll_to_bottom();
-        self.chat_last_observed_scroll_offset_y10.insert(
+        update_chat_follow_state(
             chat_key,
-            quantize_pixels_y10(self.chat_scroll_handle.offset().y),
+            &self.chat_scroll_handle,
+            &mut self.chat_follow_tail,
+            &mut self.chat_last_observed_scroll_offset_y10,
+            &mut self.chat_last_observed_scroll_max_y10_at_offset_change,
         );
         cx.notify();
     }
@@ -690,9 +697,14 @@ impl LubanRootView {
                 .copied()
                 .unwrap_or_else(|| quantize_pixels_y10(self.chat_scroll_handle.offset().y));
             let max_y10 = self
-                .chat_last_observed_scroll_max_y10
+                .chat_last_observed_scroll_max_y10_at_offset_change
                 .get(&chat_key)
                 .copied()
+                .or_else(|| {
+                    self.chat_last_observed_scroll_max_y10
+                        .get(&chat_key)
+                        .copied()
+                })
                 .unwrap_or_else(|| {
                     quantize_pixels_y10(self.chat_scroll_handle.max_offset().height)
                 });
@@ -2230,6 +2242,7 @@ impl LubanRootView {
                     &self.chat_scroll_handle,
                     &mut self.chat_follow_tail,
                     &mut self.chat_last_observed_scroll_offset_y10,
+                    &mut self.chat_last_observed_scroll_max_y10_at_offset_change,
                 );
                 if !self.should_chat_follow_tail(chat_key) {
                     self.pending_chat_scroll_to_bottom.remove(&chat_key);
@@ -2414,6 +2427,7 @@ impl LubanRootView {
                                     &view.chat_scroll_handle,
                                     &mut view.chat_follow_tail,
                                     &mut view.chat_last_observed_scroll_offset_y10,
+                                    &mut view.chat_last_observed_scroll_max_y10_at_offset_change,
                                 );
                                 view.flush_pending_chat_scroll_restore(chat_key, cx);
                                 view.flush_pending_chat_scroll_to_bottom(chat_key, cx);
@@ -3106,6 +3120,7 @@ fn update_chat_follow_state(
     scroll_handle: &gpui::ScrollHandle,
     chat_follow_tail: &mut HashMap<WorkspaceThreadKey, bool>,
     chat_last_observed_scroll_offset_y10: &mut HashMap<WorkspaceThreadKey, i32>,
+    chat_last_observed_scroll_max_y10_at_offset_change: &mut HashMap<WorkspaceThreadKey, i32>,
 ) {
     let offset_y10 = quantize_pixels_y10(scroll_handle.offset().y);
     let max_y10 = quantize_pixels_y10(scroll_handle.max_offset().height);
@@ -3113,6 +3128,13 @@ fn update_chat_follow_state(
 
     let previous_offset_y10 = chat_last_observed_scroll_offset_y10.get(&chat_key).copied();
     let follow = chat_follow_tail.get(&chat_key).copied().unwrap_or(true);
+
+    let offset_changed = previous_offset_y10
+        .map(|prev| (offset_y10 - prev).abs() >= 10)
+        .unwrap_or(true);
+    if offset_changed {
+        chat_last_observed_scroll_max_y10_at_offset_change.insert(chat_key, max_y10);
+    }
 
     if follow {
         let user_scrolled_up = previous_offset_y10

@@ -501,6 +501,7 @@ impl LubanRootView {
             &self.chat_scroll_handle,
             &mut self.chat_follow_tail,
             &mut self.chat_last_observed_scroll_offset_y10,
+            &mut self.chat_last_observed_scroll_max_y10_at_offset_change,
         );
         if !self.should_chat_follow_tail(chat_key) {
             self.pending_chat_scroll_to_bottom.remove(&chat_key);
