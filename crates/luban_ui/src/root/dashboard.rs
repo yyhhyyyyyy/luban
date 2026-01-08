@@ -648,6 +648,7 @@ impl LubanRootView {
                     .flex_col()
                     .gap_3()
                     .whitespace_normal()
+                    .pt_3()
                     .pb_2()
                     .children(history_children)
                     .when_some(tail_duration, |s, (elapsed, running)| {

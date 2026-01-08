@@ -2399,11 +2399,20 @@ async fn chat_history_is_not_pushed_down_by_scroll_padding(cx: &mut gpui::TestAp
     let column = window_cx
         .debug_bounds("workspace-chat-column")
         .expect("missing debug bounds for workspace-chat-column");
+    let first_row = window_cx
+        .debug_bounds("conversation-user-row-0")
+        .expect("missing debug bounds for conversation-user-row-0");
 
     let dy = (column.origin.y - scroll.origin.y).abs();
     assert!(
         dy <= px(1.0),
         "expected chat history to start at top of scroll container: dy={dy:?} scroll={scroll:?} column={column:?}"
+    );
+
+    let row_margin = first_row.origin.y - scroll.origin.y;
+    assert!(
+        row_margin >= px(8.0),
+        "expected first chat message to have a top margin under the thread tabs: row_margin={row_margin:?} scroll={scroll:?} first_row={first_row:?}"
     );
 }
 
