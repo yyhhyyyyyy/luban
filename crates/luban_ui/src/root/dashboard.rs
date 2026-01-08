@@ -415,15 +415,22 @@ impl LubanRootView {
 
         let is_running = run_status == OperationStatus::Running;
         let chat_target_changed = self.last_chat_workspace_id != Some(chat_key);
+        let saved_offset_y10 = self
+            .state
+            .workspace_chat_scroll_y10
+            .get(&(workspace_id, thread_id))
+            .copied();
+        let saved_is_sentinel = saved_offset_y10 == Some(CHAT_SCROLL_FOLLOW_TAIL_SENTINEL_Y10);
         if chat_target_changed {
-            let offset_y10 = self
-                .state
-                .workspace_chat_scroll_y10
-                .get(&(workspace_id, thread_id))
-                .copied()
-                .unwrap_or(0);
-            self.chat_scroll_handle
-                .set_offset(point(px(0.0), px(offset_y10 as f32 / 10.0)));
+            if saved_is_sentinel {
+                self.chat_scroll_handle.set_offset(point(px(0.0), px(0.0)));
+                self.chat_follow_tail.insert(chat_key, true);
+            } else if let Some(saved_offset_y10) = saved_offset_y10 {
+                self.chat_scroll_handle
+                    .set_offset(point(px(0.0), px(saved_offset_y10 as f32 / 10.0)));
+            } else {
+                self.chat_scroll_handle.set_offset(point(px(0.0), px(0.0)));
+            }
 
             let saved_draft = conversation.map(|c| c.draft.clone()).unwrap_or_default();
             let current_value = input_state.read(cx).value().to_owned();

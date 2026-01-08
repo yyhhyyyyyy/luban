@@ -59,6 +59,7 @@ const CHAT_ATTACHMENT_THUMBNAIL_SIZE: f32 = 72.0;
 const CHAT_ATTACHMENT_FILE_WIDTH: f32 = CHAT_ATTACHMENT_THUMBNAIL_SIZE * 2.0;
 const CHAT_SCROLL_BOTTOM_TOLERANCE_Y10: i32 = 200;
 const CHAT_SCROLL_USER_SCROLL_UP_THRESHOLD_Y10: i32 = 10;
+const CHAT_SCROLL_FOLLOW_TAIL_SENTINEL_Y10: i32 = i32::MIN;
 const WORKSPACE_HISTORY_VIRTUALIZATION_MIN_ENTRIES: usize = 800;
 
 use chat::composer::ContextImportSpec;
@@ -399,10 +400,9 @@ impl LubanRootView {
             return;
         }
 
-        if !self.chat_follow_tail.contains_key(&chat_key)
-            && saved_offset_y10
-                .map(|saved| !Self::is_chat_near_bottom(saved, max_y10))
-                .unwrap_or(false)
+        if saved_offset_y10
+            .map(|saved| !Self::is_chat_near_bottom(saved, max_y10))
+            .unwrap_or(false)
         {
             entry.remove();
             return;
@@ -541,10 +541,17 @@ impl LubanRootView {
             && let Some((workspace_id, thread_id)) = previous_chat_key_for_scroll
         {
             let offset_y10 = quantize_pixels_y10(self.chat_scroll_handle.offset().y);
+            let max_y10 = quantize_pixels_y10(self.chat_scroll_handle.max_offset().height);
+            let saved_offset_y10 = if max_y10 > 0 && Self::is_chat_near_bottom(offset_y10, max_y10)
+            {
+                CHAT_SCROLL_FOLLOW_TAIL_SENTINEL_Y10
+            } else {
+                offset_y10
+            };
             effects.extend(self.state.apply(Action::WorkspaceChatScrollSaved {
                 workspace_id,
                 thread_id,
-                offset_y10,
+                offset_y10: saved_offset_y10,
             }));
         }
         cx.notify();
@@ -1838,15 +1845,23 @@ impl LubanRootView {
 
                 let is_running = run_status == OperationStatus::Running;
                 let chat_target_changed = self.last_chat_workspace_id != Some(chat_key);
+                let saved_offset_y10 = self
+                    .state
+                    .workspace_chat_scroll_y10
+                    .get(&(workspace_id, thread_id))
+                    .copied();
+                let saved_is_sentinel =
+                    saved_offset_y10 == Some(CHAT_SCROLL_FOLLOW_TAIL_SENTINEL_Y10);
                 if chat_target_changed {
-                    let offset_y10 = self
-                        .state
-                        .workspace_chat_scroll_y10
-                        .get(&(workspace_id, thread_id))
-                        .copied()
-                        .unwrap_or(0);
-                    self.chat_scroll_handle
-                        .set_offset(point(px(0.0), px(offset_y10 as f32 / 10.0)));
+                    if saved_is_sentinel {
+                        self.chat_scroll_handle.set_offset(point(px(0.0), px(0.0)));
+                        self.chat_follow_tail.insert(chat_key, true);
+                    } else if let Some(saved_offset_y10) = saved_offset_y10 {
+                        self.chat_scroll_handle
+                            .set_offset(point(px(0.0), px(saved_offset_y10 as f32 / 10.0)));
+                    } else {
+                        self.chat_scroll_handle.set_offset(point(px(0.0), px(0.0)));
+                    }
 
                     let saved_draft = conversation.map(|c| c.draft.clone()).unwrap_or_default();
                     let current_value = input_state.read(cx).value().to_owned();
@@ -2005,17 +2020,16 @@ impl LubanRootView {
 
                 let history_grew = self.last_chat_workspace_id == Some(chat_key)
                     && entries_len > self.last_chat_item_count;
-                let should_scroll_on_open =
-                    self.last_chat_workspace_id != Some(chat_key) && agent_turn_count(entries) >= 2;
-                let saved_offset_y10 = self
-                    .state
-                    .workspace_chat_scroll_y10
-                    .get(&(workspace_id, thread_id))
-                    .copied();
+                let should_scroll_on_open = self.last_chat_workspace_id != Some(chat_key)
+                    && (saved_is_sentinel
+                        || (agent_turn_count(entries) >= 2 && saved_offset_y10.is_none()));
                 if (history_grew && self.should_chat_follow_tail(chat_key)) || should_scroll_on_open
                 {
-                    let pending_saved_offset_y10 =
-                        if history_grew { None } else { saved_offset_y10 };
+                    let pending_saved_offset_y10 = if history_grew || saved_is_sentinel {
+                        None
+                    } else {
+                        saved_offset_y10
+                    };
                     self.pending_chat_scroll_to_bottom.insert(
                         chat_key,
                         PendingChatScrollToBottom {
