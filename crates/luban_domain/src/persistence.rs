@@ -114,6 +114,17 @@ pub(crate) fn apply_persisted_app_state(
         })
         .collect();
 
+    state.workspace_chat_scroll_anchor = persisted
+        .workspace_chat_scroll_anchor
+        .into_iter()
+        .map(|((workspace_id, thread_id), anchor)| {
+            (
+                (WorkspaceId(workspace_id), WorkspaceThreadId(thread_id)),
+                anchor,
+            )
+        })
+        .collect();
+
     let max_project_id = state.projects.iter().map(|p| p.id.0).max().unwrap_or(0);
     let max_workspace_id = state
         .projects
@@ -230,6 +241,13 @@ pub(crate) fn to_persisted_app_state(state: &AppState) -> PersistedAppState {
             .iter()
             .map(|((workspace_id, thread_id), offset_y10)| {
                 ((workspace_id.0, thread_id.0), *offset_y10)
+            })
+            .collect(),
+        workspace_chat_scroll_anchor: state
+            .workspace_chat_scroll_anchor
+            .iter()
+            .map(|((workspace_id, thread_id), anchor)| {
+                ((workspace_id.0, thread_id.0), anchor.clone())
             })
             .collect(),
         workspace_unread_completions: state

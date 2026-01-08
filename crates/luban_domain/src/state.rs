@@ -60,6 +60,17 @@ pub enum ConversationEntry {
     TurnError { message: String },
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ChatScrollAnchor {
+    FollowTail,
+    Block {
+        block_id: String,
+        block_index: u32,
+        offset_in_block_y10: i32,
+    },
+}
+
 pub(crate) fn codex_item_id(item: &CodexThreadItem) -> &str {
     match item {
         CodexThreadItem::AgentMessage { id, .. } => id,
@@ -366,6 +377,7 @@ pub struct AppState {
     pub last_open_workspace_id: Option<WorkspaceId>,
     pub last_error: Option<String>,
     pub workspace_chat_scroll_y10: HashMap<(WorkspaceId, WorkspaceThreadId), i32>,
+    pub workspace_chat_scroll_anchor: HashMap<(WorkspaceId, WorkspaceThreadId), ChatScrollAnchor>,
     pub workspace_unread_completions: HashSet<WorkspaceId>,
 }
 
@@ -382,6 +394,7 @@ pub struct PersistedAppState {
     pub workspace_archived_tabs: HashMap<u64, Vec<u64>>,
     pub workspace_next_thread_id: HashMap<u64, u64>,
     pub workspace_chat_scroll_y10: HashMap<(u64, u64), i32>,
+    pub workspace_chat_scroll_anchor: HashMap<(u64, u64), ChatScrollAnchor>,
     pub workspace_unread_completions: HashMap<u64, bool>,
 }
 

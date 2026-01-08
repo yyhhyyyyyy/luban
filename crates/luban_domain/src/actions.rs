@@ -1,6 +1,7 @@
 use crate::{
-    CodexThreadEvent, ContextTokenKind, ConversationSnapshot, ConversationThreadMeta,
-    PersistedAppState, ProjectId, ThinkingEffort, WorkspaceId, WorkspaceThreadId,
+    ChatScrollAnchor, CodexThreadEvent, ContextTokenKind, ConversationSnapshot,
+    ConversationThreadMeta, PersistedAppState, ProjectId, ThinkingEffort, WorkspaceId,
+    WorkspaceThreadId,
 };
 use std::path::PathBuf;
 
@@ -194,6 +195,11 @@ pub enum Action {
         workspace_id: WorkspaceId,
         thread_id: WorkspaceThreadId,
         offset_y10: i32,
+    },
+    WorkspaceChatScrollAnchorSaved {
+        workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
+        anchor: ChatScrollAnchor,
     },
 
     SaveAppState,

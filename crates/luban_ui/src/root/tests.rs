@@ -3,8 +3,8 @@ use gpui::{
     Modifiers, MouseButton, MouseDownEvent, ScrollDelta, ScrollWheelEvent, point, px, size,
 };
 use luban_domain::{
-    ConversationEntry, ConversationSnapshot, CreatedWorkspace, PersistedAppState, PullRequestState,
-    WorkspaceConversation, WorkspaceTabs,
+    ChatScrollAnchor, ConversationEntry, ConversationSnapshot, CreatedWorkspace, PersistedAppState,
+    PullRequestState, WorkspaceConversation, WorkspaceTabs,
 };
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -145,6 +145,7 @@ async fn profile_streaming_reasoning_updates(cx: &mut gpui::TestAppContext) {
                 workspace_archived_tabs: HashMap::new(),
                 workspace_next_thread_id: HashMap::new(),
                 workspace_chat_scroll_y10: HashMap::new(),
+                workspace_chat_scroll_anchor: HashMap::new(),
                 workspace_unread_completions: HashMap::new(),
             })
         }
@@ -418,6 +419,7 @@ impl ProjectWorkspaceService for FakeService {
             workspace_archived_tabs: HashMap::new(),
             workspace_next_thread_id: HashMap::new(),
             workspace_chat_scroll_y10: HashMap::new(),
+            workspace_chat_scroll_anchor: HashMap::new(),
             workspace_unread_completions: HashMap::new(),
         })
     }
@@ -3231,6 +3233,140 @@ async fn chat_scroll_position_is_saved_and_restored(cx: &mut gpui::TestAppContex
 }
 
 #[gpui::test]
+async fn chat_scroll_anchor_is_preferred_over_offset_y10(cx: &mut gpui::TestAppContext) {
+    cx.update(gpui_component::init);
+
+    let services: Arc<dyn ProjectWorkspaceService> = Arc::new(FakeService);
+
+    let mut state = AppState::new();
+    state.apply(Action::AddProject {
+        path: PathBuf::from("/tmp/repo"),
+    });
+    let project_id = state.projects[0].id;
+    state.apply(Action::WorkspaceCreated {
+        project_id,
+        workspace_name: "abandon-about".to_owned(),
+        branch_name: "luban/abandon-about".to_owned(),
+        worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/abandon-about"),
+    });
+    let workspace_id = workspace_id_by_name(&state, "abandon-about");
+    state.main_pane = MainPane::Workspace(workspace_id);
+
+    let long_markdownish = std::iter::repeat_n(
+        "- A very long bullet line that should wrap and force the history to overflow and scroll.\n",
+        40,
+    )
+    .collect::<String>();
+
+    let mut entries = Vec::new();
+    for i in 0..24 {
+        entries.push(ConversationEntry::UserMessage {
+            text: format!("message {i} {long_markdownish}"),
+        });
+        entries.push(ConversationEntry::TurnDuration { duration_ms: 1000 });
+    }
+
+    state.apply(Action::ConversationLoaded {
+        workspace_id,
+        thread_id: default_thread_id(),
+        snapshot: ConversationSnapshot {
+            thread_id: Some("thread-1".to_owned()),
+            entries,
+        },
+    });
+
+    let (view, window_cx) =
+        cx.add_window_view(|_, cx| LubanRootView::with_state(services, state, cx));
+    window_cx.simulate_resize(size(px(900.0), px(320.0)));
+    for _ in 0..3 {
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+    }
+
+    let max_y10 = view.read_with(window_cx, |v, _| v.debug_chat_scroll_max_offset_y10());
+    assert!(max_y10 > 0, "expected a scrollable chat history");
+
+    let chat_key = thread_key(workspace_id);
+    window_cx.update(|_, app| {
+        view.update(app, |view, cx| {
+            view.chat_follow_tail.insert(chat_key, false);
+            view.pending_chat_scroll_to_bottom.remove(&chat_key);
+            cx.notify();
+        });
+    });
+
+    let desired_offset_y10 = -((max_y10 / 3).clamp(10, 2000));
+    window_cx.update(|_, app| {
+        view.update(app, |view, cx| {
+            view.chat_scroll_handle
+                .set_offset(point(px(0.0), px(desired_offset_y10 as f32 / 10.0)));
+            cx.notify();
+        });
+    });
+    for _ in 0..3 {
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+    }
+
+    let current_offset_y10 = view.read_with(window_cx, |v, _| v.debug_chat_scroll_offset_y10());
+    assert!(current_offset_y10 < 0, "expected a non-zero scroll offset");
+
+    window_cx.update(|_, app| {
+        view.update(app, |view, cx| {
+            view.dispatch(Action::OpenDashboard, cx);
+        });
+    });
+    window_cx.run_until_parked();
+    window_cx.refresh().unwrap();
+
+    let saved_anchor = view.read_with(window_cx, |v, _| {
+        v.debug_state()
+            .workspace_chat_scroll_anchor
+            .get(&thread_key(workspace_id))
+            .cloned()
+    });
+    assert!(
+        matches!(saved_anchor, Some(ChatScrollAnchor::Block { .. })),
+        "expected a block anchor to be persisted"
+    );
+
+    window_cx.update(|_, app| {
+        view.update(app, |view, cx| {
+            view.dispatch(
+                Action::WorkspaceChatScrollSaved {
+                    workspace_id,
+                    thread_id: default_thread_id(),
+                    offset_y10: 0,
+                },
+                cx,
+            );
+        });
+    });
+    window_cx.run_until_parked();
+
+    window_cx.update(|_, app| {
+        view.update(app, |view, cx| {
+            view.chat_scroll_handle.set_offset(point(px(0.0), px(0.0)));
+            view.dispatch(Action::OpenWorkspace { workspace_id }, cx);
+        });
+    });
+    for _ in 0..4 {
+        window_cx.run_until_parked();
+        window_cx.refresh().unwrap();
+    }
+
+    let restored_offset_y10 = view.read_with(window_cx, |v, _| v.debug_chat_scroll_offset_y10());
+    assert_ne!(
+        restored_offset_y10, 0,
+        "expected anchor restore to ignore a corrupted offset_y10"
+    );
+    assert!(
+        (restored_offset_y10 - current_offset_y10).abs() <= 20,
+        "expected restored offset to be close to the original offset (restored={restored_offset_y10}, original={current_offset_y10})"
+    );
+}
+
+#[gpui::test]
 async fn switching_away_at_bottom_restores_to_bottom(cx: &mut gpui::TestAppContext) {
     cx.update(gpui_component::init);
 
@@ -5983,6 +6119,7 @@ impl ProjectWorkspaceService for FakeGhService {
             workspace_archived_tabs: HashMap::new(),
             workspace_next_thread_id: HashMap::new(),
             workspace_chat_scroll_y10: HashMap::new(),
+            workspace_chat_scroll_anchor: HashMap::new(),
             workspace_unread_completions: HashMap::new(),
         })
     }

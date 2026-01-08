@@ -1,7 +1,7 @@
 use anyhow::{Context as _, anyhow};
 use luban_domain::{
-    ConversationEntry, ConversationSnapshot, ConversationThreadMeta, PersistedAppState,
-    WorkspaceStatus, WorkspaceThreadId,
+    ChatScrollAnchor, ConversationEntry, ConversationSnapshot, ConversationThreadMeta,
+    PersistedAppState, WorkspaceStatus, WorkspaceThreadId,
 };
 use rusqlite::{Connection, OptionalExtension as _, params, params_from_iter};
 use std::collections::HashMap;
@@ -10,6 +10,7 @@ use std::sync::mpsc;
 
 const LATEST_SCHEMA_VERSION: u32 = 7;
 const WORKSPACE_CHAT_SCROLL_PREFIX: &str = "workspace_chat_scroll_y10_";
+const WORKSPACE_CHAT_SCROLL_ANCHOR_PREFIX: &str = "workspace_chat_scroll_anchor_";
 const WORKSPACE_ACTIVE_THREAD_PREFIX: &str = "workspace_active_thread_id_";
 const WORKSPACE_OPEN_TAB_PREFIX: &str = "workspace_open_tab_";
 const WORKSPACE_ARCHIVED_TAB_PREFIX: &str = "workspace_archived_tab_";
@@ -765,6 +766,41 @@ impl SqliteDatabase {
             workspace_chat_scroll_y10.insert((workspace_id, thread_id), offset_y10);
         }
 
+        let mut workspace_chat_scroll_anchor = HashMap::new();
+        let mut stmt = self.conn.prepare(
+            "SELECT key, value FROM app_settings_text WHERE key LIKE 'workspace_chat_scroll_anchor_%'",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (key, value) = row?;
+            let Some(rest) = key.strip_prefix(WORKSPACE_CHAT_SCROLL_ANCHOR_PREFIX) else {
+                continue;
+            };
+            let mut parts = rest.split('_');
+            let Some(workspace_id_str) = parts.next() else {
+                continue;
+            };
+            let Ok(workspace_id) = workspace_id_str.parse::<u64>() else {
+                continue;
+            };
+            let thread_id = match parts.next() {
+                Some(thread_id_str) => match thread_id_str.parse::<u64>() {
+                    Ok(v) => v,
+                    Err(_) => continue,
+                },
+                None => 1,
+            };
+            if parts.next().is_some() {
+                continue;
+            }
+            let Ok(anchor) = serde_json::from_str::<ChatScrollAnchor>(&value) else {
+                continue;
+            };
+            workspace_chat_scroll_anchor.insert((workspace_id, thread_id), anchor);
+        }
+
         let mut workspace_unread_completions = HashMap::new();
         let mut stmt = self.conn.prepare(
             "SELECT key, value FROM app_settings WHERE key LIKE 'workspace_unread_completion_%'",
@@ -798,6 +834,7 @@ impl SqliteDatabase {
             workspace_archived_tabs,
             workspace_next_thread_id,
             workspace_chat_scroll_y10,
+            workspace_chat_scroll_anchor,
             workspace_unread_completions,
         })
     }
@@ -1110,6 +1147,24 @@ impl SqliteDatabase {
                    value = excluded.value,
                    updated_at = excluded.updated_at",
                 params![key, *offset_y10 as i64, now],
+            )?;
+        }
+
+        tx.execute(
+            "DELETE FROM app_settings_text WHERE key LIKE 'workspace_chat_scroll_anchor_%'",
+            [],
+        )?;
+        for ((workspace_id, thread_id), anchor) in &snapshot.workspace_chat_scroll_anchor {
+            let key = format!("{WORKSPACE_CHAT_SCROLL_ANCHOR_PREFIX}{workspace_id}_{thread_id}");
+            let value =
+                serde_json::to_string(anchor).context("failed to serialize chat scroll anchor")?;
+            tx.execute(
+                "INSERT INTO app_settings_text (key, value, created_at, updated_at)
+                 VALUES (?1, ?2, COALESCE((SELECT created_at FROM app_settings_text WHERE key = ?1), ?3), ?3)
+                 ON CONFLICT(key) DO UPDATE SET
+                   value = excluded.value,
+                   updated_at = excluded.updated_at",
+                params![key, value, now],
             )?;
         }
 
@@ -1530,7 +1585,7 @@ fn codex_item_id(item: &luban_domain::CodexThreadItem) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use luban_domain::{CodexThreadItem, PersistedProject, PersistedWorkspace};
+    use luban_domain::{ChatScrollAnchor, CodexThreadItem, PersistedProject, PersistedWorkspace};
 
     fn temp_db_path(test_name: &str) -> PathBuf {
         let mut dir = std::env::temp_dir();
@@ -1591,6 +1646,14 @@ mod tests {
             workspace_archived_tabs: HashMap::from([(10, vec![9, 8])]),
             workspace_next_thread_id: HashMap::from([(10, 4)]),
             workspace_chat_scroll_y10: HashMap::from([((10, 1), -1234)]),
+            workspace_chat_scroll_anchor: HashMap::from([(
+                (10, 1),
+                ChatScrollAnchor::Block {
+                    block_id: "history-block-agent-turn-3".to_owned(),
+                    block_index: 3,
+                    offset_in_block_y10: 420,
+                },
+            )]),
             workspace_unread_completions: HashMap::from([(10, true)]),
         };
 
@@ -1630,6 +1693,7 @@ mod tests {
             workspace_archived_tabs: HashMap::new(),
             workspace_next_thread_id: HashMap::new(),
             workspace_chat_scroll_y10: HashMap::new(),
+            workspace_chat_scroll_anchor: HashMap::new(),
             workspace_unread_completions: HashMap::new(),
         };
         db.save_app_state(&snapshot).unwrap();
@@ -1689,6 +1753,7 @@ mod tests {
             workspace_archived_tabs: HashMap::new(),
             workspace_next_thread_id: HashMap::new(),
             workspace_chat_scroll_y10: HashMap::new(),
+            workspace_chat_scroll_anchor: HashMap::new(),
             workspace_unread_completions: HashMap::new(),
         };
         db.save_app_state(&snapshot).unwrap();
@@ -1781,6 +1846,7 @@ mod tests {
             workspace_archived_tabs: HashMap::new(),
             workspace_next_thread_id: HashMap::new(),
             workspace_chat_scroll_y10: HashMap::new(),
+            workspace_chat_scroll_anchor: HashMap::new(),
             workspace_unread_completions: HashMap::new(),
         };
 
@@ -1829,6 +1895,7 @@ mod tests {
             workspace_archived_tabs: HashMap::new(),
             workspace_next_thread_id: HashMap::new(),
             workspace_chat_scroll_y10: HashMap::new(),
+            workspace_chat_scroll_anchor: HashMap::new(),
             workspace_unread_completions: HashMap::new(),
         };
 
@@ -1877,6 +1944,7 @@ mod tests {
             workspace_archived_tabs: HashMap::new(),
             workspace_next_thread_id: HashMap::new(),
             workspace_chat_scroll_y10: HashMap::new(),
+            workspace_chat_scroll_anchor: HashMap::new(),
             workspace_unread_completions: HashMap::new(),
         };
 
@@ -1910,6 +1978,7 @@ mod tests {
             workspace_archived_tabs: HashMap::new(),
             workspace_next_thread_id: HashMap::new(),
             workspace_chat_scroll_y10: HashMap::new(),
+            workspace_chat_scroll_anchor: HashMap::new(),
             workspace_unread_completions: HashMap::new(),
         };
         db.save_app_state(&empty).unwrap();

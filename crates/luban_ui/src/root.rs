@@ -17,12 +17,12 @@ use gpui_component::{
     text::{TextView, TextViewStyle},
 };
 use luban_domain::{
-    Action, AgentRunConfig, AppState, CodexThreadEvent, CodexThreadItem, DashboardCardModel,
-    DashboardPreviewModel, DashboardStage, Effect, MainPane, OperationStatus, ProjectId,
-    ProjectWorkspaceService, PullRequestInfo, RightPane, RunAgentTurnRequest, ThinkingEffort,
-    WorkspaceId, WorkspaceStatus, WorkspaceThreadId, agent_model_label, agent_models,
-    compose_user_message_text, dashboard_cards, dashboard_preview, default_agent_model_id,
-    default_thinking_effort, draft_text_and_attachments_from_message_text,
+    Action, AgentRunConfig, AppState, ChatScrollAnchor, CodexThreadEvent, CodexThreadItem,
+    DashboardCardModel, DashboardPreviewModel, DashboardStage, Effect, MainPane, OperationStatus,
+    ProjectId, ProjectWorkspaceService, PullRequestInfo, RightPane, RunAgentTurnRequest,
+    ThinkingEffort, WorkspaceId, WorkspaceStatus, WorkspaceThreadId, agent_model_label,
+    agent_models, compose_user_message_text, dashboard_cards, dashboard_preview,
+    default_agent_model_id, default_thinking_effort, draft_text_and_attachments_from_message_text,
     ordered_draft_attachments_for_display, thinking_effort_supported,
 };
 use std::{
@@ -77,6 +77,13 @@ struct PendingChatScrollToBottom {
     last_observed_column_width: Option<Pixels>,
 }
 
+#[derive(Clone, Debug)]
+struct PendingChatScrollRestore {
+    anchor: ChatScrollAnchor,
+    last_observed_column_width: Option<Pixels>,
+    applied_once: bool,
+}
+
 #[cfg(not(test))]
 const SUCCESS_TOAST_DURATION: Duration = Duration::from_secs(2);
 #[cfg(test)]
@@ -127,6 +134,7 @@ pub struct LubanRootView {
     running_turn_user_message_count: HashMap<WorkspaceThreadKey, usize>,
     running_turn_summary_order: HashMap<WorkspaceThreadKey, Vec<String>>,
     pending_chat_scroll_to_bottom: HashMap<WorkspaceThreadKey, PendingChatScrollToBottom>,
+    pending_chat_scroll_restore: HashMap<WorkspaceThreadKey, PendingChatScrollRestore>,
     chat_history_viewport_height: Option<Pixels>,
     chat_history_block_heights: HashMap<WorkspaceThreadKey, HashMap<String, Pixels>>,
     pending_chat_history_block_heights: HashMap<WorkspaceThreadKey, HashMap<String, Pixels>>,
@@ -189,6 +197,7 @@ impl LubanRootView {
             running_turn_user_message_count: HashMap::new(),
             running_turn_summary_order: HashMap::new(),
             pending_chat_scroll_to_bottom: HashMap::new(),
+            pending_chat_scroll_restore: HashMap::new(),
             chat_history_viewport_height: None,
             chat_history_block_heights: HashMap::new(),
             pending_chat_history_block_heights: HashMap::new(),
@@ -262,6 +271,7 @@ impl LubanRootView {
             running_turn_user_message_count: HashMap::new(),
             running_turn_summary_order: HashMap::new(),
             pending_chat_scroll_to_bottom: HashMap::new(),
+            pending_chat_scroll_restore: HashMap::new(),
             chat_history_viewport_height: None,
             chat_history_block_heights: HashMap::new(),
             pending_chat_history_block_heights: HashMap::new(),
@@ -417,6 +427,76 @@ impl LubanRootView {
         cx.notify();
     }
 
+    fn flush_pending_chat_scroll_restore(
+        &mut self,
+        chat_key: WorkspaceThreadKey,
+        cx: &mut Context<Self>,
+    ) {
+        if self.should_chat_follow_tail(chat_key) {
+            self.pending_chat_scroll_restore.remove(&chat_key);
+            return;
+        }
+
+        use std::collections::hash_map::Entry;
+        let Entry::Occupied(mut entry) = self.pending_chat_scroll_restore.entry(chat_key) else {
+            return;
+        };
+
+        let (anchor, width_stable, applied_once) = {
+            let pending = entry.get_mut();
+            let width_stable = match (pending.last_observed_column_width, self.chat_column_width) {
+                (Some(prev), Some(cur)) => (prev - cur).abs() <= px(0.5),
+                _ => false,
+            };
+            pending.last_observed_column_width = self.chat_column_width;
+            (pending.anchor.clone(), width_stable, pending.applied_once)
+        };
+
+        if matches!(anchor, ChatScrollAnchor::FollowTail) {
+            entry.remove();
+            return;
+        }
+
+        let entries: &[luban_domain::ConversationEntry] = self
+            .state
+            .workspace_thread_conversation(chat_key.0, chat_key.1)
+            .map(|c| c.entries.as_slice())
+            .unwrap_or(&[]);
+
+        let mut heights = self
+            .chat_history_block_heights
+            .get(&chat_key)
+            .cloned()
+            .unwrap_or_default();
+        if let Some(pending_updates) = self.pending_chat_history_block_heights.get(&chat_key) {
+            for (id, height) in pending_updates {
+                heights.insert(id.clone(), *height);
+            }
+        }
+
+        let Some(scroll_distance) = scroll_distance_from_top_for_anchor(entries, &heights, &anchor)
+        else {
+            entry.remove();
+            return;
+        };
+
+        let desired_offset = point(px(0.0), -scroll_distance);
+        let desired_offset_y10 = quantize_pixels_y10(desired_offset.y);
+        let current_offset_y10 = quantize_pixels_y10(self.chat_scroll_handle.offset().y);
+        let aligned = (current_offset_y10 - desired_offset_y10).abs() <= 10;
+
+        if aligned && width_stable && applied_once {
+            entry.remove();
+            return;
+        }
+
+        if !aligned || !width_stable || !applied_once {
+            entry.get_mut().applied_once = true;
+            self.chat_scroll_handle.set_offset(desired_offset);
+            cx.notify();
+        }
+    }
+
     fn is_chat_near_bottom(offset_y10: i32, max_y10: i32) -> bool {
         if max_y10 <= 0 {
             return true;
@@ -552,6 +632,34 @@ impl LubanRootView {
                 workspace_id,
                 thread_id,
                 offset_y10: saved_offset_y10,
+            }));
+
+            let entries: &[luban_domain::ConversationEntry] = self
+                .state
+                .workspace_thread_conversation(workspace_id, thread_id)
+                .map(|c| c.entries.as_slice())
+                .unwrap_or(&[]);
+            let chat_key = (workspace_id, thread_id);
+            let mut heights = self
+                .chat_history_block_heights
+                .get(&chat_key)
+                .cloned()
+                .unwrap_or_default();
+            if let Some(pending_updates) = self.pending_chat_history_block_heights.get(&chat_key) {
+                for (id, height) in pending_updates {
+                    heights.insert(id.clone(), *height);
+                }
+            }
+            let anchor = compute_chat_scroll_anchor(
+                entries,
+                &heights,
+                self.chat_scroll_handle.offset().y,
+                self.chat_scroll_handle.max_offset().height,
+            );
+            effects.extend(self.state.apply(Action::WorkspaceChatScrollAnchorSaved {
+                workspace_id,
+                thread_id,
+                anchor,
             }));
         }
         cx.notify();
@@ -1845,22 +1953,62 @@ impl LubanRootView {
 
                 let is_running = run_status == OperationStatus::Running;
                 let chat_target_changed = self.last_chat_workspace_id != Some(chat_key);
+                let saved_anchor = self
+                    .state
+                    .workspace_chat_scroll_anchor
+                    .get(&(workspace_id, thread_id))
+                    .cloned();
                 let saved_offset_y10 = self
                     .state
                     .workspace_chat_scroll_y10
                     .get(&(workspace_id, thread_id))
                     .copied();
-                let saved_is_sentinel =
-                    saved_offset_y10 == Some(CHAT_SCROLL_FOLLOW_TAIL_SENTINEL_Y10);
+                let saved_is_follow_tail =
+                    matches!(saved_anchor, Some(ChatScrollAnchor::FollowTail))
+                        || saved_offset_y10 == Some(CHAT_SCROLL_FOLLOW_TAIL_SENTINEL_Y10);
                 if chat_target_changed {
-                    if saved_is_sentinel {
+                    self.pending_chat_scroll_restore.remove(&chat_key);
+
+                    if saved_is_follow_tail {
                         self.chat_scroll_handle.set_offset(point(px(0.0), px(0.0)));
                         self.chat_follow_tail.insert(chat_key, true);
-                    } else if let Some(saved_offset_y10) = saved_offset_y10 {
-                        self.chat_scroll_handle
-                            .set_offset(point(px(0.0), px(saved_offset_y10 as f32 / 10.0)));
                     } else {
-                        self.chat_scroll_handle.set_offset(point(px(0.0), px(0.0)));
+                        self.chat_follow_tail.insert(chat_key, false);
+
+                        let mut heights = self
+                            .chat_history_block_heights
+                            .get(&chat_key)
+                            .cloned()
+                            .unwrap_or_default();
+                        if let Some(pending_updates) =
+                            self.pending_chat_history_block_heights.get(&chat_key)
+                        {
+                            for (id, height) in pending_updates {
+                                heights.insert(id.clone(), *height);
+                            }
+                        }
+
+                        if let Some(anchor) = saved_anchor.as_ref()
+                            && let Some(scroll_distance) =
+                                scroll_distance_from_top_for_anchor(entries, &heights, anchor)
+                        {
+                            self.chat_scroll_handle
+                                .set_offset(point(px(0.0), -scroll_distance));
+                            self.pending_chat_scroll_restore.insert(
+                                chat_key,
+                                PendingChatScrollRestore {
+                                    anchor: anchor.clone(),
+                                    last_observed_column_width: None,
+                                    applied_once: false,
+                                },
+                            );
+                        } else if let Some(saved_offset_y10) = saved_offset_y10 {
+                            self.chat_scroll_handle
+                                .set_offset(point(px(0.0), px(saved_offset_y10 as f32 / 10.0)));
+                        } else {
+                            self.chat_scroll_handle.set_offset(point(px(0.0), px(0.0)));
+                            self.chat_follow_tail.insert(chat_key, true);
+                        }
                     }
 
                     let saved_draft = conversation.map(|c| c.draft.clone()).unwrap_or_default();
@@ -1895,6 +2043,7 @@ impl LubanRootView {
                 );
                 if !self.should_chat_follow_tail(chat_key) {
                     self.pending_chat_scroll_to_bottom.remove(&chat_key);
+                    self.pending_chat_scroll_restore.remove(&chat_key);
                 }
 
                 let theme = cx.theme();
@@ -2021,11 +2170,13 @@ impl LubanRootView {
                 let history_grew = self.last_chat_workspace_id == Some(chat_key)
                     && entries_len > self.last_chat_item_count;
                 let should_scroll_on_open = self.last_chat_workspace_id != Some(chat_key)
-                    && (saved_is_sentinel
-                        || (agent_turn_count(entries) >= 2 && saved_offset_y10.is_none()));
+                    && (saved_is_follow_tail
+                        || (agent_turn_count(entries) >= 2
+                            && saved_anchor.is_none()
+                            && saved_offset_y10.is_none()));
                 if (history_grew && self.should_chat_follow_tail(chat_key)) || should_scroll_on_open
                 {
-                    let pending_saved_offset_y10 = if history_grew || saved_is_sentinel {
+                    let pending_saved_offset_y10 = if history_grew || saved_is_follow_tail {
                         None
                     } else {
                         saved_offset_y10
@@ -2061,6 +2212,7 @@ impl LubanRootView {
                             let height = bounds.size.height.max(px(0.0));
                             let _ = view_handle.update(app, |view, cx| {
                                 view.chat_history_viewport_height = Some(height);
+                                view.flush_pending_chat_scroll_restore(chat_key, cx);
                                 view.flush_pending_chat_scroll_to_bottom(chat_key, cx);
                             });
                         }
@@ -3492,6 +3644,77 @@ fn select_visible_blocks(
     end = end.max(start + 1);
 
     (start, end)
+}
+
+fn compute_chat_scroll_anchor(
+    entries: &[luban_domain::ConversationEntry],
+    heights: &HashMap<String, Pixels>,
+    offset_y: Pixels,
+    max_offset_height: Pixels,
+) -> ChatScrollAnchor {
+    let offset_y10 = quantize_pixels_y10(offset_y);
+    let max_y10 = quantize_pixels_y10(max_offset_height);
+    if max_y10 > 0 && LubanRootView::is_chat_near_bottom(offset_y10, max_y10) {
+        return ChatScrollAnchor::FollowTail;
+    }
+
+    let blocks = workspace_history_blocks(entries);
+    if blocks.is_empty() {
+        return ChatScrollAnchor::FollowTail;
+    }
+
+    let scroll_offset = (px(0.0) - offset_y).max(px(0.0));
+    let mut total_height = px(0.0);
+    let mut block_starts = Vec::with_capacity(blocks.len());
+    for block in &blocks {
+        block_starts.push(total_height);
+        total_height += block_estimated_height(heights, block);
+    }
+
+    let clamped_offset = scroll_offset.min(total_height.max(px(0.0)));
+    let mut index = block_starts.partition_point(|start| *start <= clamped_offset);
+    index = index.saturating_sub(1).min(blocks.len().saturating_sub(1));
+    let start = block_starts.get(index).copied().unwrap_or(px(0.0));
+    let offset_in_block = (clamped_offset - start).max(px(0.0));
+
+    ChatScrollAnchor::Block {
+        block_id: blocks[index].id.clone(),
+        block_index: index as u32,
+        offset_in_block_y10: quantize_pixels_y10(offset_in_block),
+    }
+}
+
+fn scroll_distance_from_top_for_anchor(
+    entries: &[luban_domain::ConversationEntry],
+    heights: &HashMap<String, Pixels>,
+    anchor: &ChatScrollAnchor,
+) -> Option<Pixels> {
+    let ChatScrollAnchor::Block {
+        block_id,
+        block_index,
+        offset_in_block_y10,
+    } = anchor
+    else {
+        return None;
+    };
+
+    let blocks = workspace_history_blocks(entries);
+    if blocks.is_empty() {
+        return Some(px(0.0));
+    }
+
+    let by_id = blocks.iter().position(|b| b.id == block_id.as_str());
+    let target_index = by_id
+        .unwrap_or(*block_index as usize)
+        .min(blocks.len().saturating_sub(1));
+
+    let mut total = px(0.0);
+    for block in blocks.iter().take(target_index) {
+        total += block_estimated_height(heights, block);
+    }
+
+    let offset_in_block = px(*offset_in_block_y10 as f32 / 10.0).max(px(0.0));
+    Some(total + offset_in_block)
 }
 
 fn render_turn_duration_row_for_agent_turn(

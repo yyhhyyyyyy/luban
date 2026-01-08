@@ -37,6 +37,7 @@ impl AppState {
             last_open_workspace_id: None,
             last_error: None,
             workspace_chat_scroll_y10: HashMap::new(),
+            workspace_chat_scroll_anchor: HashMap::new(),
             workspace_unread_completions: HashSet::new(),
         }
     }
@@ -831,6 +832,22 @@ impl AppState {
                 self.workspace_chat_scroll_y10.insert(key, offset_y10);
                 vec![Effect::SaveAppState]
             }
+            Action::WorkspaceChatScrollAnchorSaved {
+                workspace_id,
+                thread_id,
+                anchor,
+            } => {
+                let key = (workspace_id, thread_id);
+                if self
+                    .workspace_chat_scroll_anchor
+                    .get(&key)
+                    .is_some_and(|existing| existing == &anchor)
+                {
+                    return Vec::new();
+                }
+                self.workspace_chat_scroll_anchor.insert(key, anchor);
+                vec![Effect::SaveAppState]
+            }
             Action::SaveAppState => vec![Effect::SaveAppState],
 
             Action::AppStateLoaded { persisted } => {
@@ -1028,6 +1045,8 @@ impl AppState {
             self.workspace_tabs.remove(workspace_id);
             self.workspace_unread_completions.remove(workspace_id);
             self.workspace_chat_scroll_y10
+                .retain(|(wid, _), _| wid != workspace_id);
+            self.workspace_chat_scroll_anchor
                 .retain(|(wid, _), _| wid != workspace_id);
             self.conversations.retain(|(wid, _), _| wid != workspace_id);
         }
@@ -1277,8 +1296,8 @@ fn start_next_queued_prompt(
 mod tests {
     use super::*;
     use crate::{
-        CodexCommandExecutionStatus, CodexThreadError, CodexThreadItem, CodexUsage,
-        ContextTokenKind, ConversationSnapshot,
+        ChatScrollAnchor, CodexCommandExecutionStatus, CodexThreadError, CodexThreadItem,
+        CodexUsage, ContextTokenKind, ConversationSnapshot,
     };
 
     fn default_thread_id() -> WorkspaceThreadId {
@@ -1636,6 +1655,7 @@ mod tests {
                 workspace_archived_tabs: HashMap::new(),
                 workspace_next_thread_id: HashMap::new(),
                 workspace_chat_scroll_y10: HashMap::new(),
+                workspace_chat_scroll_anchor: HashMap::new(),
                 workspace_unread_completions: HashMap::new(),
             },
         });
@@ -1667,6 +1687,7 @@ mod tests {
                 workspace_archived_tabs: HashMap::new(),
                 workspace_next_thread_id: HashMap::new(),
                 workspace_chat_scroll_y10: HashMap::new(),
+                workspace_chat_scroll_anchor: HashMap::new(),
                 workspace_unread_completions: HashMap::new(),
             },
         });
@@ -1708,6 +1729,53 @@ mod tests {
                 .get(&(workspace_id, thread_id))
                 .copied(),
             Some(-1234)
+        );
+    }
+
+    #[test]
+    fn workspace_chat_scroll_anchor_is_persisted() {
+        let mut state = AppState::new();
+        let workspace_id = WorkspaceId(42);
+        let thread_id = default_thread_id();
+
+        let anchor = ChatScrollAnchor::Block {
+            block_id: "history-block-agent-turn-3".to_owned(),
+            block_index: 3,
+            offset_in_block_y10: 420,
+        };
+
+        let effects = state.apply(Action::WorkspaceChatScrollAnchorSaved {
+            workspace_id,
+            thread_id,
+            anchor: anchor.clone(),
+        });
+        assert_eq!(
+            state
+                .workspace_chat_scroll_anchor
+                .get(&(workspace_id, thread_id))
+                .cloned(),
+            Some(anchor.clone())
+        );
+        assert_eq!(effects.len(), 1);
+        assert!(matches!(effects[0], Effect::SaveAppState));
+
+        let persisted = state.to_persisted();
+        assert_eq!(
+            persisted
+                .workspace_chat_scroll_anchor
+                .get(&(42, 1))
+                .cloned(),
+            Some(anchor.clone())
+        );
+
+        let mut loaded = AppState::new();
+        loaded.apply(Action::AppStateLoaded { persisted });
+        assert_eq!(
+            loaded
+                .workspace_chat_scroll_anchor
+                .get(&(workspace_id, thread_id))
+                .cloned(),
+            Some(anchor)
         );
     }
 
