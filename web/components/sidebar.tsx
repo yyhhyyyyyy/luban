@@ -24,6 +24,7 @@ import { cn } from "@/lib/utils"
 import { useLuban } from "@/lib/luban-context"
 import type { OperationStatus } from "@/lib/luban-api"
 import { useEffect, useRef, useState } from "react"
+import { AddProjectModal } from "./add-project-modal"
 
 type WorktreeStatus =
   | "idle" // Waiting for user input
@@ -181,6 +182,7 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
     app,
     activeWorkspaceId,
     pickProjectPath,
+    addProject,
     createWorkspace,
     openWorkspacePullRequest,
     openWorkspacePullRequestFailedAction,
@@ -192,6 +194,7 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
   const pendingCreateRef = useRef<{ projectId: number; existingWorkspaceIds: Set<number> } | null>(null)
   const [optimisticCreatingProjectId, setOptimisticCreatingProjectId] = useState<number | null>(null)
   const [newlyCreatedWorkspaceId, setNewlyCreatedWorkspaceId] = useState<number | null>(null)
+  const [addProjectOpen, setAddProjectOpen] = useState(false)
 
   useEffect(() => {
     if (!app) return
@@ -284,7 +287,7 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
         </button>
         <button
           className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-sidebar-accent rounded transition-colors"
-          onClick={pickProjectPath}
+          onClick={() => setAddProjectOpen(true)}
         >
           <Plus className="w-4 h-4" />
         </button>
@@ -436,6 +439,13 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
           Settings
         </button>
       </div>
+
+      <AddProjectModal
+        open={addProjectOpen}
+        onOpenChange={setAddProjectOpen}
+        onPickProjectPath={pickProjectPath}
+        onAddProjectPath={addProject}
+      />
     </aside>
   )
 }
