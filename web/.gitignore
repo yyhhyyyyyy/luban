@@ -1,5 +1,8 @@
 .next/
 out/
+!out/
+out/*
+!out/.gitkeep
 dist/
 
 public/ghostty-vt.wasm
