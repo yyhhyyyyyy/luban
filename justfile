@@ -23,6 +23,8 @@ web cmd profile="debug":
           cp web/node_modules/ghostty-web/ghostty-vt.wasm web/public/ghostty-vt.wasm; \
         fi; \
         (cd web && pnpm build); \
+        mkdir -p web/out; \
+        printf '\n' > web/out/.gitkeep; \
       fi; \
     elif command -v npm >/dev/null 2>&1; then \
       if [ -d web ]; then \
@@ -34,6 +36,8 @@ web cmd profile="debug":
           cp web/node_modules/ghostty-web/ghostty-vt.wasm web/public/ghostty-vt.wasm; \
         fi; \
         (cd web && npm run build); \
+        mkdir -p web/out; \
+        printf '\n' > web/out/.gitkeep; \
       fi; \
     else \
       echo "pnpm/npm not found; skipping web build"; \
