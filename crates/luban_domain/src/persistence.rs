@@ -318,6 +318,10 @@ fn load_projects(projects: Vec<PersistedProject>) -> (Vec<Project>, bool) {
             canonical.workspaces.extend(other.workspaces);
         }
 
+        if dedupe_worktree_paths(&mut canonical.workspaces) {
+            upgraded = true;
+        }
+
         if dedupe_workspace_names(&mut canonical.workspaces) {
             upgraded = true;
         }
@@ -354,6 +358,54 @@ fn dedupe_workspace_names(workspaces: &mut [Workspace]) -> bool {
     upgraded
 }
 
+fn dedupe_worktree_paths(workspaces: &mut Vec<Workspace>) -> bool {
+    use std::collections::HashMap;
+
+    if workspaces.len() <= 1 {
+        return false;
+    }
+
+    let mut upgraded = false;
+    let mut grouped: HashMap<PathBuf, Vec<Workspace>> = HashMap::new();
+
+    for workspace in workspaces.drain(..) {
+        grouped
+            .entry(workspace.worktree_path.clone())
+            .or_default()
+            .push(workspace);
+    }
+
+    let mut merged = Vec::new();
+    for (_path, mut group) in grouped {
+        group.sort_by_key(|w| {
+            let is_main = w.workspace_name == "main";
+            let is_active = w.status == WorkspaceStatus::Active;
+            (
+                std::cmp::Reverse(is_main),
+                std::cmp::Reverse(is_active),
+                w.id.0,
+            )
+        });
+
+        let mut canonical = group.remove(0);
+        for other in group {
+            upgraded = true;
+            canonical.last_activity_at = match (canonical.last_activity_at, other.last_activity_at)
+            {
+                (Some(a), Some(b)) => Some(std::cmp::max(a, b)),
+                (Some(a), None) => Some(a),
+                (None, Some(b)) => Some(b),
+                (None, None) => None,
+            };
+        }
+        merged.push(canonical);
+    }
+
+    merged.sort_by_key(|w| w.id.0);
+    *workspaces = merged;
+    upgraded
+}
+
 fn normalize_project_path(path: &std::path::Path) -> PathBuf {
     use std::path::Component;
 
@@ -371,4 +423,90 @@ fn normalize_project_path(path: &std::path::Path) -> PathBuf {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{PersistedProject, PersistedWorkspace};
+
+    #[test]
+    fn load_projects_dedupes_duplicate_worktree_paths() {
+        let path = PathBuf::from("/tmp/repo");
+        let projects = vec![
+            PersistedProject {
+                id: 1,
+                name: "Repo".to_owned(),
+                path: path.clone(),
+                slug: "repo-1".to_owned(),
+                expanded: false,
+                workspaces: vec![PersistedWorkspace {
+                    id: 10,
+                    workspace_name: "main".to_owned(),
+                    branch_name: "main".to_owned(),
+                    worktree_path: path.clone(),
+                    status: WorkspaceStatus::Active,
+                    last_activity_at_unix_seconds: None,
+                }],
+            },
+            PersistedProject {
+                id: 2,
+                name: "Repo".to_owned(),
+                path: path.clone(),
+                slug: "repo-2".to_owned(),
+                expanded: true,
+                workspaces: vec![PersistedWorkspace {
+                    id: 11,
+                    workspace_name: "main".to_owned(),
+                    branch_name: "main".to_owned(),
+                    worktree_path: path.clone(),
+                    status: WorkspaceStatus::Active,
+                    last_activity_at_unix_seconds: None,
+                }],
+            },
+        ];
+
+        let (loaded, upgraded) = load_projects(projects);
+        assert!(upgraded, "expected a persistence upgrade");
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].workspaces.len(), 1);
+        assert_eq!(loaded[0].workspaces[0].workspace_name, "main");
+        assert_eq!(loaded[0].workspaces[0].worktree_path, path);
+    }
+
+    #[test]
+    fn load_projects_prefers_main_name_for_duplicate_worktree_paths() {
+        let path = PathBuf::from("/tmp/repo");
+        let projects = vec![PersistedProject {
+            id: 1,
+            name: "Repo".to_owned(),
+            path: path.clone(),
+            slug: "repo".to_owned(),
+            expanded: false,
+            workspaces: vec![
+                PersistedWorkspace {
+                    id: 10,
+                    workspace_name: "main-2".to_owned(),
+                    branch_name: "main".to_owned(),
+                    worktree_path: path.clone(),
+                    status: WorkspaceStatus::Active,
+                    last_activity_at_unix_seconds: None,
+                },
+                PersistedWorkspace {
+                    id: 11,
+                    workspace_name: "main".to_owned(),
+                    branch_name: "main".to_owned(),
+                    worktree_path: path.clone(),
+                    status: WorkspaceStatus::Active,
+                    last_activity_at_unix_seconds: None,
+                },
+            ],
+        }];
+
+        let (loaded, upgraded) = load_projects(projects);
+        assert!(upgraded, "expected a persistence upgrade");
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].workspaces.len(), 1);
+        assert_eq!(loaded[0].workspaces[0].workspace_name, "main");
+    }
 }
