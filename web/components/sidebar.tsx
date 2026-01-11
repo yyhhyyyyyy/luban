@@ -8,8 +8,9 @@ import {
   GitBranch,
   Plus,
   Settings,
-  Sparkles,
   LayoutGrid,
+  CirclePlus,
+  Layers,
   Archive,
   Loader2,
   MessageCircle,
@@ -273,21 +274,15 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
           onClick={() => onViewModeChange(viewMode === "workspace" ? "kanban" : "workspace")}
           className="flex items-center gap-2 hover:bg-sidebar-accent px-1.5 py-1 rounded transition-colors"
         >
-          <div className="flex items-center justify-center w-6 h-6 rounded bg-primary/15">
+          <div className="flex items-center justify-center w-6 h-6 rounded bg-secondary">
             {viewMode === "workspace" ? (
-              <Sparkles className="w-3.5 h-3.5 text-primary" />
+              <Layers className="w-3.5 h-3.5 text-foreground" />
             ) : (
-              <LayoutGrid className="w-3.5 h-3.5 text-primary" />
+              <LayoutGrid className="w-3.5 h-3.5 text-foreground" />
             )}
           </div>
           <span className="text-sm font-medium">{viewMode === "workspace" ? "Workspace" : "Kanban"}</span>
           <ChevronDown className="w-3 h-3 text-muted-foreground" />
-        </button>
-        <button
-          className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-sidebar-accent rounded transition-colors"
-          onClick={() => setAddProjectOpen(true)}
-        >
-          <Plus className="w-4 h-4" />
         </button>
       </div>
 
@@ -431,10 +426,16 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
       </div>
 
       {/* Bottom Actions */}
-      <div className="border-t border-border p-2">
-        <button className="w-full flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-sidebar-accent rounded transition-colors">
+      <div className="border-t border-border p-2 flex items-center gap-2">
+        <button
+          onClick={() => setAddProjectOpen(true)}
+          className="flex-1 flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-sidebar-accent rounded transition-colors"
+        >
+          <CirclePlus className="w-4 h-4 text-primary" />
+          New
+        </button>
+        <button className="p-2 text-muted-foreground hover:text-foreground hover:bg-sidebar-accent rounded transition-colors">
           <Settings className="w-4 h-4" />
-          Settings
         </button>
       </div>
 

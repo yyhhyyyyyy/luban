@@ -4,7 +4,7 @@ import type React from "react"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
-import { FileText, FolderOpen, GitBranch, GitPullRequest, CircleDot, Link2, Loader2, Sparkles, Play } from "lucide-react"
+import { FileText, FolderOpen, GitBranch, GitPullRequest, CircleDot, Link2, Loader2, CirclePlus, Play } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
@@ -259,8 +259,8 @@ export function AddProjectModal({ open, onOpenChange }: AddProjectModalProps) {
       <DialogContent className="sm:max-w-[520px] p-0 gap-0 bg-background border-border overflow-hidden">
         <div className="px-5 py-4 border-b border-border">
           <h2 className="text-base font-medium flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-primary" />
-            Create Task
+            <CirclePlus className="w-4 h-4 text-primary" />
+            New
           </h2>
         </div>
 
