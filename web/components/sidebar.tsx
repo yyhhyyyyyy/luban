@@ -9,7 +9,7 @@ import {
   Plus,
   Settings,
   LayoutGrid,
-  CirclePlus,
+  Sparkles,
   Layers,
   Archive,
   Loader2,
@@ -25,7 +25,8 @@ import { cn } from "@/lib/utils"
 import { useLuban } from "@/lib/luban-context"
 import type { OperationStatus } from "@/lib/luban-api"
 import { useEffect, useRef, useState } from "react"
-import { AddProjectModal } from "./add-project-modal"
+import { toast } from "sonner"
+import { NewTaskModal } from "./new-task-modal"
 
 type WorktreeStatus =
   | "idle" // Waiting for user input
@@ -188,12 +189,14 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
     archiveWorkspace,
     toggleProjectExpanded,
     openWorkspace,
+    addProject,
+    pickProjectPath,
   } = useLuban()
 
   const pendingCreateRef = useRef<{ projectId: number; existingWorkspaceIds: Set<number> } | null>(null)
   const [optimisticCreatingProjectId, setOptimisticCreatingProjectId] = useState<number | null>(null)
   const [newlyCreatedWorkspaceId, setNewlyCreatedWorkspaceId] = useState<number | null>(null)
-  const [addProjectOpen, setAddProjectOpen] = useState(false)
+  const [newTaskOpen, setNewTaskOpen] = useState(false)
 
   useEffect(() => {
     if (!app) return
@@ -262,6 +265,16 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
 
   const getActiveWorktreeCount = (worktrees: Worktree[]) => {
     return worktrees.filter((w) => w.status !== "idle").length
+  }
+
+  const handleAddProjectClick = async () => {
+    try {
+      const picked = await pickProjectPath()
+      if (!picked) return
+      addProject(picked)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    }
   }
 
   return (
@@ -423,26 +436,31 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
 	            </div>
 	          )
 	        })}
+
+        <button
+          onClick={() => void handleAddProjectClick()}
+          className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-muted-foreground/60 hover:text-muted-foreground hover:bg-sidebar-accent/50 transition-colors"
+        >
+          <Plus className="w-3 h-3 flex-shrink-0" />
+          <span className="text-[13px]">Add project</span>
+        </button>
       </div>
 
       {/* Bottom Actions */}
       <div className="border-t border-border p-2 flex items-center gap-2">
         <button
-          onClick={() => setAddProjectOpen(true)}
+          onClick={() => setNewTaskOpen(true)}
           className="flex-1 flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-sidebar-accent rounded transition-colors"
         >
-          <CirclePlus className="w-4 h-4 text-primary" />
-          New
+          <Sparkles className="w-4 h-4 text-primary" />
+          New Task
         </button>
         <button className="p-2 text-muted-foreground hover:text-foreground hover:bg-sidebar-accent rounded transition-colors">
           <Settings className="w-4 h-4" />
         </button>
       </div>
 
-      <AddProjectModal
-        open={addProjectOpen}
-        onOpenChange={setAddProjectOpen}
-      />
+      <NewTaskModal open={newTaskOpen} onOpenChange={setNewTaskOpen} />
     </aside>
   )
 }
