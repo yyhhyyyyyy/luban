@@ -112,6 +112,12 @@ pub struct TaskDraft {
     pub pull_request: Option<TaskPullRequestInfo>,
 }
 
+#[derive(Clone, Debug)]
+pub struct ProjectIdentity {
+    pub root_path: PathBuf,
+    pub github_repo: Option<String>,
+}
+
 pub trait ProjectWorkspaceService: Send + Sync {
     fn load_app_state(&self) -> Result<PersistedAppState, String>;
 
@@ -194,4 +200,11 @@ pub trait ProjectWorkspaceService: Send + Sync {
     fn task_preview(&self, input: String) -> Result<TaskDraft, String>;
 
     fn task_prepare_project(&self, spec: TaskProjectSpec) -> Result<PathBuf, String>;
+
+    fn project_identity(&self, path: PathBuf) -> Result<ProjectIdentity, String> {
+        Ok(ProjectIdentity {
+            root_path: path,
+            github_repo: None,
+        })
+    }
 }

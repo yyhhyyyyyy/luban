@@ -298,6 +298,61 @@ impl Engine {
                     return;
                 }
 
+                if let luban_api::ClientAction::AddProject { path } = &action {
+                    enum AddProjectDecision {
+                        ReuseExisting,
+                        Add { root_path: PathBuf },
+                    }
+
+                    let services = self.services.clone();
+                    let requested_path = expand_user_path(path);
+                    let existing_paths = self
+                        .state
+                        .projects
+                        .iter()
+                        .map(|p| p.path.clone())
+                        .collect::<Vec<_>>();
+
+                    let decision = tokio::task::spawn_blocking(move || {
+                        let requested = services.project_identity(requested_path)?;
+                        if let Some(github_repo) = requested.github_repo.as_deref() {
+                            for existing_path in existing_paths {
+                                let existing = match services.project_identity(existing_path) {
+                                    Ok(v) => v,
+                                    Err(_) => continue,
+                                };
+                                if existing.github_repo.as_deref() == Some(github_repo) {
+                                    return Ok(AddProjectDecision::ReuseExisting);
+                                }
+                            }
+                        }
+
+                        Ok::<AddProjectDecision, String>(AddProjectDecision::Add {
+                            root_path: requested.root_path,
+                        })
+                    })
+                    .await
+                    .ok()
+                    .unwrap_or_else(|| Err("failed to join project identity task".to_owned()));
+
+                    match decision {
+                        Ok(AddProjectDecision::ReuseExisting) => {
+                            let _ = reply.send(Ok(self.rev));
+                            return;
+                        }
+                        Ok(AddProjectDecision::Add { root_path }) => {
+                            self.process_action_queue(Action::AddProject { path: root_path })
+                                .await;
+                            let _ = reply.send(Ok(self.rev));
+                            return;
+                        }
+                        Err(message) => {
+                            let _ = reply.send(Err(message));
+                            return;
+                        }
+                    }
+                }
+
                 if let luban_api::ClientAction::TaskPreview { input } = &action {
                     let services = self.services.clone();
                     let events = self.events.clone();
@@ -340,7 +395,7 @@ impl Engine {
                     let draft = draft.clone();
                     let mode = *mode;
 
-                    let local_project_path = match draft.project {
+                    let mut local_project_path = match draft.project {
                         luban_api::TaskProjectSpec::Unspecified => {
                             let _ = reply.send(Err(
                                 "project is unspecified: provide a local path or a GitHub repo"
@@ -401,10 +456,43 @@ impl Engine {
                         .flat_map(|p| p.workspaces.iter().map(|w| w.id))
                         .collect::<HashSet<_>>();
 
-                    self.process_action_queue(Action::AddProject {
-                        path: local_project_path.clone(),
+                    let existing_paths = self
+                        .state
+                        .projects
+                        .iter()
+                        .map(|p| p.path.clone())
+                        .collect::<Vec<_>>();
+                    let services = self.services.clone();
+                    let candidate = local_project_path.clone();
+                    let reuse_path = tokio::task::spawn_blocking(move || {
+                        let identity = services.project_identity(candidate)?;
+                        let Some(github_repo) = identity.github_repo.as_deref() else {
+                            return Ok::<Option<PathBuf>, String>(None);
+                        };
+
+                        for existing_path in existing_paths {
+                            let existing = match services.project_identity(existing_path) {
+                                Ok(v) => v,
+                                Err(_) => continue,
+                            };
+                            if existing.github_repo.as_deref() == Some(github_repo) {
+                                return Ok(Some(existing.root_path));
+                            }
+                        }
+                        Ok(None)
                     })
-                    .await;
+                    .await
+                    .ok()
+                    .unwrap_or_else(|| Err("failed to join project identity task".to_owned()));
+
+                    if let Ok(Some(path)) = reuse_path {
+                        local_project_path = path;
+                    } else {
+                        self.process_action_queue(Action::AddProject {
+                            path: local_project_path.clone(),
+                        })
+                        .await;
+                    }
 
                     let Some(project_id) =
                         find_project_id_by_path(&self.state, &local_project_path)
@@ -1558,6 +1646,7 @@ mod tests {
         CodexThreadEvent, ContextImage, ConversationSnapshot as DomainConversationSnapshot,
         ConversationThreadMeta, PersistedAppState,
     };
+    use std::collections::HashMap;
     use std::sync::atomic::AtomicBool;
 
     struct TestServices;
@@ -1688,6 +1777,155 @@ mod tests {
         }
     }
 
+    struct IdentityServices;
+
+    impl ProjectWorkspaceService for IdentityServices {
+        fn load_app_state(&self) -> Result<PersistedAppState, String> {
+            Ok(PersistedAppState {
+                projects: Vec::new(),
+                sidebar_width: None,
+                terminal_pane_width: None,
+                agent_default_model_id: None,
+                agent_default_thinking_effort: None,
+                last_open_workspace_id: None,
+                workspace_active_thread_id: HashMap::new(),
+                workspace_open_tabs: HashMap::new(),
+                workspace_archived_tabs: HashMap::new(),
+                workspace_next_thread_id: HashMap::new(),
+                workspace_chat_scroll_y10: HashMap::new(),
+                workspace_chat_scroll_anchor: HashMap::new(),
+                workspace_unread_completions: HashMap::new(),
+            })
+        }
+
+        fn save_app_state(&self, _snapshot: PersistedAppState) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn create_workspace(
+            &self,
+            _project_path: PathBuf,
+            _project_slug: String,
+        ) -> Result<luban_domain::CreatedWorkspace, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn open_workspace_in_ide(&self, _worktree_path: PathBuf) -> Result<(), String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn archive_workspace(
+            &self,
+            _project_path: PathBuf,
+            _worktree_path: PathBuf,
+        ) -> Result<(), String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn ensure_conversation(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+            _thread_id: u64,
+        ) -> Result<(), String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn list_conversation_threads(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+        ) -> Result<Vec<ConversationThreadMeta>, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn load_conversation(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+            _thread_id: u64,
+        ) -> Result<DomainConversationSnapshot, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn store_context_image(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+            _image: ContextImage,
+        ) -> Result<AttachmentRef, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn store_context_text(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+            _text: String,
+            _extension: String,
+        ) -> Result<AttachmentRef, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn store_context_file(
+            &self,
+            _project_slug: String,
+            _workspace_name: String,
+            _source_path: PathBuf,
+        ) -> Result<AttachmentRef, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn run_agent_turn_streamed(
+            &self,
+            _request: luban_domain::RunAgentTurnRequest,
+            _cancel: Arc<AtomicBool>,
+            _on_event: Arc<dyn Fn(CodexThreadEvent) + Send + Sync>,
+        ) -> Result<(), String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn gh_is_authorized(&self) -> Result<bool, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn gh_pull_request_info(
+            &self,
+            _worktree_path: PathBuf,
+        ) -> Result<Option<PullRequestInfo>, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn gh_open_pull_request(&self, _worktree_path: PathBuf) -> Result<(), String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn gh_open_pull_request_failed_action(
+            &self,
+            _worktree_path: PathBuf,
+        ) -> Result<(), String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn task_preview(&self, _input: String) -> Result<luban_domain::TaskDraft, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn task_prepare_project(
+            &self,
+            _spec: luban_domain::TaskProjectSpec,
+        ) -> Result<PathBuf, String> {
+            Err("unimplemented".to_owned())
+        }
+
+        fn project_identity(&self, path: PathBuf) -> Result<luban_domain::ProjectIdentity, String> {
+            Ok(luban_domain::ProjectIdentity {
+                root_path: path,
+                github_repo: Some("github.com/example/repo".to_owned()),
+            })
+        }
+    }
+
     #[test]
     fn app_snapshot_includes_pull_request_info() {
         let mut state = AppState::new();
@@ -1736,5 +1974,32 @@ mod tests {
                 merge_ready: false,
             })
         );
+    }
+
+    #[tokio::test]
+    async fn add_project_reuses_existing_by_github_repo() {
+        let (engine, _events) = Engine::start(Arc::new(IdentityServices));
+        engine
+            .apply_client_action(
+                "req-1".to_owned(),
+                luban_api::ClientAction::AddProject {
+                    path: "/tmp/repo-a".to_owned(),
+                },
+            )
+            .await
+            .expect("add first project should succeed");
+        engine
+            .apply_client_action(
+                "req-2".to_owned(),
+                luban_api::ClientAction::AddProject {
+                    path: "/tmp/repo-b".to_owned(),
+                },
+            )
+            .await
+            .expect("add second project should be reused");
+
+        let snapshot = engine.app_snapshot().await.expect("snapshot should work");
+        assert_eq!(snapshot.projects.len(), 1);
+        assert_eq!(snapshot.projects[0].path, "/tmp/repo-a");
     }
 }

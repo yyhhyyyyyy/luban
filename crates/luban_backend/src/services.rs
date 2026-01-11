@@ -982,6 +982,33 @@ impl ProjectWorkspaceService for GitWorkspaceService {
     fn task_prepare_project(&self, spec: luban_domain::TaskProjectSpec) -> Result<PathBuf, String> {
         task::task_prepare_project(self, spec).map_err(|e| format!("{e:#}"))
     }
+
+    fn project_identity(&self, path: PathBuf) -> Result<luban_domain::ProjectIdentity, String> {
+        let result: anyhow::Result<luban_domain::ProjectIdentity> = (|| {
+            if !path.exists() {
+                return Ok(luban_domain::ProjectIdentity {
+                    root_path: path,
+                    github_repo: None,
+                });
+            }
+
+            let root = self.repo_root(&path).unwrap_or(path);
+            let remote = self.select_remote_best_effort(&root).unwrap_or(None);
+            let github_repo = if let Some(remote) = remote {
+                let url = self.run_git(&root, ["remote", "get-url", &remote]).ok();
+                url.and_then(|u| Self::github_repo_id_from_remote_url(&u))
+            } else {
+                None
+            };
+
+            Ok(luban_domain::ProjectIdentity {
+                root_path: root,
+                github_repo,
+            })
+        })();
+
+        result.map_err(|e| format!("{e:#}"))
+    }
 }
 
 impl GitWorkspaceService {
