@@ -63,6 +63,7 @@ type LubanContextValue = {
   createThread: () => void
 
   sendAgentMessage: (text: string) => void
+  sendAgentMessageTo: (workspaceId: WorkspaceId, threadId: number, text: string) => void
   cancelAgentTurn: () => void
 }
 
@@ -455,6 +456,16 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     })
   }
 
+  function sendAgentMessageTo(workspaceId: WorkspaceId, threadId: number, text: string) {
+    sendAction({
+      type: "send_agent_message",
+      workspace_id: workspaceId,
+      thread_id: threadId,
+      text,
+      attachments: [],
+    })
+  }
+
   function cancelAgentTurn() {
     const wid = activeWorkspaceIdRef.current
     const tid = activeThreadIdRef.current
@@ -483,6 +494,7 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     selectThread,
     createThread,
     sendAgentMessage,
+    sendAgentMessageTo,
     cancelAgentTurn,
   }
 

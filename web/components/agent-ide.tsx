@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { Sidebar } from "./sidebar"
 import { ChatPanel } from "./chat-panel"
 import { RightSidebar } from "./right-sidebar"
+import { KanbanBoard } from "./kanban-board"
 
 const RIGHT_SIDEBAR_OPEN_KEY = "luban:ui:right_sidebar_open"
 const VIEW_MODE_KEY = "luban:ui:view_mode"
@@ -90,47 +91,21 @@ export function AgentIDE() {
   return (
     <div className="flex flex-col h-screen bg-background text-foreground overflow-hidden">
       <div className="relative flex flex-1 overflow-hidden">
-        {/* Left Sidebar */}
-        <Sidebar viewMode={viewMode} onViewModeChange={setViewMode} widthPx={sidebarWidthPx} />
-
-        {/* Use a zero-width wrapper so borders remain continuous across panes. */}
-        <div className="relative w-0 flex-shrink-0">
-          <div
-            data-testid="sidebar-resizer"
-            className="absolute -left-1 top-0 h-full w-2 bg-transparent hover:bg-border/60 active:bg-border cursor-col-resize"
-            title="Resize sidebar"
-            onPointerDown={(e) => {
-              if (e.button !== 0) return
-              e.preventDefault()
-              startResize({
-                edge: "left",
-                pointerDownClientX: e.clientX,
-                initialSidebarWidthPx: sidebarWidthPx,
-                initialRightSidebarWidthPx: rightSidebarWidthPx,
-              })
-            }}
-          />
-        </div>
-
-        {/* Middle - Chat Panel */}
-        <div className="flex-1 min-w-0 flex">
-          <ChatPanel />
-        </div>
-
-        {/* Right Sidebar - collapsed state renders as absolute button */}
-        {rightSidebarOpen ? (
+        {viewMode === "workspace" ? (
           <>
+            <Sidebar viewMode={viewMode} onViewModeChange={setViewMode} widthPx={sidebarWidthPx} />
+
             {/* Use a zero-width wrapper so borders remain continuous across panes. */}
             <div className="relative w-0 flex-shrink-0">
               <div
-                data-testid="terminal-resizer"
+                data-testid="sidebar-resizer"
                 className="absolute -left-1 top-0 h-full w-2 bg-transparent hover:bg-border/60 active:bg-border cursor-col-resize"
-                title="Resize terminal"
+                title="Resize sidebar"
                 onPointerDown={(e) => {
                   if (e.button !== 0) return
                   e.preventDefault()
                   startResize({
-                    edge: "right",
+                    edge: "left",
                     pointerDownClientX: e.clientX,
                     initialSidebarWidthPx: sidebarWidthPx,
                     initialRightSidebarWidthPx: rightSidebarWidthPx,
@@ -138,18 +113,46 @@ export function AgentIDE() {
                 }}
               />
             </div>
-            <RightSidebar
-              isOpen={rightSidebarOpen}
-              onToggle={() => setRightSidebarOpen(!rightSidebarOpen)}
-              widthPx={rightSidebarWidthPx}
-            />
+
+            <div className="flex-1 min-w-0 flex">
+              <ChatPanel />
+            </div>
+
+            {rightSidebarOpen ? (
+              <>
+                <div className="relative w-0 flex-shrink-0">
+                  <div
+                    data-testid="terminal-resizer"
+                    className="absolute -left-1 top-0 h-full w-2 bg-transparent hover:bg-border/60 active:bg-border cursor-col-resize"
+                    title="Resize terminal"
+                    onPointerDown={(e) => {
+                      if (e.button !== 0) return
+                      e.preventDefault()
+                      startResize({
+                        edge: "right",
+                        pointerDownClientX: e.clientX,
+                        initialSidebarWidthPx: sidebarWidthPx,
+                        initialRightSidebarWidthPx: rightSidebarWidthPx,
+                      })
+                    }}
+                  />
+                </div>
+                <RightSidebar
+                  isOpen={rightSidebarOpen}
+                  onToggle={() => setRightSidebarOpen(!rightSidebarOpen)}
+                  widthPx={rightSidebarWidthPx}
+                />
+              </>
+            ) : (
+              <RightSidebar
+                isOpen={rightSidebarOpen}
+                onToggle={() => setRightSidebarOpen(!rightSidebarOpen)}
+                widthPx={rightSidebarWidthPx}
+              />
+            )}
           </>
         ) : (
-          <RightSidebar
-            isOpen={rightSidebarOpen}
-            onToggle={() => setRightSidebarOpen(!rightSidebarOpen)}
-            widthPx={rightSidebarWidthPx}
-          />
+          <KanbanBoard onViewModeChange={setViewMode} />
         )}
       </div>
     </div>
