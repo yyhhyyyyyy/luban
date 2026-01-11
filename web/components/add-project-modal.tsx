@@ -4,7 +4,24 @@ import type React from "react"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
-import { FileText, FolderOpen, GitBranch, GitPullRequest, CircleDot, Link2, Loader2, CirclePlus, Play } from "lucide-react"
+import {
+  FileText,
+  FolderOpen,
+  GitBranch,
+  GitPullRequest,
+  CircleDot,
+  Link2,
+  Loader2,
+  CirclePlus,
+  Play,
+  ChevronRight,
+  Bug,
+  Lightbulb,
+  GitMerge,
+  MessageSquare,
+  Plus,
+  X,
+} from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
@@ -133,6 +150,7 @@ export function AddProjectModal({ open, onOpenChange }: AddProjectModalProps) {
   const [isDragging, setIsDragging] = useState(false)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [draft, setDraft] = useState<TaskDraft | null>(null)
+  const [promptExpanded, setPromptExpanded] = useState(false)
   const [analysisError, setAnalysisError] = useState<string | null>(null)
   const [executingMode, setExecutingMode] = useState<TaskExecuteMode | null>(null)
   const seqRef = useRef(0)
@@ -145,12 +163,14 @@ export function AddProjectModal({ open, onOpenChange }: AddProjectModalProps) {
     const trimmed = input.trim()
     if (trimmed.length === 0) {
       setDraft(null)
+      setPromptExpanded(false)
       setAnalysisError(null)
       return
     }
 
     const seq = (seqRef.current += 1)
     setIsAnalyzing(true)
+    setPromptExpanded(false)
     setAnalysisError(null)
 
     const t = window.setTimeout(() => {
@@ -158,6 +178,7 @@ export function AddProjectModal({ open, onOpenChange }: AddProjectModalProps) {
         .then((d) => {
           if (seqRef.current !== seq) return
           setDraft(d)
+          setPromptExpanded(false)
           setAnalysisError(null)
         })
         .catch((err: unknown) => {
@@ -235,28 +256,59 @@ export function AddProjectModal({ open, onOpenChange }: AddProjectModalProps) {
   const handleClose = () => {
     setInput("")
     setDraft(null)
+    setPromptExpanded(false)
     setAnalysisError(null)
     onOpenChange(false)
   }
 
-  const getIconColor = (type: DetectedType) => {
-    switch (type) {
-      case "repo":
-        return "text-emerald-500"
-      case "issue":
-        return "text-amber-500"
-      case "pr":
-        return "text-blue-500"
-      case "local_path":
-        return "text-orange-500"
-      default:
-        return "text-primary"
+  const intentIcon = (kind: TaskIntentKind): React.ReactNode => {
+    switch (kind) {
+      case "fix_issue":
+        return <Bug className="w-4 h-4" />
+      case "implement_feature":
+        return <Lightbulb className="w-4 h-4" />
+      case "review_pull_request":
+        return <GitPullRequest className="w-4 h-4" />
+      case "resolve_pull_request_conflicts":
+        return <GitMerge className="w-4 h-4" />
+      case "add_project":
+        return <CirclePlus className="w-4 h-4" />
+      case "other":
+        return <MessageSquare className="w-4 h-4" />
     }
+  }
+
+  const intentColor = (kind: TaskIntentKind): string => {
+    switch (kind) {
+      case "fix_issue":
+        return "text-red-500"
+      case "implement_feature":
+        return "text-emerald-500"
+      case "review_pull_request":
+        return "text-blue-500"
+      case "resolve_pull_request_conflicts":
+        return "text-orange-500"
+      case "add_project":
+        return "text-emerald-500"
+      case "other":
+        return "text-purple-500"
+    }
+  }
+
+  const projectLabel = (d: TaskDraft): string => {
+    if (d.repo?.full_name) return d.repo.full_name
+    if (d.project.type === "git_hub_repo") return d.project.full_name
+    if (d.project.type === "local_path") {
+      const trimmed = d.project.path.replace(/\/$/, "")
+      const parts = trimmed.split("/")
+      return parts[parts.length - 1] || trimmed
+    }
+    return "Unspecified"
   }
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-[520px] p-0 gap-0 bg-background border-border overflow-hidden">
+      <DialogContent className="sm:max-w-[560px] p-0 gap-0 bg-background border-border overflow-hidden">
         <div className="px-5 py-4 border-b border-border">
           <h2 className="text-base font-medium flex items-center gap-2">
             <CirclePlus className="w-4 h-4 text-primary" />
@@ -320,87 +372,121 @@ export function AddProjectModal({ open, onOpenChange }: AddProjectModalProps) {
             </div>
           )}
 
-          {draft ? (
-            <div className="space-y-2">
-              <div className="flex items-start gap-3 px-3 py-2.5 bg-secondary/50 rounded-lg">
-                <div className={cn("p-1.5 rounded-md bg-background", getIconColor(detection?.type ?? null))}>
-                  {(detection?.icon ?? <FileText className="w-4 h-4" />) as React.ReactNode}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs text-muted-foreground">Intent</span>
-                    <span className="text-[11px] text-muted-foreground">{intentLabel(draft.intent_kind)}</span>
+          {(isAnalyzing || draft) && (
+            <div className="rounded-lg border border-border bg-card overflow-hidden animate-in fade-in slide-in-from-top-2 duration-300">
+              {isAnalyzing ? (
+                <div className="p-4 space-y-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-muted animate-pulse" />
+                    <div className="flex-1 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="h-3 w-16 bg-muted rounded animate-pulse" />
+                        <div className="h-5 w-20 bg-muted rounded-full animate-pulse" />
+                      </div>
+                      <div className="h-4 w-48 bg-muted rounded animate-pulse" />
+                    </div>
                   </div>
-                  <p className="text-sm font-medium whitespace-pre-line">{draft.summary}</p>
+                  <div className="space-y-2 pt-1">
+                    <div className="flex gap-2">
+                      <div className="h-3 w-12 bg-muted rounded animate-pulse" />
+                      <div className="h-3 w-32 bg-muted rounded animate-pulse" />
+                    </div>
+                    <div className="flex gap-2">
+                      <div className="h-3 w-10 bg-muted rounded animate-pulse" />
+                      <div className="h-3 w-64 bg-muted rounded animate-pulse" />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 pt-2 text-xs text-muted-foreground">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    <span>Analyzing intent...</span>
+                  </div>
                 </div>
-              </div>
+              ) : draft ? (
+                <div className="animate-in fade-in duration-300">
+                  <div className="p-4 space-y-1.5">
+                    <div className="flex items-center gap-1.5 text-sm">
+                      <span className={cn("flex items-center gap-1.5", intentColor(draft.intent_kind))}>
+                        {intentIcon(draft.intent_kind)}
+                        {intentLabel(draft.intent_kind).toLowerCase()}
+                      </span>
+                      {draft.issue ? <span className="font-medium">#{draft.issue.number}</span> : null}
+                      {draft.pull_request ? <span className="font-medium">#{draft.pull_request.number}</span> : null}
+                      <span className="text-muted-foreground">in</span>
+                      <span className="font-medium">{projectLabel(draft)}</span>
+                    </div>
+                    {draft.issue?.title || draft.pull_request?.title ? (
+                      <p className="text-sm text-muted-foreground line-clamp-2">
+                        {draft.issue?.title ?? draft.pull_request?.title}
+                      </p>
+                    ) : null}
+                    {!canExecute ? (
+                      <p className="text-xs text-muted-foreground pt-1">
+                        Select a local path or a GitHub repo to create a workspace.
+                      </p>
+                    ) : null}
+                  </div>
 
-              {!canExecute ? (
-                <div className="px-3 py-2.5 bg-muted/30 border border-border rounded-lg text-xs text-muted-foreground">
-                  Select a local path or a GitHub repo to create a workspace.
+                  <div className="border-t border-border">
+                    <button
+                      type="button"
+                      onClick={() => setPromptExpanded(!promptExpanded)}
+                      className="w-full px-4 py-2.5 flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition-colors"
+                    >
+                      <ChevronRight
+                        className={cn("w-3 h-3 transition-transform duration-200", promptExpanded && "rotate-90")}
+                      />
+                      <span>Suggested prompt</span>
+                    </button>
+                    <div
+                      className={cn(
+                        "overflow-hidden transition-all duration-300 ease-in-out",
+                        promptExpanded ? "max-h-48" : "max-h-0",
+                      )}
+                    >
+                      <div className="px-4 pb-4">
+                        <div className="p-3 rounded-md bg-secondary/50 text-xs text-muted-foreground font-mono whitespace-pre-wrap max-h-32 overflow-y-auto">
+                          {draft.prompt}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               ) : null}
-
-              <details className="group">
-                <summary className="cursor-pointer select-none text-xs text-muted-foreground hover:text-foreground transition-colors">
-                  Suggested prompt
-                </summary>
-                <pre className="mt-2 whitespace-pre-wrap text-xs bg-muted/30 border border-border rounded-lg p-3 font-mono text-foreground/90">
-                  {draft.prompt}
-                </pre>
-              </details>
             </div>
-          ) : null}
+          )}
 
-          {!draft && detection && (
+          {!draft && !isAnalyzing && detection && (
             <div className="flex items-center gap-3 px-3 py-2.5 bg-secondary/50 rounded-lg animate-in fade-in slide-in-from-top-1 duration-200">
-              <div className={cn("p-1.5 rounded-md bg-background", getIconColor(detection.type))}>{detection.icon}</div>
+              <div className="p-1.5 rounded-md bg-background text-primary">{detection.icon}</div>
               <div className="flex-1 min-w-0">
                 <span className="text-xs text-muted-foreground">{detection.label}</span>
                 <p className="text-sm font-medium truncate">{detection.detail}</p>
               </div>
             </div>
           )}
-
-          {isAnalyzing ? (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground px-1">
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              Analyzing intent…
-            </div>
-          ) : null}
         </div>
 
         <div className="px-5 py-4 border-t border-border bg-secondary/30 flex items-center justify-end gap-2">
           <Button variant="ghost" size="sm" onClick={handleClose} disabled={executingMode != null}>
+            <X className="w-3.5 h-3.5" />
             Cancel
           </Button>
           <Button
             variant="outline"
             size="sm"
             onClick={() => void handleSubmit("create")}
-            disabled={!canExecute || executingMode != null}
+            disabled={!canExecute || executingMode != null || isAnalyzing}
           >
-            {executingMode === "create" ? (
-              <>
-                <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-                Creating...
-              </>
-            ) : (
-              "Create"
-            )}
+            {executingMode === "create" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+            {executingMode === "create" ? "Creating..." : "Create"}
           </Button>
-          <Button size="sm" onClick={() => void handleSubmit("start")} disabled={!canExecute || executingMode != null}>
-            {executingMode === "start" ? (
-              <>
-                <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-                Starting...
-              </>
-            ) : (
-              <>
-                <Play className="w-3.5 h-3.5 mr-1.5" />
-                Start
-              </>
-            )}
+          <Button
+            size="sm"
+            onClick={() => void handleSubmit("start")}
+            disabled={!canExecute || executingMode != null || isAnalyzing}
+          >
+            {executingMode === "start" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
+            {executingMode === "start" ? "Starting..." : "Start"}
           </Button>
         </div>
       </DialogContent>
