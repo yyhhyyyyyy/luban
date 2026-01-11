@@ -20,7 +20,6 @@ import {
   GitMerge,
   MessageSquare,
   Plus,
-  X,
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -467,10 +466,6 @@ export function AddProjectModal({ open, onOpenChange }: AddProjectModalProps) {
         </div>
 
         <div className="px-5 py-4 border-t border-border bg-secondary/30 flex items-center justify-end gap-2">
-          <Button variant="ghost" size="sm" onClick={handleClose} disabled={executingMode != null}>
-            <X className="w-3.5 h-3.5" />
-            Cancel
-          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -478,7 +473,7 @@ export function AddProjectModal({ open, onOpenChange }: AddProjectModalProps) {
             disabled={!canExecute || executingMode != null || isAnalyzing}
           >
             {executingMode === "create" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
-            {executingMode === "create" ? "Creating..." : "Create"}
+            {executingMode === "create" ? "Creating..." : "Create Only"}
           </Button>
           <Button
             size="sm"
@@ -486,7 +481,7 @@ export function AddProjectModal({ open, onOpenChange }: AddProjectModalProps) {
             disabled={!canExecute || executingMode != null || isAnalyzing}
           >
             {executingMode === "start" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
-            {executingMode === "start" ? "Starting..." : "Start"}
+            {executingMode === "start" ? "Starting..." : "Start Now"}
           </Button>
         </div>
       </DialogContent>
