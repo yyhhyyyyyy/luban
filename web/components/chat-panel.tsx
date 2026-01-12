@@ -831,7 +831,7 @@ export function ChatPanel({
                     onBlur={() => setIsComposerFocused(false)}
                     onPaste={handlePaste}
                     placeholder="Message... (⌘↵ to send)"
-                    className="w-full bg-transparent text-sm leading-5 text-foreground placeholder:text-muted-foreground resize-none focus:outline-none min-h-[20px] max-h-[160px]"
+                    className="w-full bg-transparent text-sm leading-5 text-foreground placeholder:text-muted-foreground resize-none focus:outline-none min-h-[20px] max-h-[160px] luban-font-chat"
                     rows={1}
                     disabled={activeWorkspaceId == null || activeThreadId == null}
                     onKeyDown={(e) => {

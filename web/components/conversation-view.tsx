@@ -56,7 +56,11 @@ export function ConversationView({
                 <ActivityStream activities={message.activities} isStreaming={message.isStreaming} />
               )}
 
-              {message.content && message.content.length > 0 && <Markdown content={message.content} />}
+              {message.content && message.content.length > 0 && (
+                <div className="luban-font-chat">
+                  <Markdown content={message.content} />
+                </div>
+              )}
 
               {message.codeReferences && message.codeReferences.length > 0 && (
                 <div className="mt-3 flex flex-wrap gap-1.5">
@@ -106,7 +110,7 @@ export function ConversationView({
             <div className="flex justify-end">
               <div
                 data-testid="user-message-bubble"
-                className="max-w-[85%] border border-border rounded-lg px-3 py-2.5 bg-muted/30"
+                className="max-w-[85%] border border-border rounded-lg px-3 py-2.5 bg-muted/30 luban-font-chat"
               >
                 {message.attachments && message.attachments.length > 0 && (
                   <div className="mb-2 flex flex-wrap gap-2">

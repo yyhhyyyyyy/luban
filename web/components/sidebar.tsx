@@ -26,6 +26,7 @@ import { AgentStatusIcon, PRBadge } from "./shared/status-indicator"
 import { focusChatInput } from "@/lib/focus-chat-input"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
+import { SettingsPanel } from "@/components/settings-panel"
 
 interface SidebarProps {
   viewMode: "workspace" | "kanban"
@@ -62,6 +63,7 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
   const [deletingProjectId, setDeletingProjectId] = useState<number | null>(null)
   const [projectToDelete, setProjectToDelete] = useState<{ id: number; name: string } | null>(null)
   const [newTaskOpen, setNewTaskOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   useEffect(() => {
     if (!app) return
@@ -398,12 +400,18 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
           <Sparkles className="w-4 h-4 text-primary" />
           New Task
         </button>
-        <button className="p-2 text-muted-foreground hover:text-foreground hover:bg-sidebar-accent rounded transition-colors">
+        <button
+          data-testid="sidebar-open-settings"
+          onClick={() => setSettingsOpen(true)}
+          className="p-2 text-muted-foreground hover:text-foreground hover:bg-sidebar-accent rounded transition-colors"
+          title="Settings"
+        >
           <Settings className="w-4 h-4" />
         </button>
       </div>
 
       <NewTaskModal open={newTaskOpen} onOpenChange={setNewTaskOpen} />
+      <SettingsPanel open={settingsOpen} onOpenChange={setSettingsOpen} />
 
       <Dialog open={projectToDelete !== null} onOpenChange={(open) => !open && setProjectToDelete(null)}>
         <DialogContent

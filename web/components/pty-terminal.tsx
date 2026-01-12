@@ -5,6 +5,16 @@ import { FitAddon, Terminal } from "ghostty-web"
 import type { ITheme } from "ghostty-web"
 
 import { useLuban } from "@/lib/luban-context"
+import { useAppearance } from "@/components/appearance-provider"
+
+function escapeCssFontName(value: string): string {
+  return value.replaceAll('"', '\\"')
+}
+
+function terminalFontFamily(fontName: string): string {
+  const escaped = escapeCssFontName(fontName.trim() || "Geist Mono")
+  return `"${escaped}", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace`
+}
 
 async function copyToClipboard(text: string): Promise<void> {
   try {
@@ -118,7 +128,17 @@ function isValidTerminalSize(cols: number, rows: number): boolean {
 
 export function PtyTerminal() {
   const { activeWorkspaceId } = useLuban()
+  const { fonts } = useAppearance()
   const containerRef = useRef<HTMLDivElement | null>(null)
+  const termRef = useRef<Terminal | null>(null)
+  const fitAddonRef = useRef<FitAddon | null>(null)
+
+  useEffect(() => {
+    const term = termRef.current
+    if (!term) return
+    term.setFontFamily(terminalFontFamily(fonts.terminalFont))
+    fitAddonRef.current?.fit()
+  }, [fonts.terminalFont])
 
   useEffect(() => {
     const container = containerRef.current
@@ -135,14 +155,15 @@ export function PtyTerminal() {
 
     let disposed = false
     const fitAddon = new FitAddon()
+    fitAddonRef.current = fitAddon
     const term = new Terminal({
-      fontFamily:
-        "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
+      fontFamily: terminalFontFamily(fonts.terminalFont),
       fontSize: 12,
       wasmPath: "/ghostty-vt.wasm",
       cursorBlink: true,
       theme: terminalThemeFromCss(),
     })
+    termRef.current = term
 
     term.loadAddon(fitAddon)
 
@@ -294,6 +315,8 @@ export function PtyTerminal() {
 
     return () => {
       disposed = true
+      termRef.current = null
+      fitAddonRef.current = null
       if (focusCapture) container.removeEventListener("mousedown", focusCapture, true)
       if (focusCapture) container.removeEventListener("touchstart", focusCapture, true)
       if (keydownCapture) container.removeEventListener("keydown", keydownCapture, true)
