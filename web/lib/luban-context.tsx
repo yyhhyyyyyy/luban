@@ -85,7 +85,7 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
       .catch((err) => console.error("fetchApp failed", err))
   }, [])
 
-  const transport = useLubanTransport({
+  const { wsConnected, sendAction: sendActionTransport, request: requestTransport } = useLubanTransport({
     onEvent: (event) => {
       if (event.type === "app_changed") {
         setApp(event.snapshot)
@@ -167,11 +167,11 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
   }, [app, activeWorkspaceId])
 
   function sendAction(action: ClientAction, requestId?: string) {
-    transport.sendAction(action, requestId)
+    sendActionTransport(action, requestId)
   }
 
   function request<T>(action: ClientAction): Promise<T> {
-    return transport.request<T>(action)
+    return requestTransport<T>(action)
   }
 
   async function waitForNewThread(
