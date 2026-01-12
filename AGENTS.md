@@ -4,6 +4,7 @@ This document constrains and guides how AI agents (and human contributors) shoul
 
 ## 0. Quick start (read this first)
 - Default branch: `main`.
+- Read `postmortem/README.md` before implementing new features or large refactors.
 - Prefer `just` recipes over ad-hoc `cargo` commands:
   - `just -l` (discover workflows)
   - `just fmt && just lint && just test` (full local verification)
@@ -12,6 +13,22 @@ This document constrains and guides how AI agents (and human contributors) shoul
   - `just build` / `just build release`
 - Keep changes small and reviewable. For functional changes, add or update tests.
 - After finishing a task, run the relevant checks, then commit and push.
+
+## 0.1 Postmortems (required)
+
+This repository treats postmortems as a first-class engineering artifact.
+
+- Before implementing a new feature, skim the relevant postmortems in `postmortem/`.
+  - Prefer to reuse proven patterns and avoid repeating known failure modes.
+- When fixing a **Sev-1** or **Sev-2** issue (or any bug that required multiple iterations):
+  1. Create a new postmortem in `postmortem/` using the template in `postmortem/README.md`.
+  2. Update `postmortem/README.md` to include the new incident in the index.
+  3. Ensure the postmortem includes:
+     - severity, impact, and detection
+     - root cause analysis
+     - "introduced by" commit(s) and "fixed by" commit(s)
+     - reproduction and verification steps
+     - prevention/action items
 
 ## 1. Project context and goals (first-screen context for agents)
 - Tech stack: Rust server + web frontend (optionally wrapped by Tauri)
