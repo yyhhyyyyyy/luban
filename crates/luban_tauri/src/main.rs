@@ -3,6 +3,15 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use tauri::{Manager as _, WebviewUrl, WebviewWindowBuilder};
 
+#[tauri::command]
+fn open_external(url: String) -> Result<(), String> {
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return Err("unsupported url scheme".to_owned());
+    }
+    open::that(url).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 fn resolve_web_dist(app: &tauri::AppHandle) -> PathBuf {
     if let Ok(resource_dir) = app.path().resource_dir() {
         let candidates = [
@@ -22,6 +31,7 @@ fn resolve_web_dist(app: &tauri::AppHandle) -> PathBuf {
 
 fn main() -> anyhow::Result<()> {
     tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![open_external])
         .setup(|app| {
             let handle = app.handle();
             let web_dist = resolve_web_dist(handle);

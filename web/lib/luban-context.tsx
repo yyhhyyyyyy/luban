@@ -22,6 +22,7 @@ import type {
 import { createLubanActions } from "./luban-actions"
 import { useLubanStore } from "./luban-store"
 import { createLubanServerEventHandler } from "./luban-store-events"
+import { useExternalLinkInterceptor } from "./external-link-interceptor"
 import { ACTIVE_WORKSPACE_KEY } from "./ui-prefs"
 import { useLubanTransport } from "./luban-transport"
 
@@ -67,6 +68,8 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
   const store = useLubanStore()
   const { app, activeWorkspaceId, activeThreadId, threads, workspaceTabs, conversation, activeWorkspace } = store.state
   const eventHandlerRef = useRef<(event: ServerEvent) => void>(() => {})
+
+  useExternalLinkInterceptor()
 
   const { wsConnected, sendAction: sendActionTransport, request: requestTransport } = useLubanTransport({
     onEvent: (event) => eventHandlerRef.current(event),

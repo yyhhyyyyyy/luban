@@ -54,3 +54,23 @@ test("scroll-to-bottom button appears only when away from bottom", async ({ page
     )
     .toBeTruthy()
 })
+
+test("external links open without navigating current page", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  const startUrl = page.url()
+  await page.evaluate(() => {
+    const a = document.createElement("a")
+    a.href = "https://example.com/"
+    a.textContent = "example"
+    a.setAttribute("data-testid", "external-link")
+    document.body.appendChild(a)
+  })
+
+  const popupPromise = page.waitForEvent("popup", { timeout: 10_000 })
+  await page.getByTestId("external-link").click()
+  const popup = await popupPromise
+  await popup.close()
+
+  expect(page.url()).toBe(startUrl)
+})

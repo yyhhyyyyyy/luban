@@ -9,5 +9,5 @@ tauri-build = "2"
 [dependencies]
 anyhow.workspace = true
 luban_server = { path = "../luban_server" }
+open = "5"
 tauri = "2"
-

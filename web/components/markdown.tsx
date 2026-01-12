@@ -4,6 +4,7 @@ import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 
 import { cn } from "@/lib/utils"
+import { openExternalUrl } from "@/lib/open-external-url"
 
 function normalizeMarkdown(input: string): string {
   return input
@@ -28,8 +29,21 @@ export function Markdown({ content, className }: { content: string; className?: 
           blockquote: (props) => (
             <blockquote className="my-2 border-l-2 border-border pl-3 text-muted-foreground" {...props} />
           ),
-          a: ({ className, ...props }) => (
-            <a className={cn("text-primary underline underline-offset-2", className)} {...props} />
+          a: ({ className, href, onClick, ...props }) => (
+            <a
+              className={cn("text-primary underline underline-offset-2", className)}
+              href={href}
+              target="_blank"
+              rel="noreferrer noopener"
+              onClick={(ev) => {
+                onClick?.(ev)
+                if (ev.defaultPrevented) return
+                if (!href) return
+                ev.preventDefault()
+                void openExternalUrl(String(href))
+              }}
+              {...props}
+            />
           ),
           code: ({ className, children, ...props }) => {
             const isBlock = typeof className === "string" && className.includes("language-")
