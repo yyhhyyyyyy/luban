@@ -19,14 +19,9 @@ import type {
   WsServerMessage,
 } from "./luban-api"
 import { fetchApp, fetchConversation, fetchThreads } from "./luban-http"
+import { ACTIVE_WORKSPACE_KEY, activeThreadKey } from "./ui-prefs"
 
 const PROTOCOL_VERSION = 1
-
-const ACTIVE_WORKSPACE_KEY = "luban:active_workspace_id"
-
-function activeThreadKey(workspaceId: number): string {
-  return `luban:active_thread_id:${workspaceId}`
-}
 
 function randomRequestId(): string {
   return `req_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`

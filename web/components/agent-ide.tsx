@@ -5,11 +5,12 @@ import { Sidebar } from "./sidebar"
 import { ChatPanel } from "./chat-panel"
 import { RightSidebar } from "./right-sidebar"
 import { KanbanBoard } from "./kanban-board"
-
-const RIGHT_SIDEBAR_OPEN_KEY = "luban:ui:right_sidebar_open"
-const VIEW_MODE_KEY = "luban:ui:view_mode"
-const SIDEBAR_WIDTH_KEY = "luban:ui:sidebar_width_px"
-const RIGHT_SIDEBAR_WIDTH_KEY = "luban:ui:right_sidebar_width_px"
+import {
+  RIGHT_SIDEBAR_OPEN_KEY,
+  RIGHT_SIDEBAR_WIDTH_KEY,
+  SIDEBAR_WIDTH_KEY,
+  VIEW_MODE_KEY,
+} from "@/lib/ui-prefs"
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n))

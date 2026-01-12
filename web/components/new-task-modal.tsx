@@ -22,14 +22,11 @@ import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { useLuban } from "@/lib/luban-context"
 import type { TaskDraft, TaskExecuteMode, TaskIntentKind } from "@/lib/luban-api"
+import { draftKey } from "@/lib/ui-prefs"
 
 interface NewTaskModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-}
-
-function draftKeyForThread(workspaceId: number, threadId: number) {
-  return `luban:draft:${workspaceId}:${threadId}`
 }
 
 function intentLabel(kind: TaskIntentKind): string {
@@ -106,7 +103,7 @@ export function NewTaskModal({ open, onOpenChange }: NewTaskModalProps) {
       const result = await executeTask(draft, mode)
       if (mode === "create") {
         localStorage.setItem(
-          draftKeyForThread(result.workspace_id, result.thread_id),
+          draftKey(result.workspace_id, result.thread_id),
           JSON.stringify({ text: result.prompt }),
         )
       } else {

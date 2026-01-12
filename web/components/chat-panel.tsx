@@ -30,32 +30,15 @@ import {
   thinkingEffortLabel,
 } from "@/lib/conversation-ui"
 import { ConversationView } from "@/components/conversation-view"
-
-function loadJson<T>(key: string): T | null {
-  const raw = localStorage.getItem(key)
-  if (!raw) return null
-  try {
-    return JSON.parse(raw) as T
-  } catch {
-    return null
-  }
-}
-
-function saveJson(key: string, value: unknown) {
-  localStorage.setItem(key, JSON.stringify(value))
-}
-
-function draftKeyForThread(workspaceId: number, threadId: number) {
-  return `luban:draft:${workspaceId}:${threadId}`
-}
-
-function followTailKeyForThread(workspaceId: number, threadId: number) {
-  return `luban:follow_tail:${workspaceId}:${threadId}`
-}
-
-function threadOrderKeyForWorkspace(workspaceId: number) {
-  return `luban:ui:thread_order:${workspaceId}`
-}
+import {
+  closedAtKey,
+  draftKey,
+  followTailKey,
+  hiddenThreadsKey,
+  loadJson,
+  saveJson,
+  threadOrderKey,
+} from "@/lib/ui-prefs"
 
 function arraysEqual<T>(a: T[], b: T[]): boolean {
   if (a === b) return true
@@ -193,9 +176,9 @@ export function ChatPanel() {
       setThreadOrderIds([])
       return
     }
-    const hidden = loadJson<number[]>(`luban:ui:hidden_threads:${activeWorkspaceId}`) ?? []
+    const hidden = loadJson<number[]>(hiddenThreadsKey(activeWorkspaceId)) ?? []
     setHiddenThreadIds(Array.isArray(hidden) ? hidden.filter((x) => Number.isFinite(x)) : [])
-    const closedAt = loadJson<Record<string, number>>(`luban:ui:closed_at:${activeWorkspaceId}`) ?? {}
+    const closedAt = loadJson<Record<string, number>>(closedAtKey(activeWorkspaceId)) ?? {}
     const parsed: Record<number, number> = {}
     for (const [k, v] of Object.entries(closedAt)) {
       const id = Number(k)
@@ -204,7 +187,7 @@ export function ChatPanel() {
     }
     setClosedAtByThreadId(parsed)
 
-    const storedOrder = loadJson<number[]>(threadOrderKeyForWorkspace(activeWorkspaceId)) ?? []
+    const storedOrder = loadJson<number[]>(threadOrderKey(activeWorkspaceId)) ?? []
     const nextOrder: number[] = []
     const seen = new Set<number>()
     for (const raw of storedOrder) {
@@ -242,7 +225,7 @@ export function ChatPanel() {
     if (arraysEqual(next, threadOrderIds)) return
 
     setThreadOrderIds(next)
-    saveJson(threadOrderKeyForWorkspace(activeWorkspaceId), next)
+    saveJson(threadOrderKey(activeWorkspaceId), next)
   }, [activeWorkspaceId, threads, hiddenThreadIds, threadOrderIds])
 
   useEffect(() => {
@@ -252,9 +235,9 @@ export function ChatPanel() {
     }
 
     setFollowTail(true)
-    localStorage.setItem(followTailKeyForThread(activeWorkspaceId, activeThreadId), "true")
+    localStorage.setItem(followTailKey(activeWorkspaceId, activeThreadId), "true")
 
-    const saved = loadJson<{ text: string }>(draftKeyForThread(activeWorkspaceId, activeThreadId))
+    const saved = loadJson<{ text: string }>(draftKey(activeWorkspaceId, activeThreadId))
     setDraftText(saved?.text ?? "")
   }, [activeWorkspaceId, activeThreadId])
 
@@ -280,7 +263,7 @@ export function ChatPanel() {
 
   function persistDraft(nextText: string) {
     if (activeWorkspaceId == null || activeThreadId == null) return
-    saveJson(draftKeyForThread(activeWorkspaceId, activeThreadId), {
+    saveJson(draftKey(activeWorkspaceId, activeThreadId), {
       text: nextText,
     })
   }
@@ -300,13 +283,13 @@ export function ChatPanel() {
     const closedAt = { ...closedAtByThreadId, [threadId]: Date.now() }
     setHiddenThreadIds(nextHidden)
     setClosedAtByThreadId(closedAt)
-    saveJson(`luban:ui:hidden_threads:${activeWorkspaceId}`, nextHidden)
-    saveJson(`luban:ui:closed_at:${activeWorkspaceId}`, Object.fromEntries(Object.entries(closedAt)))
+    saveJson(hiddenThreadsKey(activeWorkspaceId), nextHidden)
+    saveJson(closedAtKey(activeWorkspaceId), Object.fromEntries(Object.entries(closedAt)))
 
     const nextOrder = threadOrderIds.filter((id) => id !== threadId)
     if (!arraysEqual(nextOrder, threadOrderIds)) {
       setThreadOrderIds(nextOrder)
-      saveJson(threadOrderKeyForWorkspace(activeWorkspaceId), nextOrder)
+      saveJson(threadOrderKey(activeWorkspaceId), nextOrder)
     }
 
     if (activeThreadId === threadId) {
@@ -333,11 +316,11 @@ export function ChatPanel() {
     if (!Number.isFinite(id)) return
     const nextHidden = hiddenThreadIds.filter((x) => x !== id)
     setHiddenThreadIds(nextHidden)
-    saveJson(`luban:ui:hidden_threads:${activeWorkspaceId}`, nextHidden)
+    saveJson(hiddenThreadsKey(activeWorkspaceId), nextHidden)
 
     const nextOrder = [...threadOrderIds.filter((x) => x !== id), id]
     setThreadOrderIds(nextOrder)
-    saveJson(threadOrderKeyForWorkspace(activeWorkspaceId), nextOrder)
+    saveJson(threadOrderKey(activeWorkspaceId), nextOrder)
 
     setShowTabDropdown(false)
     void selectThread(id)
@@ -351,7 +334,7 @@ export function ChatPanel() {
     setDraftText("")
     persistDraft("")
     setFollowTail(true)
-    localStorage.setItem(followTailKeyForThread(activeWorkspaceId, activeThreadId), "true")
+    localStorage.setItem(followTailKey(activeWorkspaceId, activeThreadId), "true")
     scheduleScrollToBottom()
   }
 
@@ -491,7 +474,7 @@ export function ChatPanel() {
           if (!programmaticScrollRef.current) {
             setFollowTail(isNearBottom)
             localStorage.setItem(
-              followTailKeyForThread(activeWorkspaceId, activeThreadId),
+              followTailKey(activeWorkspaceId, activeThreadId),
               isNearBottom ? "true" : "false",
             )
           }
@@ -517,7 +500,7 @@ export function ChatPanel() {
                 onClick={() => {
                   if (activeWorkspaceId == null || activeThreadId == null) return
                   setFollowTail(true)
-                  localStorage.setItem(followTailKeyForThread(activeWorkspaceId, activeThreadId), "true")
+                  localStorage.setItem(followTailKey(activeWorkspaceId, activeThreadId), "true")
                   scheduleScrollToBottom()
                 }}
               >

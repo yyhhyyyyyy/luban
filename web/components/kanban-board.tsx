@@ -28,10 +28,7 @@ import { agentModelLabel, buildMessages, thinkingEffortLabel, type Message } fro
 import type { ConversationEntry, ConversationSnapshot } from "@/lib/luban-api"
 import { ConversationView } from "@/components/conversation-view"
 import { kanbanColumnForStatus, kanbanColumns, worktreeStatusFromWorkspace, type KanbanColumn, type WorktreeStatus } from "@/lib/worktree-ui"
-
-function activeThreadKeyForWorkspace(workspaceId: number): string {
-  return `luban:active_thread_id:${workspaceId}`
-}
+import { activeThreadKey } from "@/lib/ui-prefs"
 
 type Worktree = {
   id: string
@@ -211,7 +208,7 @@ function WorktreePreviewPanel({
         const threads = snap.threads ?? []
         if (threads.length === 0) return null
 
-        const stored = Number(localStorage.getItem(activeThreadKeyForWorkspace(workspaceId)) ?? "")
+        const stored = Number(localStorage.getItem(activeThreadKey(workspaceId)) ?? "")
         const storedOk = Number.isFinite(stored) && threads.some((t) => t.thread_id === stored)
         const picked = storedOk
           ? stored
