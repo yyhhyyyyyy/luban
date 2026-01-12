@@ -13,6 +13,9 @@ This directory contains engineering postmortems for user-visible bugs, CI regres
 
 - `2026-01-terminal-clipboard-shortcuts.md`
   - Related fix commits: `a3b4fd0`, `b7120c4`, `a343f74`, `397fc88`
+- `2026-01-ghostty-web-clipboard-overwrite.md`
+  - Upstream issue: `coder/ghostty-web#108`
+  - Related fix commits: `a3b4fd0`, `b7120c4`, `a343f74`, `397fc88`
 - `2026-01-e2e-parallel-flakiness.md`
   - Related fix commits: `0489744` (and stabilization commit `6051e9d`)
 - `2026-01-engine-missing-effect-handlers.md`
@@ -61,4 +64,3 @@ Create a new file named `YYYY-MM-<short-title>.md` and fill in:
 9. **Resolution**
 10. **Lessons learned**
 11. **Prevention / action items**
-
