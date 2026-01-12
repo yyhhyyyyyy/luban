@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import { requireEnv } from "./env"
 import { sendWsAction } from "./helpers"
 
 function runGit(cwd: string, args: string[]) {
@@ -17,8 +18,7 @@ function ensureEmptyDir(dir: string) {
 test("project can be deleted via sidebar confirmation dialog", async ({ page }) => {
   await page.goto("/")
 
-  const root = process.env.LUBAN_E2E_ROOT
-  if (!root) throw new Error("LUBAN_E2E_ROOT is not set")
+  const root = requireEnv("LUBAN_E2E_ROOT")
 
   const tmpBase = path.join(os.tmpdir(), "luban-e2e-delete-project-")
   const projectDir = fs.mkdtempSync(tmpBase)

@@ -1,4 +1,5 @@
 import type { Page } from "@playwright/test"
+import { requireEnv } from "./env"
 
 export async function sendWsAction<TAction extends Record<string, unknown>>(
   page: Page,
@@ -40,8 +41,7 @@ export async function sendWsAction<TAction extends Record<string, unknown>>(
 export async function ensureWorkspace(page: Page) {
   await page.goto("/")
 
-  const projectDir = process.env.LUBAN_E2E_PROJECT_DIR
-  if (!projectDir) throw new Error("LUBAN_E2E_PROJECT_DIR is not set")
+  const projectDir = requireEnv("LUBAN_E2E_PROJECT_DIR")
 
   await sendWsAction(page, { type: "add_project", path: projectDir })
 

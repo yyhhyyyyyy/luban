@@ -39,3 +39,18 @@ Run:
 
 - `just test-ui`
 - `just test-ui-headed`
+
+## Isolation and safety
+
+UI tests run against an isolated Luban instance by default:
+
+- A temporary `LUBAN_E2E_ROOT` is created under your OS temp dir.
+- The server binds to a random loopback port (via `LUBAN_E2E_PORT`).
+- `HOME` and `LUBAN_ROOT` are pointed at directories inside `LUBAN_E2E_ROOT`, so the SQLite DB and
+  on-disk state used by tests never touch your production instance.
+
+You can override this behavior:
+
+- `LUBAN_E2E_ROOT=/path/to/dir`: reuse a specific scratch root (will be cleared by global setup).
+- `LUBAN_E2E_PORT=12345`: force a port (must be free).
+- `LUBAN_E2E_REUSE_SERVER=1`: reuse an already running server at the configured port (local-only).
