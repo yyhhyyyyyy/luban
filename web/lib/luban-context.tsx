@@ -15,23 +15,10 @@ import type {
   TaskExecuteResult,
   WorkspaceId,
   WorkspaceSnapshot,
-  WsClientMessage,
-  WsServerMessage,
 } from "./luban-api"
 import { fetchApp, fetchConversation, fetchThreads } from "./luban-http"
 import { ACTIVE_WORKSPACE_KEY, activeThreadKey } from "./ui-prefs"
-
-const PROTOCOL_VERSION = 1
-
-function randomRequestId(): string {
-  return `req_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`
-}
-
-function wsUrl(path: string): string {
-  const url = new URL(path, window.location.href)
-  url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
-  return url.toString()
-}
+import { useLubanTransport } from "./luban-transport"
 
 type LubanContextValue = {
   app: AppSnapshot | null
@@ -70,10 +57,7 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
   const [activeThreadId, setActiveThreadId] = useState<number | null>(null)
   const [threads, setThreads] = useState<ThreadMeta[]>([])
   const [conversation, setConversation] = useState<ConversationSnapshot | null>(null)
-  const [wsConnected, setWsConnected] = useState(false)
 
-  const wsRef = useRef<WebSocket | null>(null)
-  const pendingActionsRef = useRef<ClientAction[]>([])
   const activeWorkspaceIdRef = useRef<WorkspaceId | null>(null)
   const activeThreadIdRef = useRef<number | null>(null)
   const threadsRef = useRef<ThreadMeta[]>([])
@@ -82,16 +66,6 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     existingThreadIds: Set<number>
     requestedAtUnixMs: number
   } | null>(null)
-
-  const pendingResponsesRef = useRef<
-    Map<
-      string,
-      {
-        resolve: (value: unknown) => void
-        reject: (err: Error) => void
-      }
-    >
-  >(new Map())
 
   useEffect(() => {
     activeWorkspaceIdRef.current = activeWorkspaceId
@@ -111,130 +85,66 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
       .catch((err) => console.error("fetchApp failed", err))
   }, [])
 
-  useEffect(() => {
-    const ws = new WebSocket(wsUrl("/api/events"))
-    wsRef.current = ws
-
-    ws.onopen = () => {
-      const hello: WsClientMessage = {
-        type: "hello",
-        protocol_version: PROTOCOL_VERSION,
-        last_seen_rev: null,
+  const transport = useLubanTransport({
+    onEvent: (event) => {
+      if (event.type === "app_changed") {
+        setApp(event.snapshot)
+        return
       }
-      ws.send(JSON.stringify(hello))
-      setWsConnected(true)
 
-      const pending = pendingActionsRef.current.splice(0, pendingActionsRef.current.length)
-      for (const action of pending) {
-        const msg: WsClientMessage = { type: "action", request_id: randomRequestId(), action }
-        ws.send(JSON.stringify(msg))
-      }
-    }
+      if (event.type === "workspace_threads_changed") {
+        const wid = activeWorkspaceIdRef.current
+        if (wid != null && wid === event.workspace_id) {
+          setThreads(event.threads)
+          const current = activeThreadIdRef.current
 
-    ws.onmessage = (ev) => {
-      if (typeof ev.data !== "string") return
-      const msg = JSON.parse(ev.data) as WsServerMessage
-
-      if (msg.type === "event") {
-        const event = msg.event
-        if (event.type === "app_changed") {
-          setApp(event.snapshot)
-          return
-        }
-        if (event.type === "workspace_threads_changed") {
-          const wid = activeWorkspaceIdRef.current
-          if (wid != null && wid === event.workspace_id) {
-            setThreads(event.threads)
-            const current = activeThreadIdRef.current
-
-            const pending = pendingCreateThreadRef.current
-            if (pending && pending.workspaceId === wid) {
-              const created = event.threads
-                .map((t) => t.thread_id)
-                .filter((id) => !pending.existingThreadIds.has(id))
-                .sort((a, b) => b - a)[0]
-              if (created != null) {
-                pendingCreateThreadRef.current = null
-                void selectThreadInternal(wid, created)
-                return
-              }
-
-              if (Date.now() - pending.requestedAtUnixMs > 5_000) {
-                pendingCreateThreadRef.current = null
-              }
+          const pending = pendingCreateThreadRef.current
+          if (pending && pending.workspaceId === wid) {
+            const created = event.threads
+              .map((t) => t.thread_id)
+              .filter((id) => !pending.existingThreadIds.has(id))
+              .sort((a, b) => b - a)[0]
+            if (created != null) {
+              pendingCreateThreadRef.current = null
+              void selectThreadInternal(wid, created)
+              return
             }
 
-            if (current == null || !event.threads.some((t) => t.thread_id === current)) {
-              const next = event.threads[0]?.thread_id ?? null
-              if (next != null) {
-                void selectThreadInternal(wid, next)
-              }
+            if (Date.now() - pending.requestedAtUnixMs > 5_000) {
+              pendingCreateThreadRef.current = null
             }
           }
-          return
-        }
-        if (event.type === "conversation_changed") {
-          const wid = activeWorkspaceIdRef.current
-          const tid = activeThreadIdRef.current
-          if (wid == null || tid == null) return
-          if (event.snapshot.workspace_id === wid && event.snapshot.thread_id === tid) {
-            setConversation(event.snapshot)
-          }
-          return
-        }
-        if (event.type === "toast") {
-          console.warn("server toast:", event.message)
-          toast(event.message)
-          return
-        }
 
-        if (event.type === "project_path_picked") {
-          const pending = pendingResponsesRef.current.get(event.request_id)
-          if (pending) {
-            pendingResponsesRef.current.delete(event.request_id)
-            pending.resolve(event.path)
+          if (current == null || !event.threads.some((t) => t.thread_id === current)) {
+            const next = event.threads[0]?.thread_id ?? null
+            if (next != null) {
+              void selectThreadInternal(wid, next)
+            }
           }
-          return
         }
-
-        if (event.type === "task_preview_ready") {
-          const pending = pendingResponsesRef.current.get(event.request_id)
-          if (pending) {
-            pendingResponsesRef.current.delete(event.request_id)
-            pending.resolve(event.draft)
-          }
-          return
-        }
-
-        if (event.type === "task_executed") {
-          const pending = pendingResponsesRef.current.get(event.request_id)
-          if (pending) {
-            pendingResponsesRef.current.delete(event.request_id)
-            pending.resolve(event.result)
-          }
-          return
-        }
+        return
       }
 
-      if (msg.type === "error") {
-        if (msg.request_id) {
-          const pending = pendingResponsesRef.current.get(msg.request_id)
-          if (pending) {
-            pendingResponsesRef.current.delete(msg.request_id)
-            pending.reject(new Error(msg.message))
-            return
-          }
+      if (event.type === "conversation_changed") {
+        const wid = activeWorkspaceIdRef.current
+        const tid = activeThreadIdRef.current
+        if (wid == null || tid == null) return
+        if (event.snapshot.workspace_id === wid && event.snapshot.thread_id === tid) {
+          setConversation(event.snapshot)
         }
-        console.warn("server error:", msg.message)
-        toast.error(msg.message)
+        return
       }
-    }
 
-    ws.onerror = () => setWsConnected(false)
-    ws.onclose = () => setWsConnected(false)
-
-    return () => ws.close()
-  }, [])
+      if (event.type === "toast") {
+        console.warn("server toast:", event.message)
+        toast(event.message)
+      }
+    },
+    onError: (message) => {
+      console.warn("server error:", message)
+      toast.error(message)
+    },
+  })
 
   useEffect(() => {
     if (app == null) return
@@ -257,29 +167,11 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
   }, [app, activeWorkspaceId])
 
   function sendAction(action: ClientAction, requestId?: string) {
-    const ws = wsRef.current
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      if (pendingActionsRef.current.length < 128) {
-        pendingActionsRef.current.push(action)
-      } else {
-        pendingActionsRef.current.shift()
-        pendingActionsRef.current.push(action)
-      }
-      return
-    }
-    const msg: WsClientMessage = { type: "action", request_id: requestId ?? randomRequestId(), action }
-    ws.send(JSON.stringify(msg))
+    transport.sendAction(action, requestId)
   }
 
   function request<T>(action: ClientAction): Promise<T> {
-    const requestId = randomRequestId()
-    return new Promise<T>((resolve, reject) => {
-      pendingResponsesRef.current.set(requestId, {
-        resolve,
-        reject: (err) => reject(err),
-      })
-      sendAction(action, requestId)
-    })
+    return transport.request<T>(action)
   }
 
   async function waitForNewThread(
