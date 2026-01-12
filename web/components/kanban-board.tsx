@@ -489,7 +489,6 @@ export function KanbanBoard({ onViewModeChange }: KanbanBoardProps) {
     for (const p of app.projects) {
       for (const w of p.workspaces) {
         if (w.status !== "active") continue
-        if (w.workspace_name === "main") continue
         const mapped = worktreeStatusFromWorkspace(w)
         out.push({
           id: w.short_id,
