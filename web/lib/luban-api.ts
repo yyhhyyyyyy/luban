@@ -32,6 +32,42 @@ export type WorkspaceSnapshot = {
   pull_request: PullRequestSnapshot | null
 }
 
+export type FileChangeStatus = "modified" | "added" | "deleted" | "renamed"
+
+export type FileChangeGroup = "committed" | "staged" | "unstaged"
+
+export type ChangedFileSnapshot = {
+  id: string
+  path: string
+  name: string
+  status: FileChangeStatus
+  group: FileChangeGroup
+  additions: number | null
+  deletions: number | null
+  old_path: string | null
+}
+
+export type WorkspaceChangesSnapshot = {
+  workspace_id: WorkspaceId
+  files: ChangedFileSnapshot[]
+}
+
+export type DiffFileContents = {
+  name: string
+  contents: string
+}
+
+export type WorkspaceDiffFileSnapshot = {
+  file: ChangedFileSnapshot
+  old_file: DiffFileContents
+  new_file: DiffFileContents
+}
+
+export type WorkspaceDiffSnapshot = {
+  workspace_id: WorkspaceId
+  files: WorkspaceDiffFileSnapshot[]
+}
+
 export type PullRequestState = "open" | "closed" | "merged"
 
 export type PullRequestCiState = "pending" | "success" | "failure"

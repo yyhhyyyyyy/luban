@@ -98,6 +98,38 @@ test("creating a worktree auto-opens its conversation", async ({ page }) => {
   await expect(page.getByTestId("chat-input")).toBeFocused({ timeout: 20_000 })
 })
 
+test("changes panel opens unified diff tab", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  const workspaceIdRaw = (await page.evaluate(() => localStorage.getItem("luban:active_workspace_id"))) ?? ""
+  const workspaceId = Number(workspaceIdRaw)
+  expect(workspaceId).toBeGreaterThan(0)
+
+  const worktreePath = await page.evaluate(async (workspaceId) => {
+    const res = await fetch("/api/app")
+    if (!res.ok) return null
+    const app = (await res.json()) as { projects: { workspaces: { id: number; worktree_path: string }[] }[] }
+    for (const p of app.projects) {
+      for (const w of p.workspaces) {
+        if (w.id === workspaceId) return w.worktree_path
+      }
+    }
+    return null
+  }, workspaceId)
+  if (!worktreePath) throw new Error("worktree_path not found")
+
+  const demo = path.join(worktreePath, "diff-demo.txt")
+  fs.writeFileSync(demo, "hello\nworld\n", "utf8")
+
+  await page.getByTestId("right-sidebar-tab-changes").click()
+  const fileRow = page.getByRole("button", { name: /diff-demo\.txt/ }).first()
+  await expect(fileRow).toBeVisible({ timeout: 20_000 })
+  await fileRow.click()
+
+  await expect(page.getByTestId("diff-viewer")).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByTestId("diff-viewer").getByText("diff-demo.txt").first()).toBeVisible({ timeout: 20_000 })
+})
+
 test("archiving a worktree shows an executing animation", async ({ page }) => {
   await page.goto("/")
 

@@ -7,7 +7,10 @@ use axum::{
     routing::{delete, get, post},
 };
 use luban_api::AppSnapshot;
-use luban_api::{PROTOCOL_VERSION, WsClientMessage, WsServerMessage};
+use luban_api::{
+    PROTOCOL_VERSION, WorkspaceChangesSnapshot, WorkspaceDiffSnapshot, WsClientMessage,
+    WsServerMessage,
+};
 use luban_domain::{ContextImage, ProjectWorkspaceService};
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -41,6 +44,8 @@ pub async fn router() -> anyhow::Result<Router> {
             "/workspaces/{workspace_id}/attachments/{attachment_id}",
             get(download_attachment),
         )
+        .route("/workspaces/{workspace_id}/changes", get(get_changes))
+        .route("/workspaces/{workspace_id}/diff", get(get_diff))
         .route("/workspaces/{workspace_id}/context", get(get_context))
         .route(
             "/workspaces/{workspace_id}/context/{context_id}",
@@ -278,6 +283,72 @@ async fn download_attachment(
     };
 
     ([(axum::http::header::CONTENT_TYPE, content_type)], bytes).into_response()
+}
+
+async fn get_changes(
+    State(state): State<AppStateHolder>,
+    Path(workspace_id): Path<u64>,
+) -> impl IntoResponse {
+    let Some((_project_slug, _workspace_name, worktree_path)) =
+        workspace_info_from_snapshot(&state.engine.app_snapshot().await.ok(), workspace_id)
+    else {
+        return (axum::http::StatusCode::NOT_FOUND, "workspace not found").into_response();
+    };
+
+    let repo_path = PathBuf::from(worktree_path);
+    let result =
+        tokio::task::spawn_blocking(move || crate::git_changes::collect_changes(&repo_path)).await;
+
+    match result {
+        Ok(Ok(files)) => Json(WorkspaceChangesSnapshot {
+            workspace_id: luban_api::WorkspaceId(workspace_id),
+            files,
+        })
+        .into_response(),
+        Ok(Err(err)) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            err.to_string(),
+        )
+            .into_response(),
+        Err(err) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to run git: {err}"),
+        )
+            .into_response(),
+    }
+}
+
+async fn get_diff(
+    State(state): State<AppStateHolder>,
+    Path(workspace_id): Path<u64>,
+) -> impl IntoResponse {
+    let Some((_project_slug, _workspace_name, worktree_path)) =
+        workspace_info_from_snapshot(&state.engine.app_snapshot().await.ok(), workspace_id)
+    else {
+        return (axum::http::StatusCode::NOT_FOUND, "workspace not found").into_response();
+    };
+
+    let repo_path = PathBuf::from(worktree_path);
+    let result =
+        tokio::task::spawn_blocking(move || crate::git_changes::collect_diff(&repo_path)).await;
+
+    match result {
+        Ok(Ok(files)) => Json(WorkspaceDiffSnapshot {
+            workspace_id: luban_api::WorkspaceId(workspace_id),
+            files,
+        })
+        .into_response(),
+        Ok(Err(err)) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            err.to_string(),
+        )
+            .into_response(),
+        Err(err) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to run git: {err}"),
+        )
+            .into_response(),
+    }
 }
 
 async fn get_context(
@@ -531,6 +602,25 @@ fn workspace_scope_from_snapshot(
         for workspace in &project.workspaces {
             if workspace.id.0 == workspace_id {
                 return Some((project.slug.clone(), workspace.workspace_name.clone()));
+            }
+        }
+    }
+    None
+}
+
+fn workspace_info_from_snapshot(
+    snapshot: &Option<AppSnapshot>,
+    workspace_id: u64,
+) -> Option<(String, String, String)> {
+    let snapshot = snapshot.as_ref()?;
+    for project in &snapshot.projects {
+        for workspace in &project.workspaces {
+            if workspace.id.0 == workspace_id {
+                return Some((
+                    project.slug.clone(),
+                    workspace.workspace_name.clone(),
+                    workspace.worktree_path.clone(),
+                ));
             }
         }
     }

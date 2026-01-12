@@ -5,6 +5,7 @@ import { Sidebar } from "./sidebar"
 import { ChatPanel } from "./chat-panel"
 import { RightSidebar } from "./right-sidebar"
 import { KanbanBoard } from "./kanban-board"
+import type { ChangedFile } from "./right-sidebar"
 import {
   RIGHT_SIDEBAR_OPEN_KEY,
   RIGHT_SIDEBAR_WIDTH_KEY,
@@ -21,6 +22,7 @@ export function AgentIDE() {
   const [viewMode, setViewMode] = useState<"workspace" | "kanban">("workspace")
   const [sidebarWidthPx, setSidebarWidthPx] = useState(240)
   const [rightSidebarWidthPx, setRightSidebarWidthPx] = useState(320)
+  const [pendingDiffFile, setPendingDiffFile] = useState<ChangedFile | null>(null)
 
   useEffect(() => {
     const rawOpen = localStorage.getItem(RIGHT_SIDEBAR_OPEN_KEY)
@@ -116,7 +118,10 @@ export function AgentIDE() {
             </div>
 
             <div className="flex-1 min-w-0 flex">
-              <ChatPanel />
+              <ChatPanel
+                pendingDiffFile={pendingDiffFile}
+                onDiffFileOpened={() => setPendingDiffFile(null)}
+              />
             </div>
 
             {rightSidebarOpen ? (
@@ -142,6 +147,7 @@ export function AgentIDE() {
                   isOpen={rightSidebarOpen}
                   onToggle={() => setRightSidebarOpen(!rightSidebarOpen)}
                   widthPx={rightSidebarWidthPx}
+                  onOpenDiffTab={(file) => setPendingDiffFile(file)}
                 />
               </>
             ) : (
@@ -149,6 +155,7 @@ export function AgentIDE() {
                 isOpen={rightSidebarOpen}
                 onToggle={() => setRightSidebarOpen(!rightSidebarOpen)}
                 widthPx={rightSidebarWidthPx}
+                onOpenDiffTab={(file) => setPendingDiffFile(file)}
               />
             )}
           </>

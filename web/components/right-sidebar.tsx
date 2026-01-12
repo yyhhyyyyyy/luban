@@ -10,6 +10,7 @@ import {
   PanelRightOpen,
   Paperclip,
   ChevronDown,
+  ChevronRight,
   File as FileIcon,
   FileImage,
   FileText,
@@ -18,13 +19,25 @@ import {
   Trash2,
   Copy,
   FilePlus,
+  GitCompareArrows,
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { PtyTerminal } from "./pty-terminal"
 import { useLuban } from "@/lib/luban-context"
-import type { AttachmentRef, ContextItemSnapshot } from "@/lib/luban-api"
-import { deleteContextItem, fetchContext, uploadAttachment } from "@/lib/luban-http"
+import type {
+  AttachmentRef,
+  ChangedFileSnapshot,
+  ContextItemSnapshot,
+  FileChangeGroup,
+  FileChangeStatus,
+} from "@/lib/luban-api"
+import {
+  deleteContextItem,
+  fetchContext,
+  fetchWorkspaceChanges,
+  uploadAttachment,
+} from "@/lib/luban-http"
 import { emitAddChatAttachments } from "@/lib/chat-attachment-events"
 import { emitContextChanged, onContextChanged } from "@/lib/context-events"
 import { focusChatInput } from "@/lib/focus-chat-input"
@@ -36,15 +49,18 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 
-type RightPanelTab = "terminal" | "context"
+type RightPanelTab = "terminal" | "context" | "changes"
 
 interface RightSidebarProps {
   isOpen: boolean
   onToggle: () => void
   widthPx: number
+  onOpenDiffTab?: (file: ChangedFile) => void
 }
 
-export function RightSidebar({ isOpen, onToggle, widthPx }: RightSidebarProps) {
+export type ChangedFile = ChangedFileSnapshot
+
+export function RightSidebar({ isOpen, onToggle, widthPx, onOpenDiffTab }: RightSidebarProps) {
   const { activeWorkspaceId } = useLuban()
   const [activeTab, setActiveTab] = useState<RightPanelTab>("terminal")
   const [isDragOver, setIsDragOver] = useState(false)
@@ -63,6 +79,7 @@ export function RightSidebar({ isOpen, onToggle, widthPx }: RightSidebarProps) {
   }
 
   const canUseContext = activeWorkspaceId != null
+  const canUseChanges = activeWorkspaceId != null
 
   const handleDragOver = (e: React.DragEvent) => {
     if (activeTab !== "context") return
@@ -130,6 +147,23 @@ export function RightSidebar({ isOpen, onToggle, widthPx }: RightSidebarProps) {
           {activeTab === "context" && <span className="text-xs font-medium">Context</span>}
         </button>
 
+        <button
+          data-testid="right-sidebar-tab-changes"
+          onClick={() => setActiveTab("changes")}
+          className={cn(
+            "flex items-center gap-1.5 px-2 py-1.5 rounded transition-all",
+            activeTab === "changes"
+              ? "bg-primary/15 text-primary"
+              : "text-muted-foreground hover:text-foreground hover:bg-muted",
+            !canUseChanges && "opacity-60",
+          )}
+          title="Changes"
+          disabled={!canUseChanges}
+        >
+          <GitCompareArrows className="w-4 h-4" />
+          {activeTab === "changes" && <span className="text-xs font-medium">Changes</span>}
+        </button>
+
         <div className="flex-1" />
 
         <button
@@ -146,6 +180,8 @@ export function RightSidebar({ isOpen, onToggle, widthPx }: RightSidebarProps) {
           <div className="h-full overflow-auto overscroll-contain">
             <PtyTerminal />
           </div>
+        ) : activeTab === "changes" ? (
+          <ChangesPanel workspaceId={activeWorkspaceId} onOpenDiffTab={onOpenDiffTab} />
         ) : (
           <ContextPanel
             workspaceId={activeWorkspaceId}
@@ -155,6 +191,159 @@ export function RightSidebar({ isOpen, onToggle, widthPx }: RightSidebarProps) {
           />
         )}
       </div>
+    </div>
+  )
+}
+
+function ChangesPanel({
+  workspaceId,
+  onOpenDiffTab,
+}: {
+  workspaceId: number | null
+  onOpenDiffTab?: (file: ChangedFile) => void
+}) {
+  const [files, setFiles] = useState<ChangedFile[]>([])
+  const [error, setError] = useState<string | null>(null)
+  const [isLoading, setIsLoading] = useState(false)
+  const [expandedGroups, setExpandedGroups] = useState<Set<FileChangeGroup>>(
+    () => new Set(["staged", "unstaged"]),
+  )
+
+  const refresh = useCallback(async () => {
+    if (workspaceId == null) return
+    setIsLoading(true)
+    setError(null)
+    try {
+      const snap = await fetchWorkspaceChanges(workspaceId)
+      setFiles(snap.files ?? [])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setIsLoading(false)
+    }
+  }, [workspaceId])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
+
+  const toggleGroup = (group: FileChangeGroup) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev)
+      if (next.has(group)) next.delete(group)
+      else next.add(group)
+      return next
+    })
+  }
+
+  const committedFiles = files.filter((f) => f.group === "committed")
+  const stagedFiles = files.filter((f) => f.group === "staged")
+  const unstagedFiles = files.filter((f) => f.group === "unstaged")
+
+  const getStatusColor = (status: FileChangeStatus) => {
+    switch (status) {
+      case "modified":
+        return "text-status-warning"
+      case "added":
+        return "text-status-success"
+      case "deleted":
+        return "text-status-error"
+      case "renamed":
+        return "text-status-info"
+      default:
+        return "text-muted-foreground"
+    }
+  }
+
+  const getStatusLabel = (status: FileChangeStatus) => {
+    switch (status) {
+      case "modified":
+        return "M"
+      case "added":
+        return "A"
+      case "deleted":
+        return "D"
+      case "renamed":
+        return "R"
+      default:
+        return "?"
+    }
+  }
+
+  const renderGroup = (title: string, list: ChangedFile[], group: FileChangeGroup) => {
+    if (list.length === 0) return null
+    const isExpanded = expandedGroups.has(group)
+
+    return (
+      <div key={group}>
+        <button
+          onClick={() => toggleGroup(group)}
+          className="w-full flex items-center gap-1.5 px-2 py-1.5 hover:bg-muted/50 transition-colors"
+        >
+          {isExpanded ? (
+            <ChevronDown className="w-3 h-3 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="w-3 h-3 text-muted-foreground" />
+          )}
+          <span className="text-xs font-medium text-foreground">{title}</span>
+          <span className="text-[10px] text-muted-foreground">({list.length})</span>
+        </button>
+
+        {isExpanded && (
+          <div className="space-y-px">
+            {list.map((file) => (
+              <button
+                key={file.id}
+                onClick={() => onOpenDiffTab?.(file)}
+                className="group w-full flex items-center gap-2 py-1 px-2 pl-6 hover:bg-muted/50 transition-colors text-left"
+              >
+                <span className={cn("text-[10px] font-mono font-semibold w-3", getStatusColor(file.status))}>
+                  {getStatusLabel(file.status)}
+                </span>
+                <span className="flex-1 text-xs truncate text-muted-foreground group-hover:text-foreground">
+                  {file.name}
+                </span>
+                {(file.additions != null || file.deletions != null) && (
+                  <span className="text-[10px] text-muted-foreground/70">
+                    {file.additions != null && file.additions > 0 && (
+                      <span className="text-status-success">+{file.additions}</span>
+                    )}
+                    {file.additions != null &&
+                      file.deletions != null &&
+                      file.additions > 0 &&
+                      file.deletions > 0 && <span className="mx-0.5">/</span>}
+                    {file.deletions != null && file.deletions > 0 && (
+                      <span className="text-status-error">-{file.deletions}</span>
+                    )}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  if (workspaceId == null) {
+    return <div className="p-3 text-xs text-muted-foreground">Select a workspace to view changes.</div>
+  }
+
+  return (
+    <div className="py-1">
+      {isLoading && <div className="px-3 py-2 text-xs text-muted-foreground">Loading…</div>}
+      {error && <div className="px-3 py-2 text-xs text-destructive">{error}</div>}
+
+      {renderGroup("Committed", committedFiles, "committed")}
+      {renderGroup("Staged", stagedFiles, "staged")}
+      {renderGroup("Unstaged", unstagedFiles, "unstaged")}
+
+      {files.length === 0 && !isLoading && !error && (
+        <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+          <GitCompareArrows className="w-8 h-8 mb-2 opacity-50" />
+          <span className="text-xs">No changes</span>
+        </div>
+      )}
     </div>
   )
 }

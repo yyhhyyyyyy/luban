@@ -3,6 +3,7 @@ use axum::Router;
 use std::net::SocketAddr;
 
 pub mod engine;
+mod git_changes;
 pub mod pty;
 pub mod server;
 

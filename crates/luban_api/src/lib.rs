@@ -47,6 +47,60 @@ pub struct WorkspaceSnapshot {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum FileChangeStatus {
+    Modified,
+    Added,
+    Deleted,
+    Renamed,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FileChangeGroup {
+    Committed,
+    Staged,
+    Unstaged,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ChangedFileSnapshot {
+    pub id: String,
+    pub path: String,
+    pub name: String,
+    pub status: FileChangeStatus,
+    pub group: FileChangeGroup,
+    pub additions: Option<u64>,
+    pub deletions: Option<u64>,
+    pub old_path: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WorkspaceChangesSnapshot {
+    pub workspace_id: WorkspaceId,
+    pub files: Vec<ChangedFileSnapshot>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DiffFileContents {
+    pub name: String,
+    pub contents: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WorkspaceDiffFileSnapshot {
+    pub file: ChangedFileSnapshot,
+    pub old_file: DiffFileContents,
+    pub new_file: DiffFileContents,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WorkspaceDiffSnapshot {
+    pub workspace_id: WorkspaceId,
+    pub files: Vec<WorkspaceDiffFileSnapshot>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PullRequestState {
     Open,
     Closed,

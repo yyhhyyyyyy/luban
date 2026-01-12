@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Send,
   Brain,
@@ -15,6 +15,7 @@ import {
   X,
   ExternalLink,
   GitBranch,
+  GitCompareArrows,
   RotateCcw,
   Terminal,
   Eye,
@@ -25,6 +26,8 @@ import {
   ImageIcon,
   FileText,
   FileCode,
+  Columns2,
+  AlignJustify,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useLuban } from "@/lib/luban-context"
@@ -35,7 +38,7 @@ import {
 } from "@/lib/conversation-ui"
 import { AGENT_MODELS, supportedThinkingEffortsForModel } from "@/lib/agent-settings"
 import { ConversationView } from "@/components/conversation-view"
-import { uploadAttachment } from "@/lib/luban-http"
+import { fetchWorkspaceDiff, uploadAttachment } from "@/lib/luban-http"
 import type { AttachmentRef } from "@/lib/luban-api"
 import { onAddChatAttachments } from "@/lib/chat-attachment-events"
 import { emitContextChanged } from "@/lib/context-events"
@@ -45,6 +48,8 @@ import {
   loadJson,
   saveJson,
 } from "@/lib/ui-prefs"
+import type { ChangedFile } from "./right-sidebar"
+import { MultiFileDiff, type FileContents } from "@pierre/diffs/react"
 
 interface ChatTab {
   id: string
@@ -68,7 +73,19 @@ type ComposerAttachment = {
   attachment?: AttachmentRef
 }
 
-export function ChatPanel() {
+interface DiffFileData {
+  file: ChangedFile
+  oldFile: FileContents
+  newFile: FileContents
+}
+
+export function ChatPanel({
+  pendingDiffFile,
+  onDiffFileOpened,
+}: {
+  pendingDiffFile?: ChangedFile | null
+  onDiffFileOpened?: () => void
+}) {
   const [showTabDropdown, setShowTabDropdown] = useState(false)
 
   const scrollContainerRef = useRef<HTMLDivElement | null>(null)
@@ -103,6 +120,14 @@ export function ChatPanel() {
   const [isDragging, setIsDragging] = useState(false)
   const attachmentScopeRef = useRef<string>("")
   const attachmentScope = `${activeWorkspaceId ?? "none"}:${activeThreadId ?? "none"}`
+
+  const [activePanel, setActivePanel] = useState<"thread" | "diff">("thread")
+  const [diffStyle, setDiffStyle] = useState<"split" | "unified">("split")
+  const [diffFiles, setDiffFiles] = useState<DiffFileData[]>([])
+  const [diffActiveFileId, setDiffActiveFileId] = useState<string | undefined>(undefined)
+  const [isDiffTabOpen, setIsDiffTabOpen] = useState(false)
+  const [isDiffLoading, setIsDiffLoading] = useState(false)
+  const [diffError, setDiffError] = useState<string | null>(null)
 
   useEffect(() => {
     return onAddChatAttachments((incoming) => {
@@ -227,6 +252,50 @@ export function ChatPanel() {
     attachmentScopeRef.current = attachmentScope
   }, [activeWorkspaceId, activeThreadId])
 
+  useEffect(() => {
+    setIsDiffTabOpen(false)
+    setActivePanel("thread")
+    setDiffFiles([])
+    setDiffActiveFileId(undefined)
+    setIsDiffLoading(false)
+    setDiffError(null)
+  }, [activeWorkspaceId])
+
+  const openDiffTab = useCallback(
+    async (targetFile: ChangedFile) => {
+      if (activeWorkspaceId == null) return
+      setIsDiffTabOpen(true)
+      setActivePanel("diff")
+      setDiffActiveFileId(targetFile.id)
+      setIsDiffLoading(true)
+      setDiffError(null)
+
+      try {
+        const snap = await fetchWorkspaceDiff(activeWorkspaceId)
+        const files: DiffFileData[] = (snap.files ?? []).map((file) => ({
+          file: file.file,
+          oldFile: { name: file.old_file.name, contents: file.old_file.contents },
+          newFile: { name: file.new_file.name, contents: file.new_file.contents },
+        }))
+        setDiffFiles(files)
+      } catch (err) {
+        setDiffError(err instanceof Error ? err.message : String(err))
+        setDiffFiles([])
+      } finally {
+        setIsDiffLoading(false)
+      }
+    },
+    [activeWorkspaceId],
+  )
+
+  useEffect(() => {
+    if (!pendingDiffFile) return
+    void (async () => {
+      await openDiffTab(pendingDiffFile)
+      onDiffFileOpened?.()
+    })()
+  }, [onDiffFileOpened, openDiffTab, pendingDiffFile])
+
   function scheduleScrollToBottom() {
     const el = scrollContainerRef.current
     if (!el) return
@@ -257,7 +326,20 @@ export function ChatPanel() {
   const handleTabClick = (tabId: string) => {
     const id = Number(tabId)
     if (!Number.isFinite(id)) return
+    setActivePanel("thread")
     void selectThread(id)
+  }
+
+  const handleDiffTabClick = () => {
+    if (!isDiffTabOpen) return
+    setActivePanel("diff")
+  }
+
+  const handleCloseDiffTab = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setIsDiffTabOpen(false)
+    setActivePanel("thread")
+    setDiffActiveFileId(undefined)
   }
 
   const handleCloseTab = (tabId: string, e: React.MouseEvent) => {
@@ -406,7 +488,7 @@ export function ChatPanel() {
               onClick={() => handleTabClick(tab.id)}
               className={cn(
                 "group relative flex items-center gap-2 h-10 px-3 cursor-pointer transition-colors min-w-0 max-w-[180px]",
-                tab.id === activeTabId
+                activePanel === "thread" && tab.id === activeTabId
                   ? "text-foreground bg-background"
                   : "text-muted-foreground hover:text-foreground hover:bg-muted/50",
               )}
@@ -423,11 +505,38 @@ export function ChatPanel() {
                   <X className="w-3 h-3" />
                 </button>
               )}
-              {tab.id === activeTabId && (
+              {activePanel === "thread" && tab.id === activeTabId && (
                 <div className="absolute bottom-0 left-2 right-2 h-0.5 bg-primary rounded-full" />
               )}
             </div>
           ))}
+
+          {isDiffTabOpen && (
+            <div
+              key="diff-tab"
+              onClick={handleDiffTabClick}
+              className={cn(
+                "group relative flex items-center gap-2 h-10 px-3 cursor-pointer transition-colors min-w-0 max-w-[180px]",
+                activePanel === "diff"
+                  ? "text-foreground bg-background"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50",
+              )}
+            >
+              <GitCompareArrows className="w-3.5 h-3.5 flex-shrink-0" />
+              <span className="text-xs truncate flex-1">Changes</span>
+              <button
+                onClick={handleCloseDiffTab}
+                className="p-0.5 opacity-0 group-hover:opacity-100 hover:bg-muted rounded transition-all"
+                title="Close changes tab"
+              >
+                <X className="w-3 h-3" />
+              </button>
+              {activePanel === "diff" && (
+                <div className="absolute bottom-0 left-2 right-2 h-0.5 bg-primary rounded-full" />
+              )}
+            </div>
+          )}
+
           <button
             onClick={handleAddTab}
             className="flex items-center justify-center w-8 h-10 text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors flex-shrink-0"
@@ -460,6 +569,21 @@ export function ChatPanel() {
                     </span>
                   </div>
                   <div className="max-h-40 overflow-y-auto">
+                    {isDiffTabOpen && (
+                      <button
+                        onClick={() => {
+                          handleDiffTabClick()
+                          setShowTabDropdown(false)
+                        }}
+                        className={cn(
+                          "w-full flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-muted transition-colors",
+                          activePanel === "diff" && "bg-primary/10 text-primary",
+                        )}
+                      >
+                        <GitCompareArrows className="w-3.5 h-3.5 flex-shrink-0" />
+                        <span className="truncate">Changes</span>
+                      </button>
+                    )}
                     {tabs.map((tab) => (
                       <button
                         key={tab.id}
@@ -469,7 +593,7 @@ export function ChatPanel() {
                         }}
                         className={cn(
                           "w-full flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-muted transition-colors",
-                          tab.id === activeTabId && "bg-primary/10 text-primary",
+                          activePanel === "thread" && tab.id === activeTabId && "bg-primary/10 text-primary",
                         )}
                       >
                         <MessageSquare className="w-3.5 h-3.5 flex-shrink-0" />
@@ -506,107 +630,129 @@ export function ChatPanel() {
         </div>
       </div>
 
-      <div
-        data-testid="chat-scroll-container"
-        className="flex-1 overflow-y-auto relative"
-        ref={scrollContainerRef}
-        onScroll={(e) => {
-          if (activeWorkspaceId == null || activeThreadId == null) return
-          const el = e.target as HTMLDivElement
-          const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-          const isNearBottom = distanceToBottom < 50
-          if (!programmaticScrollRef.current) {
-            setFollowTail(isNearBottom)
-            localStorage.setItem(
-              followTailKey(activeWorkspaceId, activeThreadId),
-              isNearBottom ? "true" : "false",
-            )
-          }
-        }}
-      >
-        <ConversationView
-          messages={messages}
-          workspaceId={activeWorkspaceId ?? undefined}
-          className="max-w-3xl mx-auto py-4 px-4 pb-20"
-          emptyState={
-            <div className="max-w-3xl mx-auto py-4 px-4 text-sm text-muted-foreground">
-              {activeWorkspaceId == null ? "Select a workspace to start." : "Select a thread to load conversation."}
+      {activePanel === "diff" ? (
+        <div className="flex-1 overflow-hidden">
+          {isDiffLoading ? (
+            <div className="px-4 py-3 text-xs text-muted-foreground">Loading…</div>
+          ) : diffError ? (
+            <div className="px-4 py-3 text-xs text-destructive">{diffError}</div>
+          ) : diffFiles.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+              <GitCompareArrows className="w-8 h-8 mb-2 opacity-50" />
+              <span className="text-xs">No changes</span>
             </div>
-          }
-        />
-      </div>
+          ) : (
+            <AllFilesDiffViewer
+              files={diffFiles}
+              activeFileId={diffActiveFileId}
+              diffStyle={diffStyle}
+              onStyleChange={setDiffStyle}
+            />
+          )}
+        </div>
+      ) : (
+        <>
+          <div
+            data-testid="chat-scroll-container"
+            className="flex-1 overflow-y-auto relative"
+            ref={scrollContainerRef}
+            onScroll={(e) => {
+              if (activeWorkspaceId == null || activeThreadId == null) return
+              const el = e.target as HTMLDivElement
+              const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+              const isNearBottom = distanceToBottom < 50
+              if (!programmaticScrollRef.current) {
+                setFollowTail(isNearBottom)
+                localStorage.setItem(
+                  followTailKey(activeWorkspaceId, activeThreadId),
+                  isNearBottom ? "true" : "false",
+                )
+              }
+            }}
+          >
+            <ConversationView
+              messages={messages}
+              workspaceId={activeWorkspaceId ?? undefined}
+              className="max-w-3xl mx-auto py-4 px-4 pb-20"
+              emptyState={
+                <div className="max-w-3xl mx-auto py-4 px-4 text-sm text-muted-foreground">
+                  {activeWorkspaceId == null ? "Select a workspace to start." : "Select a thread to load conversation."}
+                </div>
+              }
+            />
+          </div>
 
-      <div className="relative z-10 -mt-16 pt-8 bg-gradient-to-t from-background via-background to-transparent pointer-events-none">
-        <div className="pointer-events-auto">
-          {!followTail && messages.length > 0 ? (
-            <div className="flex justify-center pb-2">
-              <button
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-card border border-border rounded-full text-xs text-muted-foreground hover:text-foreground hover:border-primary/50 transition-all shadow-sm hover:shadow-md"
-                onClick={() => {
-                  if (activeWorkspaceId == null || activeThreadId == null) return
-                  setFollowTail(true)
-                  localStorage.setItem(followTailKey(activeWorkspaceId, activeThreadId), "true")
-                  scheduleScrollToBottom()
-                }}
-              >
-                <ArrowDown className="w-3 h-3" />
-                Scroll to bottom
-              </button>
-            </div>
-          ) : null}
+          <div className="relative z-10 -mt-16 pt-8 bg-gradient-to-t from-background via-background to-transparent pointer-events-none">
+            <div className="pointer-events-auto">
+              {!followTail && messages.length > 0 ? (
+                <div className="flex justify-center pb-2">
+                  <button
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-card border border-border rounded-full text-xs text-muted-foreground hover:text-foreground hover:border-primary/50 transition-all shadow-sm hover:shadow-md"
+                    onClick={() => {
+                      if (activeWorkspaceId == null || activeThreadId == null) return
+                      setFollowTail(true)
+                      localStorage.setItem(followTailKey(activeWorkspaceId, activeThreadId), "true")
+                      scheduleScrollToBottom()
+                    }}
+                  >
+                    <ArrowDown className="w-3 h-3" />
+                    Scroll to bottom
+                  </button>
+                </div>
+              ) : null}
 
-          <div className="px-4 pb-4">
-            <div className="max-w-3xl mx-auto">
-              <div
-                className={cn(
-                  "relative bg-background border rounded-lg shadow-lg transition-all",
-                  isComposerFocused ? "border-primary/50 ring-1 ring-primary/20 shadow-xl" : "border-border",
-                  isDragging && "border-primary ring-2 ring-primary/30 bg-primary/5",
-                )}
-                onDragOver={(e) => {
-                  e.preventDefault()
-                  if (activeWorkspaceId == null || activeThreadId == null) return
-                  setIsDragging(true)
-                }}
-                onDragLeave={(e) => {
-                  e.preventDefault()
-                  setIsDragging(false)
-                }}
-                onDrop={(e) => {
-                  e.preventDefault()
-                  setIsDragging(false)
-                  const raw = e.dataTransfer.getData("luban-context-attachment")
-                  if (raw) {
-                    try {
-                      const attachment = JSON.parse(raw) as AttachmentRef
-                      if (attachment && typeof attachment.id === "string") {
-                        const isImage = attachment.kind === "image"
-                        const previewUrl =
-                          isImage && activeWorkspaceId != null
-                            ? `/api/workspaces/${activeWorkspaceId}/attachments/${attachment.id}?ext=${encodeURIComponent(attachment.extension)}`
-                            : undefined
-                        setAttachments((prev) => [
-                          ...prev,
-                          {
-                            id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-                            type: isImage ? "image" : "file",
-                            name: attachment.name,
-                            size: attachment.byte_len,
-                            previewUrl,
-                            status: "ready",
-                            attachment,
-                          },
-                        ])
-                        return
+              <div className="px-4 pb-4">
+                <div className="max-w-3xl mx-auto">
+                  <div
+                    className={cn(
+                      "relative bg-background border rounded-lg shadow-lg transition-all",
+                      isComposerFocused ? "border-primary/50 ring-1 ring-primary/20 shadow-xl" : "border-border",
+                      isDragging && "border-primary ring-2 ring-primary/30 bg-primary/5",
+                    )}
+                    onDragOver={(e) => {
+                      e.preventDefault()
+                      if (activeWorkspaceId == null || activeThreadId == null) return
+                      setIsDragging(true)
+                    }}
+                    onDragLeave={(e) => {
+                      e.preventDefault()
+                      setIsDragging(false)
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault()
+                      setIsDragging(false)
+                      const raw = e.dataTransfer.getData("luban-context-attachment")
+                      if (raw) {
+                        try {
+                          const attachment = JSON.parse(raw) as AttachmentRef
+                          if (attachment && typeof attachment.id === "string") {
+                            const isImage = attachment.kind === "image"
+                            const previewUrl =
+                              isImage && activeWorkspaceId != null
+                                ? `/api/workspaces/${activeWorkspaceId}/attachments/${attachment.id}?ext=${encodeURIComponent(attachment.extension)}`
+                                : undefined
+                            setAttachments((prev) => [
+                              ...prev,
+                              {
+                                id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                                type: isImage ? "image" : "file",
+                                name: attachment.name,
+                                size: attachment.byte_len,
+                                previewUrl,
+                                status: "ready",
+                                attachment,
+                              },
+                            ])
+                            return
+                          }
+                        } catch {
+                          // Ignore invalid payloads.
+                        }
                       }
-                    } catch {
-                      // Ignore invalid payloads.
-                    }
-                  }
 
-                  handleFileSelect(e.dataTransfer.files)
-                }}
-              >
+                      handleFileSelect(e.dataTransfer.files)
+                    }}
+                  >
                 {isDragging && (
                   <div className="absolute inset-0 z-10 flex items-center justify-center bg-primary/5 rounded-lg border-2 border-dashed border-primary">
                     <div className="flex flex-col items-center gap-2 text-primary">
@@ -853,6 +999,175 @@ export function ChatPanel() {
             </div>
           </div>
         </div>
+      </div>
+    </>
+      )}
+    </div>
+  )
+}
+
+function AllFilesDiffViewer({
+  files,
+  activeFileId,
+  diffStyle,
+  onStyleChange,
+}: {
+  files: DiffFileData[]
+  activeFileId?: string
+  diffStyle: "split" | "unified"
+  onStyleChange: (style: "split" | "unified") => void
+}) {
+  const fileRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const prevActiveFileIdRef = useRef<string | undefined>(undefined)
+  const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(() => new Set())
+
+  const toggleCollapse = (fileId: string) => {
+    setCollapsedFiles((prev) => {
+      const next = new Set(prev)
+      if (next.has(fileId)) next.delete(fileId)
+      else next.add(fileId)
+      return next
+    })
+  }
+
+  useEffect(() => {
+    if (!activeFileId) return
+    if (activeFileId === prevActiveFileIdRef.current) return
+
+    const el = fileRefs.current[activeFileId]
+    if (!el) return
+
+    if (collapsedFiles.has(activeFileId)) {
+      setCollapsedFiles((prev) => {
+        const next = new Set(prev)
+        next.delete(activeFileId)
+        return next
+      })
+    }
+
+    el.scrollIntoView({ behavior: "smooth", block: "start" })
+    prevActiveFileIdRef.current = activeFileId
+  }, [activeFileId, collapsedFiles])
+
+  const getStatusColor = (status: ChangedFile["status"]) => {
+    switch (status) {
+      case "modified":
+        return "text-status-warning"
+      case "added":
+        return "text-status-success"
+      case "deleted":
+        return "text-status-error"
+      case "renamed":
+        return "text-status-info"
+      default:
+        return "text-muted-foreground"
+    }
+  }
+
+  const getStatusLabel = (status: ChangedFile["status"]) => {
+    switch (status) {
+      case "modified":
+        return "M"
+      case "added":
+        return "A"
+      case "deleted":
+        return "D"
+      case "renamed":
+        return "R"
+      default:
+        return "?"
+    }
+  }
+
+  const totalAdditions = files.reduce((sum, f) => sum + (f.file.additions ?? 0), 0)
+  const totalDeletions = files.reduce((sum, f) => sum + (f.file.deletions ?? 0), 0)
+
+  return (
+    <div className="flex-1 flex flex-col overflow-hidden bg-background" data-testid="diff-viewer">
+      <div className="flex items-center gap-2 px-4 py-2 bg-muted/50 border-b border-border text-xs">
+        <span className="text-foreground font-medium">{files.length} files changed</span>
+        <span className="text-muted-foreground">
+          {totalAdditions > 0 && <span className="text-status-success">+{totalAdditions}</span>}
+          {totalAdditions > 0 && totalDeletions > 0 && <span className="mx-1">/</span>}
+          {totalDeletions > 0 && <span className="text-status-error">-{totalDeletions}</span>}
+        </span>
+        <div className="ml-auto flex items-center gap-0.5 p-0.5 bg-muted rounded">
+          <button
+            onClick={() => onStyleChange("split")}
+            className={cn(
+              "p-1 rounded transition-colors",
+              diffStyle === "split"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+            title="Split view"
+          >
+            <Columns2 className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => onStyleChange("unified")}
+            className={cn(
+              "p-1 rounded transition-colors",
+              diffStyle === "unified"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+            title="Unified view"
+          >
+            <AlignJustify className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-auto">
+        {files.map((fileData) => {
+          const isCollapsed = collapsedFiles.has(fileData.file.id)
+          return (
+            <div
+              key={fileData.file.id}
+              ref={(el) => {
+                fileRefs.current[fileData.file.id] = el
+              }}
+              className="border-b border-border last:border-b-0"
+            >
+              <button
+                onClick={() => toggleCollapse(fileData.file.id)}
+                className="sticky top-0 z-[5] w-full flex items-center gap-2 px-4 py-2 bg-muted/80 backdrop-blur-sm border-b border-border/50 text-xs hover:bg-muted transition-colors text-left"
+              >
+                {isCollapsed ? (
+                  <ChevronRight className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+                ) : (
+                  <ChevronDown className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+                )}
+                <span className={cn("font-mono font-semibold", getStatusColor(fileData.file.status))}>
+                  {getStatusLabel(fileData.file.status)}
+                </span>
+                <span className="font-mono text-foreground">{fileData.file.path}</span>
+                {fileData.file.additions != null && fileData.file.additions > 0 && (
+                  <span className="text-status-success">+{fileData.file.additions}</span>
+                )}
+                {fileData.file.deletions != null && fileData.file.deletions > 0 && (
+                  <span className="text-status-error">-{fileData.file.deletions}</span>
+                )}
+              </button>
+
+              {!isCollapsed && (
+                <MultiFileDiff
+                  oldFile={fileData.oldFile}
+                  newFile={fileData.newFile}
+                  options={{
+                    theme: { dark: "pierre-dark", light: "pierre-light" },
+                    diffStyle: diffStyle,
+                    diffIndicators: "bars",
+                    hunkSeparators: "line-info",
+                    lineDiffType: "word-alt",
+                    enableLineSelection: true,
+                  }}
+                />
+              )}
+            </div>
+          )
+        })}
       </div>
     </div>
   )

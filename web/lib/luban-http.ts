@@ -5,6 +5,8 @@ import type {
   ContextSnapshot,
   ConversationSnapshot,
   ThreadsSnapshot,
+  WorkspaceChangesSnapshot,
+  WorkspaceDiffSnapshot,
 } from "./luban-api"
 
 export async function fetchApp(): Promise<AppSnapshot> {
@@ -69,4 +71,16 @@ export async function deleteContextItem(workspaceId: number, contextId: number):
       `DELETE /api/workspaces/${workspaceId}/context/${contextId} failed: ${res.status}${text ? `: ${text}` : ""}`,
     )
   }
+}
+
+export async function fetchWorkspaceChanges(workspaceId: number): Promise<WorkspaceChangesSnapshot> {
+  const res = await fetch(`/api/workspaces/${workspaceId}/changes`)
+  if (!res.ok) throw new Error(`GET /api/workspaces/${workspaceId}/changes failed: ${res.status}`)
+  return (await res.json()) as WorkspaceChangesSnapshot
+}
+
+export async function fetchWorkspaceDiff(workspaceId: number): Promise<WorkspaceDiffSnapshot> {
+  const res = await fetch(`/api/workspaces/${workspaceId}/diff`)
+  if (!res.ok) throw new Error(`GET /api/workspaces/${workspaceId}/diff failed: ${res.status}`)
+  return (await res.json()) as WorkspaceDiffSnapshot
 }
