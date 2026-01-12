@@ -9,18 +9,14 @@ import {
   CheckCircle2,
   ChevronDown,
   Clock,
-  Eye,
   FolderGit2,
   GitBranch,
   GitPullRequest,
   LayoutGrid,
   Loader2,
   MessageCircle,
-  Pencil,
   Send,
   Settings2,
-  Terminal,
-  Wrench,
   X,
   XCircle,
 } from "lucide-react"
@@ -28,9 +24,10 @@ import {
 import { cn } from "@/lib/utils"
 import { useLuban } from "@/lib/luban-context"
 import { fetchConversation, fetchThreads } from "@/lib/luban-http"
-import { agentModelLabel, buildMessages, thinkingEffortLabel, type ActivityEvent, type Message } from "@/lib/conversation-ui"
+import { agentModelLabel, buildMessages, thinkingEffortLabel, type Message } from "@/lib/conversation-ui"
 import { Markdown } from "@/components/markdown"
 import type { ConversationEntry, ConversationSnapshot } from "@/lib/luban-api"
+import { ActivityStream } from "@/components/activity-stream"
 
 type WorktreeStatus =
   | "idle"
@@ -233,35 +230,6 @@ function WorktreeCard({
   )
 }
 
-function ActivityEventItem({ event }: { event: ActivityEvent }) {
-  const icon = (() => {
-    switch (event.type) {
-      case "thinking":
-        return <Brain className="w-3.5 h-3.5" />
-      case "file_edit":
-        return <Pencil className="w-3.5 h-3.5" />
-      case "bash":
-        return <Terminal className="w-3.5 h-3.5" />
-      case "search":
-        return <Eye className="w-3.5 h-3.5" />
-      case "tool_call":
-        return <Wrench className="w-3.5 h-3.5" />
-      case "complete":
-        return <CheckCircle2 className="w-3.5 h-3.5" />
-      default:
-        return <Wrench className="w-3.5 h-3.5" />
-    }
-  })()
-
-  return (
-    <div className={cn("flex items-center gap-2 py-1 px-2 rounded text-xs", event.status === "running" ? "text-primary" : "text-muted-foreground")}>
-      {event.status === "running" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : icon}
-      <span className="flex-1 truncate">{event.title}</span>
-      {event.duration && <span className="text-[10px] text-muted-foreground/70">{event.duration}</span>}
-    </div>
-  )
-}
-
 function WorktreePreviewPanel({
   worktree,
   onClose,
@@ -397,11 +365,7 @@ function WorktreePreviewPanel({
               {message.type === "assistant" ? (
                 <div className="space-y-2">
                   {message.activities && (
-                    <div className="space-y-0.5">
-                      {message.activities.map((event) => (
-                        <ActivityEventItem key={event.id} event={event} />
-                      ))}
-                    </div>
+                    <ActivityStream activities={message.activities} isStreaming={message.isStreaming} />
                   )}
 
                   {message.content && message.content.length > 0 ? (
@@ -432,6 +396,13 @@ function WorktreePreviewPanel({
               )}
             </div>
           ))}
+
+          {worktree.status === "agent-running" && (
+            <div className="flex items-center gap-2 py-2 px-2 rounded text-xs text-primary">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              <span>Agent is working...</span>
+            </div>
+          )}
         </div>
       </div>
 
