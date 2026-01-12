@@ -29,6 +29,8 @@ impl AppState {
             right_pane: RightPane::None,
             sidebar_width: None,
             terminal_pane_width: None,
+            appearance_theme: crate::AppearanceTheme::default(),
+            appearance_fonts: crate::AppearanceFonts::default(),
             agent_default_model_id: default_agent_model_id().to_owned(),
             agent_default_thinking_effort: default_thinking_effort(),
             conversations: HashMap::new(),
@@ -831,6 +833,53 @@ impl AppState {
             }
             Action::SidebarWidthChanged { width } => {
                 self.sidebar_width = Some(width);
+                vec![Effect::SaveAppState]
+            }
+            Action::AppearanceThemeChanged { theme } => {
+                if self.appearance_theme == theme {
+                    return Vec::new();
+                }
+                self.appearance_theme = theme;
+                vec![Effect::SaveAppState]
+            }
+            Action::AppearanceFontsChanged {
+                ui_font,
+                chat_font,
+                code_font,
+                terminal_font,
+            } => {
+                let normalize = |raw: String| {
+                    let trimmed = raw.trim();
+                    if trimmed.is_empty() || trimmed.len() > 128 {
+                        None
+                    } else {
+                        Some(trimmed.to_owned())
+                    }
+                };
+
+                let Some(ui_font) = normalize(ui_font) else {
+                    return Vec::new();
+                };
+                let Some(chat_font) = normalize(chat_font) else {
+                    return Vec::new();
+                };
+                let Some(code_font) = normalize(code_font) else {
+                    return Vec::new();
+                };
+                let Some(terminal_font) = normalize(terminal_font) else {
+                    return Vec::new();
+                };
+
+                let next = crate::AppearanceFonts {
+                    ui_font,
+                    chat_font,
+                    code_font,
+                    terminal_font,
+                };
+                if self.appearance_fonts == next {
+                    return Vec::new();
+                }
+                self.appearance_fonts = next;
                 vec![Effect::SaveAppState]
             }
             Action::WorkspaceChatScrollSaved {
@@ -1665,6 +1714,11 @@ mod tests {
                 projects: Vec::new(),
                 sidebar_width: None,
                 terminal_pane_width: Some(480),
+                appearance_theme: None,
+                appearance_ui_font: None,
+                appearance_chat_font: None,
+                appearance_code_font: None,
+                appearance_terminal_font: None,
                 agent_default_model_id: None,
                 agent_default_thinking_effort: None,
                 last_open_workspace_id: None,
@@ -1697,6 +1751,11 @@ mod tests {
                 projects: Vec::new(),
                 sidebar_width: Some(360),
                 terminal_pane_width: None,
+                appearance_theme: None,
+                appearance_ui_font: None,
+                appearance_chat_font: None,
+                appearance_code_font: None,
+                appearance_terminal_font: None,
                 agent_default_model_id: None,
                 agent_default_thinking_effort: None,
                 last_open_workspace_id: None,

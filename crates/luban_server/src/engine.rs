@@ -1221,6 +1221,19 @@ impl Engine {
                         .collect(),
                 })
                 .collect(),
+            appearance: luban_api::AppearanceSnapshot {
+                theme: match self.state.appearance_theme {
+                    luban_domain::AppearanceTheme::Light => luban_api::AppearanceTheme::Light,
+                    luban_domain::AppearanceTheme::Dark => luban_api::AppearanceTheme::Dark,
+                    luban_domain::AppearanceTheme::System => luban_api::AppearanceTheme::System,
+                },
+                fonts: luban_api::AppearanceFontsSnapshot {
+                    ui_font: self.state.appearance_fonts.ui_font.clone(),
+                    chat_font: self.state.appearance_fonts.chat_font.clone(),
+                    code_font: self.state.appearance_fonts.code_font.clone(),
+                    terminal_font: self.state.appearance_fonts.terminal_font.clone(),
+                },
+            },
         }
     }
 
@@ -1737,6 +1750,19 @@ fn map_client_action(action: luban_api::ClientAction) -> Option<Action> {
             thread_id: WorkspaceThreadId::from_u64(thread_id.0),
             to_index,
         }),
+        luban_api::ClientAction::AppearanceThemeChanged { theme } => Some(Action::AppearanceThemeChanged {
+            theme: match theme {
+                luban_api::AppearanceTheme::Light => luban_domain::AppearanceTheme::Light,
+                luban_api::AppearanceTheme::Dark => luban_domain::AppearanceTheme::Dark,
+                luban_api::AppearanceTheme::System => luban_domain::AppearanceTheme::System,
+            },
+        }),
+        luban_api::ClientAction::AppearanceFontsChanged { fonts } => Some(Action::AppearanceFontsChanged {
+            ui_font: fonts.ui_font,
+            chat_font: fonts.chat_font,
+            code_font: fonts.code_font,
+            terminal_font: fonts.terminal_font,
+        }),
     }
 }
 
@@ -1954,6 +1980,11 @@ mod tests {
                 projects: Vec::new(),
                 sidebar_width: None,
                 terminal_pane_width: None,
+                appearance_theme: None,
+                appearance_ui_font: None,
+                appearance_chat_font: None,
+                appearance_code_font: None,
+                appearance_terminal_font: None,
                 agent_default_model_id: None,
                 agent_default_thinking_effort: None,
                 last_open_workspace_id: None,
@@ -2343,6 +2374,11 @@ mod tests {
                 projects: Vec::new(),
                 sidebar_width: None,
                 terminal_pane_width: None,
+                appearance_theme: None,
+                appearance_ui_font: None,
+                appearance_chat_font: None,
+                appearance_code_font: None,
+                appearance_terminal_font: None,
                 agent_default_model_id: None,
                 agent_default_thinking_effort: None,
                 last_open_workspace_id: None,
@@ -2586,6 +2622,11 @@ mod tests {
                 projects: Vec::new(),
                 sidebar_width: None,
                 terminal_pane_width: None,
+                appearance_theme: None,
+                appearance_ui_font: None,
+                appearance_chat_font: None,
+                appearance_code_font: None,
+                appearance_terminal_font: None,
                 agent_default_model_id: None,
                 agent_default_thinking_effort: None,
                 last_open_workspace_id: None,

@@ -18,6 +18,29 @@ pub struct WorkspaceThreadId(pub u64);
 pub struct AppSnapshot {
     pub rev: u64,
     pub projects: Vec<ProjectSnapshot>,
+    pub appearance: AppearanceSnapshot,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AppearanceSnapshot {
+    pub theme: AppearanceTheme,
+    pub fonts: AppearanceFontsSnapshot,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AppearanceTheme {
+    Light,
+    Dark,
+    System,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AppearanceFontsSnapshot {
+    pub ui_font: String,
+    pub chat_font: String,
+    pub code_font: String,
+    pub terminal_font: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -448,6 +471,12 @@ pub enum ClientAction {
         workspace_id: WorkspaceId,
         thread_id: WorkspaceThreadId,
         to_index: usize,
+    },
+    AppearanceThemeChanged {
+        theme: AppearanceTheme,
+    },
+    AppearanceFontsChanged {
+        fonts: AppearanceFontsSnapshot,
     },
 }
 

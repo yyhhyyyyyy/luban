@@ -20,6 +20,11 @@ const WORKSPACE_UNREAD_COMPLETION_PREFIX: &str = "workspace_unread_completion_";
 const LAST_OPEN_WORKSPACE_ID_KEY: &str = "last_open_workspace_id";
 const AGENT_DEFAULT_MODEL_ID_KEY: &str = "agent_default_model_id";
 const AGENT_DEFAULT_THINKING_EFFORT_KEY: &str = "agent_default_thinking_effort";
+const APPEARANCE_THEME_KEY: &str = "appearance_theme";
+const APPEARANCE_UI_FONT_KEY: &str = "appearance_ui_font";
+const APPEARANCE_CHAT_FONT_KEY: &str = "appearance_chat_font";
+const APPEARANCE_CODE_FONT_KEY: &str = "appearance_code_font";
+const APPEARANCE_TERMINAL_FONT_KEY: &str = "appearance_terminal_font";
 
 const MIGRATIONS: &[(u32, &str)] = &[
     (
@@ -724,6 +729,11 @@ impl SqliteDatabase {
                 projects,
                 sidebar_width: None,
                 terminal_pane_width: None,
+                appearance_theme: None,
+                appearance_ui_font: None,
+                appearance_chat_font: None,
+                appearance_code_font: None,
+                appearance_terminal_font: None,
                 agent_default_model_id,
                 agent_default_thinking_effort,
                 last_open_workspace_id: None,
@@ -758,6 +768,56 @@ impl SqliteDatabase {
             .optional()
             .context("failed to load terminal pane width")?
             .and_then(|value| u16::try_from(value).ok());
+
+        let appearance_theme = self
+            .conn
+            .query_row(
+                "SELECT value FROM app_settings_text WHERE key = ?1",
+                params![APPEARANCE_THEME_KEY],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .context("failed to load appearance theme")?;
+
+        let appearance_ui_font = self
+            .conn
+            .query_row(
+                "SELECT value FROM app_settings_text WHERE key = ?1",
+                params![APPEARANCE_UI_FONT_KEY],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .context("failed to load appearance ui font")?;
+
+        let appearance_chat_font = self
+            .conn
+            .query_row(
+                "SELECT value FROM app_settings_text WHERE key = ?1",
+                params![APPEARANCE_CHAT_FONT_KEY],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .context("failed to load appearance chat font")?;
+
+        let appearance_code_font = self
+            .conn
+            .query_row(
+                "SELECT value FROM app_settings_text WHERE key = ?1",
+                params![APPEARANCE_CODE_FONT_KEY],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .context("failed to load appearance code font")?;
+
+        let appearance_terminal_font = self
+            .conn
+            .query_row(
+                "SELECT value FROM app_settings_text WHERE key = ?1",
+                params![APPEARANCE_TERMINAL_FONT_KEY],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .context("failed to load appearance terminal font")?;
 
         let last_open_workspace_id = self
             .conn
@@ -997,6 +1057,11 @@ impl SqliteDatabase {
             projects,
             sidebar_width,
             terminal_pane_width,
+            appearance_theme,
+            appearance_ui_font,
+            appearance_chat_font,
+            appearance_code_font,
+            appearance_terminal_font,
             agent_default_model_id,
             agent_default_thinking_effort,
             last_open_workspace_id,
@@ -1161,6 +1226,22 @@ impl SqliteDatabase {
         }
 
         if self.persist_ui_state {
+            let upsert_text = |tx: &rusqlite::Transaction<'_>, key: &str, value: Option<&str>| {
+                if let Some(value) = value {
+                    tx.execute(
+                        "INSERT INTO app_settings_text (key, value, created_at, updated_at)
+                         VALUES (?1, ?2, COALESCE((SELECT created_at FROM app_settings_text WHERE key = ?1), ?3), ?3)
+                         ON CONFLICT(key) DO UPDATE SET
+                           value = excluded.value,
+                           updated_at = excluded.updated_at",
+                        params![key, value, now],
+                    )?;
+                } else {
+                    tx.execute("DELETE FROM app_settings_text WHERE key = ?1", params![key])?;
+                }
+                Ok::<(), rusqlite::Error>(())
+            };
+
             if let Some(value) = snapshot.sidebar_width {
                 tx.execute(
                     "INSERT INTO app_settings (key, value, created_at, updated_at)
@@ -1189,6 +1270,24 @@ impl SqliteDatabase {
                     [],
                 )?;
             }
+
+            upsert_text(&tx, APPEARANCE_THEME_KEY, snapshot.appearance_theme.as_deref())?;
+            upsert_text(&tx, APPEARANCE_UI_FONT_KEY, snapshot.appearance_ui_font.as_deref())?;
+            upsert_text(
+                &tx,
+                APPEARANCE_CHAT_FONT_KEY,
+                snapshot.appearance_chat_font.as_deref(),
+            )?;
+            upsert_text(
+                &tx,
+                APPEARANCE_CODE_FONT_KEY,
+                snapshot.appearance_code_font.as_deref(),
+            )?;
+            upsert_text(
+                &tx,
+                APPEARANCE_TERMINAL_FONT_KEY,
+                snapshot.appearance_terminal_font.as_deref(),
+            )?;
         }
 
         if let Some(value) = snapshot.agent_default_model_id.as_deref() {
@@ -1915,6 +2014,11 @@ mod tests {
             }],
             sidebar_width: Some(280),
             terminal_pane_width: Some(360),
+            appearance_theme: Some("dark".to_owned()),
+            appearance_ui_font: Some("Inter".to_owned()),
+            appearance_chat_font: Some("Inter".to_owned()),
+            appearance_code_font: Some("Geist Mono".to_owned()),
+            appearance_terminal_font: Some("Geist Mono".to_owned()),
             agent_default_model_id: Some("gpt-5.2-codex".to_owned()),
             agent_default_thinking_effort: Some("high".to_owned()),
             last_open_workspace_id: Some(10),
@@ -1962,6 +2066,11 @@ mod tests {
             }],
             sidebar_width: None,
             terminal_pane_width: None,
+            appearance_theme: None,
+            appearance_ui_font: None,
+            appearance_chat_font: None,
+            appearance_code_font: None,
+            appearance_terminal_font: None,
             agent_default_model_id: None,
             agent_default_thinking_effort: None,
             last_open_workspace_id: None,
@@ -2022,6 +2131,11 @@ mod tests {
             }],
             sidebar_width: None,
             terminal_pane_width: None,
+            appearance_theme: None,
+            appearance_ui_font: None,
+            appearance_chat_font: None,
+            appearance_code_font: None,
+            appearance_terminal_font: None,
             agent_default_model_id: None,
             agent_default_thinking_effort: None,
             last_open_workspace_id: None,
@@ -2115,6 +2229,11 @@ mod tests {
             ],
             sidebar_width: None,
             terminal_pane_width: None,
+            appearance_theme: None,
+            appearance_ui_font: None,
+            appearance_chat_font: None,
+            appearance_code_font: None,
+            appearance_terminal_font: None,
             agent_default_model_id: None,
             agent_default_thinking_effort: None,
             last_open_workspace_id: None,
@@ -2165,6 +2284,11 @@ mod tests {
             }],
             sidebar_width: None,
             terminal_pane_width: None,
+            appearance_theme: None,
+            appearance_ui_font: None,
+            appearance_chat_font: None,
+            appearance_code_font: None,
+            appearance_terminal_font: None,
             agent_default_model_id: None,
             agent_default_thinking_effort: None,
             last_open_workspace_id: None,
@@ -2214,6 +2338,11 @@ mod tests {
             }],
             sidebar_width: None,
             terminal_pane_width: None,
+            appearance_theme: None,
+            appearance_ui_font: None,
+            appearance_chat_font: None,
+            appearance_code_font: None,
+            appearance_terminal_font: None,
             agent_default_model_id: None,
             agent_default_thinking_effort: None,
             last_open_workspace_id: None,
@@ -2249,6 +2378,11 @@ mod tests {
             projects: Vec::new(),
             sidebar_width: None,
             terminal_pane_width: None,
+            appearance_theme: None,
+            appearance_ui_font: None,
+            appearance_chat_font: None,
+            appearance_code_font: None,
+            appearance_terminal_font: None,
             agent_default_model_id: None,
             agent_default_thinking_effort: None,
             last_open_workspace_id: None,

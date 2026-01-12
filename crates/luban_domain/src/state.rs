@@ -69,6 +69,57 @@ pub enum OperationStatus {
     Running,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AppearanceTheme {
+    Light,
+    Dark,
+    System,
+}
+
+impl AppearanceTheme {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Light => "light",
+            Self::Dark => "dark",
+            Self::System => "system",
+        }
+    }
+
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw.trim() {
+            "light" => Some(Self::Light),
+            "dark" => Some(Self::Dark),
+            "system" => Some(Self::System),
+            _ => None,
+        }
+    }
+}
+
+impl Default for AppearanceTheme {
+    fn default() -> Self {
+        Self::System
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AppearanceFonts {
+    pub ui_font: String,
+    pub chat_font: String,
+    pub code_font: String,
+    pub terminal_font: String,
+}
+
+impl Default for AppearanceFonts {
+    fn default() -> Self {
+        Self {
+            ui_font: "Inter".to_owned(),
+            chat_font: "Inter".to_owned(),
+            code_font: "Geist Mono".to_owned(),
+            terminal_font: "Geist Mono".to_owned(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ConversationEntry {
@@ -434,6 +485,8 @@ pub struct AppState {
     pub right_pane: RightPane,
     pub sidebar_width: Option<u16>,
     pub terminal_pane_width: Option<u16>,
+    pub appearance_theme: AppearanceTheme,
+    pub appearance_fonts: AppearanceFonts,
     pub(crate) agent_default_model_id: String,
     pub(crate) agent_default_thinking_effort: ThinkingEffort,
     pub conversations: HashMap<(WorkspaceId, WorkspaceThreadId), WorkspaceConversation>,
@@ -451,6 +504,11 @@ pub struct PersistedAppState {
     pub projects: Vec<PersistedProject>,
     pub sidebar_width: Option<u16>,
     pub terminal_pane_width: Option<u16>,
+    pub appearance_theme: Option<String>,
+    pub appearance_ui_font: Option<String>,
+    pub appearance_chat_font: Option<String>,
+    pub appearance_code_font: Option<String>,
+    pub appearance_terminal_font: Option<String>,
     pub agent_default_model_id: Option<String>,
     pub agent_default_thinking_effort: Option<String>,
     pub last_open_workspace_id: Option<u64>,

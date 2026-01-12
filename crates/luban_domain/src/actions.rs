@@ -1,7 +1,7 @@
 use crate::{
-    AttachmentRef, ChatScrollAnchor, CodexThreadEvent, ContextTokenKind, ConversationSnapshot,
-    ConversationThreadMeta, PersistedAppState, ProjectId, ThinkingEffort, WorkspaceId,
-    WorkspaceThreadId,
+    AppearanceTheme, AttachmentRef, ChatScrollAnchor, CodexThreadEvent, ContextTokenKind,
+    ConversationSnapshot, ConversationThreadMeta, PersistedAppState, ProjectId, ThinkingEffort,
+    WorkspaceId, WorkspaceThreadId,
 };
 use std::path::PathBuf;
 
@@ -191,6 +191,15 @@ pub enum Action {
     },
     SidebarWidthChanged {
         width: u16,
+    },
+    AppearanceThemeChanged {
+        theme: AppearanceTheme,
+    },
+    AppearanceFontsChanged {
+        ui_font: String,
+        chat_font: String,
+        code_font: String,
+        terminal_font: String,
     },
     WorkspaceChatScrollSaved {
         workspace_id: WorkspaceId,

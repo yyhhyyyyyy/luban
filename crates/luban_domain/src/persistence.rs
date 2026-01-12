@@ -1,13 +1,21 @@
 use crate::agent_settings::parse_thinking_effort;
 use crate::{
-    AppState, Effect, MainPane, OperationStatus, PersistedAppState, PersistedProject,
-    PersistedWorkspace, Project, ProjectId, RightPane, Workspace, WorkspaceId, WorkspaceStatus,
-    WorkspaceTabs, WorkspaceThreadId,
+    AppState, AppearanceFonts, AppearanceTheme, Effect, MainPane, OperationStatus, PersistedAppState,
+    PersistedProject, PersistedWorkspace, Project, ProjectId, RightPane, Workspace, WorkspaceId,
+    WorkspaceStatus, WorkspaceTabs, WorkspaceThreadId,
 };
 use crate::{default_agent_model_id, default_thinking_effort, normalize_thinking_effort};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::{Duration, UNIX_EPOCH};
+
+fn normalize_font(raw: Option<&str>, fallback: &str) -> String {
+    raw.map(str::trim)
+        .filter(|v| !v.is_empty())
+        .filter(|v| v.len() <= 128)
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| fallback.to_owned())
+}
 
 pub(crate) fn apply_persisted_app_state(
     state: &mut AppState,
@@ -36,6 +44,21 @@ pub(crate) fn apply_persisted_app_state(
     state.projects = projects;
     state.sidebar_width = persisted.sidebar_width;
     state.terminal_pane_width = persisted.terminal_pane_width;
+    state.appearance_theme = persisted
+        .appearance_theme
+        .as_deref()
+        .and_then(AppearanceTheme::parse)
+        .unwrap_or_default();
+    let defaults = AppearanceFonts::default();
+    state.appearance_fonts = AppearanceFonts {
+        ui_font: normalize_font(persisted.appearance_ui_font.as_deref(), &defaults.ui_font),
+        chat_font: normalize_font(persisted.appearance_chat_font.as_deref(), &defaults.chat_font),
+        code_font: normalize_font(persisted.appearance_code_font.as_deref(), &defaults.code_font),
+        terminal_font: normalize_font(
+            persisted.appearance_terminal_font.as_deref(),
+            &defaults.terminal_font,
+        ),
+    };
     state.last_open_workspace_id = persisted.last_open_workspace_id.map(WorkspaceId);
     state.workspace_tabs = HashMap::new();
     state.conversations = HashMap::new();
@@ -201,6 +224,11 @@ pub(crate) fn to_persisted_app_state(state: &AppState) -> PersistedAppState {
             .collect(),
         sidebar_width: state.sidebar_width,
         terminal_pane_width: state.terminal_pane_width,
+        appearance_theme: Some(state.appearance_theme.as_str().to_owned()),
+        appearance_ui_font: Some(state.appearance_fonts.ui_font.clone()),
+        appearance_chat_font: Some(state.appearance_fonts.chat_font.clone()),
+        appearance_code_font: Some(state.appearance_fonts.code_font.clone()),
+        appearance_terminal_font: Some(state.appearance_fonts.terminal_font.clone()),
         agent_default_model_id: Some(state.agent_default_model_id.clone()),
         agent_default_thinking_effort: Some(
             state.agent_default_thinking_effort.as_str().to_owned(),
