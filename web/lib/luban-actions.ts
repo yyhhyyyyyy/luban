@@ -18,6 +18,7 @@ export type LubanActions = {
   pickProjectPath: () => Promise<string | null>
   addProject: (path: string) => void
   createWorkspace: (projectId: number) => void
+  openWorkspaceInIde: (workspaceId: WorkspaceId) => void
   openWorkspacePullRequest: (workspaceId: WorkspaceId) => void
   openWorkspacePullRequestFailedAction: (workspaceId: WorkspaceId) => void
   archiveWorkspace: (workspaceId: number) => void
@@ -59,6 +60,10 @@ export function createLubanActions(args: {
 
   function createWorkspace(projectId: number) {
     args.sendAction({ type: "create_workspace", project_id: projectId })
+  }
+
+  function openWorkspaceInIde(workspaceId: WorkspaceId) {
+    args.sendAction({ type: "open_workspace_in_ide", workspace_id: workspaceId })
   }
 
   function openWorkspacePullRequest(workspaceId: WorkspaceId) {
@@ -240,6 +245,7 @@ export function createLubanActions(args: {
     pickProjectPath,
     addProject,
     createWorkspace,
+    openWorkspaceInIde,
     openWorkspacePullRequest,
     openWorkspacePullRequestFailedAction,
     archiveWorkspace,

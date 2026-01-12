@@ -310,6 +310,9 @@ pub enum ClientAction {
     OpenWorkspace {
         workspace_id: WorkspaceId,
     },
+    OpenWorkspaceInIde {
+        workspace_id: WorkspaceId,
+    },
     OpenWorkspacePullRequest {
         workspace_id: WorkspaceId,
     },

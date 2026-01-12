@@ -77,6 +77,7 @@ export function ChatPanel() {
     selectThread,
     createThread,
     sendAgentMessage,
+    openWorkspaceInIde,
     setChatModel,
     setThinkingEffort,
   } = useLuban()
@@ -359,6 +360,11 @@ export function ChatPanel() {
           <button
             className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded transition-colors"
             title="Open in editor"
+            disabled={activeWorkspaceId == null}
+            onClick={() => {
+              if (activeWorkspaceId == null) return
+              openWorkspaceInIde(activeWorkspaceId)
+            }}
           >
             <ExternalLink className="w-4 h-4" />
           </button>
