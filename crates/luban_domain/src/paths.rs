@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 pub const LUBAN_CODEX_BIN_ENV: &str = "LUBAN_CODEX_BIN";
+pub const LUBAN_ROOT_ENV: &str = "LUBAN_ROOT";
 
 pub fn worktrees_root(luban_root: &Path) -> PathBuf {
     luban_root.join("worktrees")

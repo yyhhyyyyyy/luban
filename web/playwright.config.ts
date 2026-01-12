@@ -51,7 +51,9 @@ const e2eRoot = resolveE2ERoot()
 const port = resolvePort()
 const baseURL = `http://127.0.0.1:${port}`
 const e2eHome = path.join(e2eRoot, "home")
+const e2eLubanRoot = path.join(e2eRoot, "luban-root")
 fs.mkdirSync(e2eHome, { recursive: true })
+fs.mkdirSync(e2eLubanRoot, { recursive: true })
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -85,6 +87,7 @@ export default defineConfig({
       "CARGO_HOME=${CARGO_HOME:-$HOME/.cargo} " +
       `LUBAN_E2E_ROOT=${shellQuote(e2eRoot)} ` +
       `HOME=${shellQuote(e2eHome)} ` +
+      `LUBAN_ROOT=${shellQuote(e2eLubanRoot)} ` +
       "LUBAN_WEB_DIST_DIR=web/out " +
       `LUBAN_SERVER_ADDR=127.0.0.1:${port} ` +
       "LUBAN_CODEX_BIN=/usr/bin/false " +

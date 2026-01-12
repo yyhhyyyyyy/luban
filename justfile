@@ -8,10 +8,10 @@ lint:
   cargo clippy --workspace --all-targets --all-features --no-deps -- -D warnings
 
 test:
-  cargo test --workspace --all-targets --all-features
+  sh -eu -c 'root="$(mktemp -d -t luban-test-XXXXXX)"; trap "rm -rf \"$root\"" EXIT; LUBAN_ROOT="$root" cargo test --workspace --all-targets --all-features'
 
 test-fast:
-  cargo test -p luban_domain
+  sh -eu -c 'root="$(mktemp -d -t luban-test-XXXXXX)"; trap "rm -rf \"$root\"" EXIT; LUBAN_ROOT="$root" cargo test -p luban_domain'
 
 web cmd profile="debug":
   if [ "{{cmd}}" = "build" ]; then \

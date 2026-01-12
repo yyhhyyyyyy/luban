@@ -172,6 +172,29 @@ fn generate_turn_scope_id() -> String {
     format!("turn-{micros:x}-{rand:x}")
 }
 
+fn resolve_luban_root() -> anyhow::Result<PathBuf> {
+    if let Some(root) = std::env::var_os(paths::LUBAN_ROOT_ENV) {
+        let root = root.to_string_lossy();
+        let trimmed = root.trim();
+        if trimmed.is_empty() {
+            return Err(anyhow!("{} is set but empty", paths::LUBAN_ROOT_ENV));
+        }
+        return Ok(PathBuf::from(trimmed));
+    }
+
+    if cfg!(test) {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let pid = std::process::id();
+        return Ok(std::env::temp_dir().join(format!("luban-test-{pid}-{nanos}")));
+    }
+
+    let home = std::env::var_os("HOME").ok_or_else(|| anyhow!("HOME is not set"))?;
+    Ok(PathBuf::from(home).join("luban"))
+}
+
 #[derive(Clone)]
 pub struct GitWorkspaceService {
     worktrees_root: PathBuf,
@@ -185,9 +208,7 @@ impl GitWorkspaceService {
     }
 
     pub fn new_with_options(options: SqliteStoreOptions) -> anyhow::Result<Arc<Self>> {
-        let home = std::env::var_os("HOME").ok_or_else(|| anyhow!("HOME is not set"))?;
-        let mut luban_root = PathBuf::from(home);
-        luban_root.push("luban");
+        let luban_root = resolve_luban_root()?;
 
         std::fs::create_dir_all(&luban_root)
             .with_context(|| format!("failed to create {}", luban_root.display()))?;
@@ -1091,6 +1112,10 @@ mod tests {
 
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+    fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+        ENV_LOCK.lock().unwrap_or_else(|err| err.into_inner())
+    }
+
     fn run_git(repo_path: &Path, args: &[&str]) -> std::process::Output {
         Command::new("git")
             .args(args)
@@ -1122,7 +1147,7 @@ mod tests {
 
     #[test]
     fn codex_runner_reports_missing_executable() {
-        let _guard = ENV_LOCK.lock().expect("env lock should work");
+        let _guard = lock_env();
 
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -1171,6 +1196,73 @@ mod tests {
         assert!(err.to_string().contains("missing codex executable"));
 
         drop(service);
+        let _ = std::fs::remove_dir_all(&base_dir);
+    }
+
+    #[test]
+    fn tests_do_not_use_production_db_by_default() {
+        let _guard = lock_env();
+
+        let prev = std::env::var_os(paths::LUBAN_ROOT_ENV);
+        unsafe {
+            std::env::remove_var(paths::LUBAN_ROOT_ENV);
+        }
+
+        let root = resolve_luban_root().expect("test root should resolve");
+        assert!(
+            root.to_string_lossy().contains("luban-test-"),
+            "expected test root under temp dir, got {}",
+            root.display()
+        );
+
+        if let Some(prev) = prev {
+            unsafe {
+                std::env::set_var(paths::LUBAN_ROOT_ENV, prev);
+            }
+        }
+    }
+
+    #[test]
+    fn luban_root_env_overrides_default_root() {
+        let _guard = lock_env();
+
+        let prev = std::env::var_os(paths::LUBAN_ROOT_ENV);
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be valid")
+            .as_nanos();
+        let base_dir =
+            std::env::temp_dir().join(format!("luban-root-env-{}-{}", std::process::id(), unique));
+        std::fs::create_dir_all(&base_dir).expect("temp dir should be created");
+
+        unsafe {
+            std::env::set_var(paths::LUBAN_ROOT_ENV, base_dir.as_os_str());
+        }
+
+        let service = GitWorkspaceService::new_with_options(SqliteStoreOptions::default())
+            .expect("service should init");
+        service
+            .sqlite
+            .load_app_state()
+            .expect("sqlite queries should work");
+
+        let expected_db = paths::sqlite_path(&base_dir);
+        assert!(
+            expected_db.exists(),
+            "expected sqlite db at {}, but it was not created",
+            expected_db.display()
+        );
+
+        drop(service);
+        if let Some(prev) = prev {
+            unsafe {
+                std::env::set_var(paths::LUBAN_ROOT_ENV, prev);
+            }
+        } else {
+            unsafe {
+                std::env::remove_var(paths::LUBAN_ROOT_ENV);
+            }
+        }
         let _ = std::fs::remove_dir_all(&base_dir);
     }
 
