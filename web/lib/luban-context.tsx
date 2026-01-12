@@ -39,6 +39,7 @@ type LubanContextValue = {
 
   pickProjectPath: () => Promise<string | null>
   addProject: (path: string) => void
+  deleteProject: (projectId: number) => void
   createWorkspace: (projectId: number) => void
   openWorkspaceInIde: (workspaceId: WorkspaceId) => void
   openWorkspacePullRequest: (workspaceId: WorkspaceId) => void
@@ -124,6 +125,7 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     wsConnected,
     pickProjectPath: actions.pickProjectPath,
     addProject: actions.addProject,
+    deleteProject: actions.deleteProject,
     createWorkspace: actions.createWorkspace,
     openWorkspaceInIde: actions.openWorkspaceInIde,
     openWorkspacePullRequest: actions.openWorkspacePullRequest,
