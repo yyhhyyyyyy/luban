@@ -10,6 +10,7 @@ use luban_api::AppSnapshot;
 use luban_api::{PROTOCOL_VERSION, WsClientMessage, WsServerMessage};
 use luban_domain::{ContextImage, ProjectWorkspaceService};
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::broadcast;
 use tower_http::services::{ServeDir, ServeFile};
 
@@ -352,11 +353,44 @@ async fn upload_attachment(
             .services
             .store_context_text(project_slug, workspace_name, text, extension)
     } else {
-        return (
-            axum::http::StatusCode::BAD_REQUEST,
-            "unsupported attachment kind (use image/* or text/*)",
-        )
-            .into_response();
+        let uploaded_at_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let display_name = append_timestamp_to_basename(&name, uploaded_at_ms);
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let tmp_dir = std::env::temp_dir().join(format!(
+            "luban-upload-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        if let Err(err) = std::fs::create_dir_all(&tmp_dir) {
+            return (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("failed to create tmp dir: {err}"),
+            )
+                .into_response();
+        }
+
+        let tmp_path = tmp_dir.join(display_name);
+        if let Err(err) = std::fs::write(&tmp_path, &bytes) {
+            let _ = std::fs::remove_dir_all(&tmp_dir);
+            return (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("failed to write tmp file: {err}"),
+            )
+                .into_response();
+        }
+
+        let stored = state
+            .services
+            .store_context_file(project_slug, workspace_name, tmp_path);
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        stored
     };
 
     match stored {
@@ -376,6 +410,58 @@ async fn upload_attachment(
             Json(api).into_response()
         }
         Err(message) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, message).into_response(),
+    }
+}
+
+fn append_timestamp_to_basename(name: &str, unix_ms: u64) -> String {
+    let raw_name = std::path::Path::new(name)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(name)
+        .trim();
+
+    let raw_name = if raw_name.is_empty() { "file" } else { raw_name };
+
+    let path = std::path::Path::new(raw_name);
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or("file");
+    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+
+    if ext.is_empty() {
+        format!("{stem}-{unix_ms}")
+    } else {
+        format!("{stem}-{unix_ms}.{ext}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::append_timestamp_to_basename;
+
+    #[test]
+    fn timestamp_appended_for_simple_names() {
+        assert_eq!(
+            append_timestamp_to_basename("report.txt", 123),
+            "report-123.txt"
+        );
+        assert_eq!(append_timestamp_to_basename("archive", 456), "archive-456");
+    }
+
+    #[test]
+    fn timestamp_uses_basename_only() {
+        assert_eq!(
+            append_timestamp_to_basename("../path/to/file.md", 42),
+            "file-42.md"
+        );
+    }
+
+    #[test]
+    fn timestamp_handles_empty_names() {
+        assert_eq!(append_timestamp_to_basename("", 9), "file-9");
+        assert_eq!(append_timestamp_to_basename("   ", 9), "file-9");
     }
 }
 
