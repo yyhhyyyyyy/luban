@@ -15,32 +15,19 @@ test-fast:
 
 web cmd profile="debug":
   if [ "{{cmd}}" = "build" ]; then \
-    if command -v pnpm >/dev/null 2>&1; then \
-      if [ -d web ]; then \
-        (cd web && pnpm install); \
-        if [ -f web/node_modules/ghostty-web/ghostty-vt.wasm ]; then \
-          mkdir -p web/public; \
-          cp web/node_modules/ghostty-web/ghostty-vt.wasm web/public/ghostty-vt.wasm; \
-        fi; \
-        (cd web && pnpm build); \
-        mkdir -p web/out; \
-        printf '\n' > web/out/.gitkeep; \
+    if ! command -v pnpm >/dev/null 2>&1; then \
+      echo "pnpm not found; install pnpm to build the web UI"; \
+      exit 1; \
+    fi; \
+    if [ -d web ]; then \
+      (cd web && pnpm install); \
+      if [ -f web/node_modules/ghostty-web/ghostty-vt.wasm ]; then \
+        mkdir -p web/public; \
+        cp web/node_modules/ghostty-web/ghostty-vt.wasm web/public/ghostty-vt.wasm; \
       fi; \
-    elif command -v npm >/dev/null 2>&1; then \
-      if [ -d web ]; then \
-        if [ ! -d web/node_modules ]; then \
-          (cd web && npm install); \
-        fi; \
-        if [ -f web/node_modules/ghostty-web/ghostty-vt.wasm ]; then \
-          mkdir -p web/public; \
-          cp web/node_modules/ghostty-web/ghostty-vt.wasm web/public/ghostty-vt.wasm; \
-        fi; \
-        (cd web && npm run build); \
-        mkdir -p web/out; \
-        printf '\n' > web/out/.gitkeep; \
-      fi; \
-    else \
-      echo "pnpm/npm not found; skipping web build"; \
+      (cd web && pnpm build); \
+      mkdir -p web/out; \
+      printf '\n' > web/out/.gitkeep; \
     fi; \
   elif [ "{{cmd}}" = "run" ]; then \
     just web build "{{profile}}"; \
@@ -81,24 +68,18 @@ app cmd profile="debug":
   fi
 
 test-ui:
-  if command -v pnpm >/dev/null 2>&1; then \
-    (cd web && pnpm test:e2e); \
-  elif command -v npm >/dev/null 2>&1; then \
-    (cd web && npm run test:e2e); \
-  else \
-    echo "pnpm/npm not found; cannot run Playwright tests"; \
+  if ! command -v pnpm >/dev/null 2>&1; then \
+    echo "pnpm not found; cannot run Playwright tests"; \
     exit 1; \
-  fi
+  fi; \
+  (cd web && pnpm test:e2e)
 
 test-ui-headed:
-  if command -v pnpm >/dev/null 2>&1; then \
-    (cd web && pnpm test:e2e:headed); \
-  elif command -v npm >/dev/null 2>&1; then \
-    (cd web && npm run test:e2e:headed); \
-  else \
-    echo "pnpm/npm not found; cannot run Playwright tests"; \
+  if ! command -v pnpm >/dev/null 2>&1; then \
+    echo "pnpm not found; cannot run Playwright tests"; \
     exit 1; \
-  fi
+  fi; \
+  (cd web && pnpm test:e2e:headed)
 
 run profile="debug":
   just web run "{{profile}}"

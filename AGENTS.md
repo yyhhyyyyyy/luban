@@ -5,6 +5,7 @@ This document constrains and guides how AI agents (and human contributors) shoul
 ## 0. Quick start (read this first)
 - Default branch: `main`.
 - Read `postmortem/README.md` before implementing new features or large refactors.
+- Use `pnpm` for all web-related commands; do not use `npm`.
 - Prefer `just` recipes over ad-hoc `cargo` commands:
   - `just -l` (discover workflows)
   - `just fmt && just lint && just test` (full local verification)

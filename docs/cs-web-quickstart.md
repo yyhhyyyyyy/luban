@@ -9,7 +9,7 @@ This repo contains a local Rust server (`luban_server`) and a browser UI (`web/`
 2. Open:
    - `http://127.0.0.1:8421/`
 
-`just web run` builds `web/` (prefers `pnpm`, falls back to `npm`) and starts `luban_server`, which serves
+`just web run` builds `web/` (requires `pnpm`) and starts `luban_server`, which serves
 the built assets from `/`.
 
 ## Run (Tauri shell)
