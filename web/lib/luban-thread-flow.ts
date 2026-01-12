@@ -2,6 +2,9 @@
 
 import type { ThreadMeta, WorkspaceId } from "./luban-api"
 
+export const DEFAULT_NEW_THREAD_TIMEOUT_MS = 5_000
+export const DEFAULT_NEW_THREAD_POLL_MS = 250
+
 export function pickCreatedThreadId(args: {
   threads: ThreadMeta[]
   existingThreadIds: Set<number>
@@ -21,8 +24,8 @@ export async function waitForNewThread(args: {
   timeoutMs?: number
   pollMs?: number
 }): Promise<{ threads: ThreadMeta[]; createdThreadId: number | null }> {
-  const timeoutMs = args.timeoutMs ?? 5_000
-  const pollMs = args.pollMs ?? 250
+  const timeoutMs = args.timeoutMs ?? DEFAULT_NEW_THREAD_TIMEOUT_MS
+  const pollMs = args.pollMs ?? DEFAULT_NEW_THREAD_POLL_MS
 
   const startedAt = Date.now()
   while (Date.now() - startedAt < timeoutMs) {

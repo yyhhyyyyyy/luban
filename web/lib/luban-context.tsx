@@ -19,7 +19,11 @@ import type {
 import { fetchApp, fetchConversation, fetchThreads } from "./luban-http"
 import { ACTIVE_WORKSPACE_KEY, activeThreadKey } from "./ui-prefs"
 import { useLubanTransport } from "./luban-transport"
-import { pickCreatedThreadId, waitForNewThread } from "./luban-thread-flow"
+import {
+  DEFAULT_NEW_THREAD_TIMEOUT_MS,
+  pickCreatedThreadId,
+  waitForNewThread,
+} from "./luban-thread-flow"
 
 type LubanContextValue = {
   app: AppSnapshot | null
@@ -111,7 +115,7 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
               return
             }
 
-            if (Date.now() - pending.requestedAtUnixMs > 5_000) {
+            if (Date.now() - pending.requestedAtUnixMs > DEFAULT_NEW_THREAD_TIMEOUT_MS) {
               pendingCreateThreadRef.current = null
             }
           }
@@ -173,6 +177,17 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
 
   function request<T>(action: ClientAction): Promise<T> {
     return requestTransport<T>(action)
+  }
+
+  function markPendingCreateThread(args: {
+    workspaceId: WorkspaceId
+    existingThreadIds: Set<number>
+  }) {
+    pendingCreateThreadRef.current = {
+      workspaceId: args.workspaceId,
+      existingThreadIds: args.existingThreadIds,
+      requestedAtUnixMs: Date.now(),
+    }
   }
 
   function addProject(path: string) {
@@ -275,11 +290,7 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
 
       if (initial == null) {
         const existing = new Set<number>()
-        pendingCreateThreadRef.current = {
-          workspaceId,
-          existingThreadIds: existing,
-          requestedAtUnixMs: Date.now(),
-        }
+        markPendingCreateThread({ workspaceId, existingThreadIds: existing })
         sendAction({ type: "create_workspace_thread", workspace_id: workspaceId })
         setActiveThreadId(null)
 
@@ -305,11 +316,7 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
 
     void (async () => {
       const existingThreadIds = new Set(threadsRef.current.map((t) => t.thread_id))
-      pendingCreateThreadRef.current = {
-        workspaceId: wid,
-        existingThreadIds,
-        requestedAtUnixMs: Date.now(),
-      }
+      markPendingCreateThread({ workspaceId: wid, existingThreadIds })
       sendAction({ type: "open_workspace", workspace_id: wid })
       sendAction({ type: "create_workspace_thread", workspace_id: wid })
 
@@ -317,14 +324,20 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     })()
   }
 
-  function sendAgentMessage(text: string) {
+  function activeWorkspaceThread(): { workspaceId: WorkspaceId; threadId: number } | null {
     const wid = activeWorkspaceIdRef.current
     const tid = activeThreadIdRef.current
-    if (wid == null || tid == null) return
+    if (wid == null || tid == null) return null
+    return { workspaceId: wid, threadId: tid }
+  }
+
+  function sendAgentMessage(text: string) {
+    const ids = activeWorkspaceThread()
+    if (!ids) return
     sendAction({
       type: "send_agent_message",
-      workspace_id: wid,
-      thread_id: tid,
+      workspace_id: ids.workspaceId,
+      thread_id: ids.threadId,
       text,
       attachments: [],
     })
@@ -341,10 +354,9 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
   }
 
   function cancelAgentTurn() {
-    const wid = activeWorkspaceIdRef.current
-    const tid = activeThreadIdRef.current
-    if (wid == null || tid == null) return
-    sendAction({ type: "cancel_agent_turn", workspace_id: wid, thread_id: tid })
+    const ids = activeWorkspaceThread()
+    if (!ids) return
+    sendAction({ type: "cancel_agent_turn", workspace_id: ids.workspaceId, thread_id: ids.threadId })
   }
 
   const value: LubanContextValue = {
