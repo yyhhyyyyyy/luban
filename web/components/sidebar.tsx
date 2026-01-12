@@ -5,7 +5,6 @@ import type React from "react"
 import {
   ChevronDown,
   ChevronRight,
-  GitBranch,
   Plus,
   Settings,
   LayoutGrid,
@@ -248,7 +247,7 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
 	                    <div
 	                      key={worktree.workspaceId}
 	                      className={cn(
-	                        "group/worktree flex items-center gap-2 px-2 py-1.5 hover:bg-sidebar-accent/30 transition-all cursor-pointer rounded-sm mx-1",
+	                        "group/worktree flex items-center gap-2 px-2 py-1.5 hover:bg-sidebar-accent/30 transition-all cursor-pointer rounded mx-1",
 	                        worktree.workspaceId === activeWorkspaceId && "bg-sidebar-accent/30",
 	                        newlyCreatedWorkspaceId === worktree.workspaceId &&
 	                          "animate-in slide-in-from-left-2 fade-in duration-300 bg-primary/15 ring-1 ring-primary/30",
@@ -262,42 +261,36 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
 	                        void openWorkspace(worktree.workspaceId)
 	                      }}
 	                    >
-	                      <div className="flex flex-col flex-1 min-w-0">
-	                        <div className="flex items-center gap-1.5">
-	                          <GitBranch className="w-3 h-3 text-muted-foreground flex-shrink-0" />
-	                          <span
-                              data-testid="worktree-branch-name"
-                              className="text-xs text-foreground truncate"
-                              title={worktree.name}
-                            >
-	                            {worktree.name}
-	                          </span>
-	                        </div>
-	                        <span
-                            data-testid="worktree-short-id"
-                            className="text-[10px] text-muted-foreground/50 ml-4 font-mono"
+                        {worktree.isArchiving ? (
+                          <Loader2
+                            data-testid="worktree-archiving-spinner"
+                            className="w-3.5 h-3.5 animate-spin text-muted-foreground"
+                          />
+                        ) : (
+                          <AgentStatusIcon status={worktree.agentStatus} size="sm" />
+                        )}
+
+                        <div className="flex flex-col flex-1 min-w-0">
+                          <span
+                            data-testid="worktree-branch-name"
+                            className="text-xs text-foreground truncate"
+                            title={worktree.name}
                           >
+                            {worktree.name}
+                          </span>
+                          <span data-testid="worktree-short-id" className="text-[10px] text-muted-foreground/50 font-mono">
                             {worktree.id}
                           </span>
-	                      </div>
-                        <div className="flex items-center gap-2">
-                          {worktree.isArchiving ? (
-                            <Loader2
-                              data-testid="worktree-archiving-spinner"
-                              className="w-3.5 h-3.5 animate-spin text-muted-foreground"
-                            />
-                          ) : (
-                            <AgentStatusIcon status={worktree.agentStatus} size="sm" />
-                          )}
-                          <PRBadge
-                            status={worktree.prStatus}
-                            prNumber={worktree.prNumber}
-                            workspaceId={worktree.workspaceId}
-                            onOpenPullRequest={openWorkspacePullRequest}
-                            onOpenPullRequestFailedAction={openWorkspacePullRequestFailedAction}
-                            titleOverride={worktree.prTitle}
-                          />
                         </div>
+
+                        <PRBadge
+                          status={worktree.prStatus}
+                          prNumber={worktree.prNumber}
+                          workspaceId={worktree.workspaceId}
+                          onOpenPullRequest={openWorkspacePullRequest}
+                          onOpenPullRequestFailedAction={openWorkspacePullRequestFailedAction}
+                          titleOverride={worktree.prTitle}
+                        />
                       {/* Archive button only for non-home worktrees */}
                       {worktree.isHome ? (
                         <span className="p-0.5 text-muted-foreground/50" title="Main worktree">
