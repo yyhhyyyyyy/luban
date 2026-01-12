@@ -25,32 +25,27 @@ export type SidebarProjectVm = {
 
 export function buildSidebarProjects(
   app: AppSnapshot | null,
-  args: {
-    nowUnixMs: number
-    archiveAnimatingUntilUnixMsByWorkspaceId: Record<number, number>
+  args?: {
+    optimisticArchivingWorkspaceIds?: Set<number>
   },
 ): SidebarProjectVm[] {
   if (!app) return []
+  const optimisticArchiving = args?.optimisticArchivingWorkspaceIds ?? null
   return app.projects.map((p) => ({
     id: p.id,
     name: p.slug,
     expanded: p.expanded,
     createWorkspaceStatus: p.create_workspace_status,
     worktrees: p.workspaces
-      .filter(
-        (w) =>
-          w.status === "active" ||
-          (args.archiveAnimatingUntilUnixMsByWorkspaceId[w.id] ?? 0) > args.nowUnixMs,
-      )
+      .filter((w) => w.status === "active")
       .map((w) => {
         const agentStatus = agentStatusFromWorkspace(w)
         const pr = prStatusFromWorkspace(w)
-        const animatingUntil = args.archiveAnimatingUntilUnixMsByWorkspaceId[w.id] ?? 0
         return {
           id: w.short_id,
           name: w.branch_name,
           isHome: w.workspace_name === "main",
-          isArchiving: w.archive_status === "running" || animatingUntil > args.nowUnixMs,
+          isArchiving: w.archive_status === "running" || optimisticArchiving?.has(w.id) === true,
           agentStatus,
           prStatus: pr.status,
           prNumber: pr.prNumber,

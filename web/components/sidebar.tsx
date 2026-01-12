@@ -53,40 +53,39 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
   const pendingAddProjectPathRef = useRef<string | null>(null)
   const [optimisticCreatingProjectId, setOptimisticCreatingProjectId] = useState<number | null>(null)
   const [newlyCreatedWorkspaceId, setNewlyCreatedWorkspaceId] = useState<number | null>(null)
-  const [archiveAnimatingUntilUnixMsByWorkspaceId, setArchiveAnimatingUntilUnixMsByWorkspaceId] = useState<
-    Record<number, number>
-  >({})
+  const [optimisticArchivingWorkspaceIds, setOptimisticArchivingWorkspaceIds] = useState<Set<number>>(
+    () => new Set(),
+  )
   const [newTaskOpen, setNewTaskOpen] = useState(false)
-
-  const archiveAnimationMinMs = 1500
 
   useEffect(() => {
     if (!app) return
 
-    setArchiveAnimatingUntilUnixMsByWorkspaceId((prev) => {
-      const now = Date.now()
-      let changed = false
-      const next: Record<number, number> = { ...prev }
+    setOptimisticArchivingWorkspaceIds((prev) => {
+      if (prev.size === 0) return prev
 
+      const activeById = new Map<number, "idle" | "running">()
       for (const project of app.projects) {
         for (const workspace of project.workspaces) {
-          if (workspace.archive_status === "running") {
-            const until = now + archiveAnimationMinMs
-            if ((next[workspace.id] ?? 0) < until) {
-              next[workspace.id] = until
-              changed = true
-            }
-          }
+          if (workspace.status !== "active") continue
+          activeById.set(workspace.id, workspace.archive_status)
         }
       }
 
-      for (const [key, until] of Object.entries(next)) {
-        if (until <= now) {
-          delete next[Number(key)]
+      let changed = false
+      const next = new Set<number>()
+      for (const id of prev) {
+        const status = activeById.get(id)
+        if (!status) {
           changed = true
+          continue
         }
+        if (status !== "running") {
+          changed = true
+          continue
+        }
+        next.add(id)
       }
-
       return changed ? next : prev
     })
 
@@ -148,33 +147,7 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
     }
   }, [app?.rev])
 
-  useEffect(() => {
-    const values = Object.values(archiveAnimatingUntilUnixMsByWorkspaceId)
-    if (values.length === 0) return
-
-    const nextExpiry = Math.min(...values)
-    const delay = Math.max(0, nextExpiry - Date.now() + 10)
-    const t = window.setTimeout(() => {
-      setArchiveAnimatingUntilUnixMsByWorkspaceId((prev) => {
-        const now = Date.now()
-        let changed = false
-        const next: Record<number, number> = { ...prev }
-        for (const [key, until] of Object.entries(next)) {
-          if (until <= now) {
-            delete next[Number(key)]
-            changed = true
-          }
-        }
-        return changed ? next : prev
-      })
-    }, delay)
-    return () => window.clearTimeout(t)
-  }, [archiveAnimatingUntilUnixMsByWorkspaceId])
-
-  const projects: SidebarProjectVm[] = buildSidebarProjects(app, {
-    nowUnixMs: Date.now(),
-    archiveAnimatingUntilUnixMsByWorkspaceId,
-  })
+  const projects: SidebarProjectVm[] = buildSidebarProjects(app, { optimisticArchivingWorkspaceIds })
 
   const getActiveWorktreeCount = (worktrees: SidebarWorktreeVm[]) => {
     return worktrees.filter((w) => w.agentStatus !== "idle" || w.prStatus !== "none").length
@@ -341,6 +314,11 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
                           title="Archive worktree"
                           onClick={(e) => {
                             e.stopPropagation()
+                            setOptimisticArchivingWorkspaceIds((prev) => {
+                              const next = new Set(prev)
+                              next.add(worktree.workspaceId)
+                              return next
+                            })
                             archiveWorkspace(worktree.workspaceId)
                           }}
                           disabled={worktree.isArchiving}

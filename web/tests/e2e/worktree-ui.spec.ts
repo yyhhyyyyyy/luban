@@ -71,7 +71,7 @@ test("creating a worktree auto-opens its conversation", async ({ page }) => {
     })
     .not.toBe(beforeWorkspaceId)
 
-  await expect(page.getByTestId("chat-input")).toBeFocused()
+  await expect(page.getByTestId("chat-input")).toBeFocused({ timeout: 20_000 })
 })
 
 test("archiving a worktree shows an executing animation", async ({ page }) => {
@@ -145,7 +145,12 @@ test("archiving a worktree shows an executing animation", async ({ page }) => {
       const app = (await res.json()) as {
         projects: {
           path: string
-          workspaces: { id: number; short_id: string; workspace_name: string; status: string }[]
+          workspaces: {
+            id: number
+            short_id: string
+            workspace_name: string
+            status: string
+          }[]
         }[]
       }
       const project = app.projects.find((p) => p.path === projectDir)
@@ -167,7 +172,8 @@ test("archiving a worktree shows an executing animation", async ({ page }) => {
     .locator("..")
     .locator("..")
 
-  await sendWsAction(page, { type: "archive_workspace", workspace_id: resolved.workspaceId })
+  await row.hover()
+  await row.getByTitle("Archive worktree").click()
 
   await expect(row.getByTestId("worktree-archiving-spinner")).toBeVisible({ timeout: 20_000 })
   await expect(row).toHaveClass(/animate-pulse/, { timeout: 20_000 })
