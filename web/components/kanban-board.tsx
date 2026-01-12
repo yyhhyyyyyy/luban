@@ -29,6 +29,7 @@ import type { ConversationEntry, ConversationSnapshot } from "@/lib/luban-api"
 import { ConversationView } from "@/components/conversation-view"
 import { kanbanColumnForStatus, kanbanColumns, worktreeStatusFromWorkspace, type KanbanColumn, type WorktreeStatus } from "@/lib/worktree-ui"
 import { activeThreadKey } from "@/lib/ui-prefs"
+import { pickThreadId } from "@/lib/thread-ui"
 
 type Worktree = {
   id: string
@@ -209,12 +210,8 @@ function WorktreePreviewPanel({
         if (threads.length === 0) return null
 
         const stored = Number(localStorage.getItem(activeThreadKey(workspaceId)) ?? "")
-        const storedOk = Number.isFinite(stored) && threads.some((t) => t.thread_id === stored)
-        const picked = storedOk
-          ? stored
-          : threads.slice().sort((a, b) => (b.updated_at_unix_seconds ?? 0) - (a.updated_at_unix_seconds ?? 0))[0]
-              ?.thread_id ?? null
-        return picked
+        const preferred = Number.isFinite(stored) ? stored : null
+        return pickThreadId({ threads, preferredThreadId: preferred })
       })
       .then(async (pickedThreadId) => {
         if (seqRef.current !== seq) return
