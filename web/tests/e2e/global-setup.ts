@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process"
 import fs from "node:fs"
+import os from "node:os"
 import path from "node:path"
 
 function runGit(cwd: string, args: string[]) {
@@ -17,9 +18,13 @@ function writeFile(filePath: string, content: string) {
 }
 
 export default async function globalSetup() {
-  const projectRoot = path.resolve(__dirname, "../../..")
-  const projectDir = path.join(projectRoot, "web", ".playwright-project", "e2e-project")
-  const remoteDir = path.join(projectRoot, "web", ".playwright-project", "remote.git")
+  const root =
+    (process.env.LUBAN_E2E_ROOT && process.env.LUBAN_E2E_ROOT.trim()) ||
+    fs.mkdtempSync(path.join(os.tmpdir(), "luban-e2e-"))
+  process.env.LUBAN_E2E_ROOT = root
+
+  const projectDir = path.join(root, "projects", "e2e-project")
+  const remoteDir = path.join(root, "projects", "remote.git")
 
   ensureEmptyDir(path.dirname(projectDir))
   ensureEmptyDir(projectDir)
@@ -42,4 +47,3 @@ export default async function globalSetup() {
 
   process.env.LUBAN_E2E_PROJECT_DIR = projectDir
 }
-
