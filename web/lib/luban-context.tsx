@@ -9,6 +9,7 @@ import type {
   AppSnapshot,
   ClientAction,
   ConversationSnapshot,
+  ServerEvent,
   ThreadMeta,
   TaskDraft,
   TaskExecuteMode,
@@ -72,6 +73,58 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     requestedAtUnixMs: number
   } | null>(null)
 
+  function handleAppChanged(event: Extract<ServerEvent, { type: "app_changed" }>) {
+    setApp(event.snapshot)
+  }
+
+  function handleWorkspaceThreadsChanged(
+    event: Extract<ServerEvent, { type: "workspace_threads_changed" }>,
+  ) {
+    const wid = activeWorkspaceIdRef.current
+    if (wid == null || wid !== event.workspace_id) return
+
+    setThreads(event.threads)
+    const current = activeThreadIdRef.current
+
+    const pending = pendingCreateThreadRef.current
+    if (pending && pending.workspaceId === wid) {
+      const created = pickCreatedThreadId({
+        threads: event.threads,
+        existingThreadIds: pending.existingThreadIds,
+      })
+      if (created != null) {
+        pendingCreateThreadRef.current = null
+        void selectThreadInternal(wid, created)
+        return
+      }
+
+      if (Date.now() - pending.requestedAtUnixMs > DEFAULT_NEW_THREAD_TIMEOUT_MS) {
+        pendingCreateThreadRef.current = null
+      }
+    }
+
+    if (current == null || !event.threads.some((t) => t.thread_id === current)) {
+      const next = event.threads[0]?.thread_id ?? null
+      if (next != null) {
+        void selectThreadInternal(wid, next)
+      }
+    }
+  }
+
+  function handleConversationChanged(event: Extract<ServerEvent, { type: "conversation_changed" }>) {
+    const wid = activeWorkspaceIdRef.current
+    const tid = activeThreadIdRef.current
+    if (wid == null || tid == null) return
+    if (event.snapshot.workspace_id === wid && event.snapshot.thread_id === tid) {
+      setConversation(event.snapshot)
+    }
+  }
+
+  function handleToast(event: Extract<ServerEvent, { type: "toast" }>) {
+    console.warn("server toast:", event.message)
+    toast(event.message)
+  }
+
   useEffect(() => {
     activeWorkspaceIdRef.current = activeWorkspaceId
   }, [activeWorkspaceId])
@@ -92,57 +145,19 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
 
   const { wsConnected, sendAction: sendActionTransport, request: requestTransport } = useLubanTransport({
     onEvent: (event) => {
-      if (event.type === "app_changed") {
-        setApp(event.snapshot)
-        return
-      }
-
-      if (event.type === "workspace_threads_changed") {
-        const wid = activeWorkspaceIdRef.current
-        if (wid != null && wid === event.workspace_id) {
-          setThreads(event.threads)
-          const current = activeThreadIdRef.current
-
-          const pending = pendingCreateThreadRef.current
-          if (pending && pending.workspaceId === wid) {
-            const created = pickCreatedThreadId({
-              threads: event.threads,
-              existingThreadIds: pending.existingThreadIds,
-            })
-            if (created != null) {
-              pendingCreateThreadRef.current = null
-              void selectThreadInternal(wid, created)
-              return
-            }
-
-            if (Date.now() - pending.requestedAtUnixMs > DEFAULT_NEW_THREAD_TIMEOUT_MS) {
-              pendingCreateThreadRef.current = null
-            }
-          }
-
-          if (current == null || !event.threads.some((t) => t.thread_id === current)) {
-            const next = event.threads[0]?.thread_id ?? null
-            if (next != null) {
-              void selectThreadInternal(wid, next)
-            }
-          }
-        }
-        return
-      }
-
-      if (event.type === "conversation_changed") {
-        const wid = activeWorkspaceIdRef.current
-        const tid = activeThreadIdRef.current
-        if (wid == null || tid == null) return
-        if (event.snapshot.workspace_id === wid && event.snapshot.thread_id === tid) {
-          setConversation(event.snapshot)
-        }
-        return
-      }
-
-      if (event.type === "toast") {
-        console.warn("server toast:", event.message)
-        toast(event.message)
+      switch (event.type) {
+        case "app_changed":
+          handleAppChanged(event)
+          return
+        case "workspace_threads_changed":
+          handleWorkspaceThreadsChanged(event)
+          return
+        case "conversation_changed":
+          handleConversationChanged(event)
+          return
+        case "toast":
+          handleToast(event)
+          return
       }
     },
     onError: (message) => {
