@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react"
+import { createContext, useContext, useEffect } from "react"
 import { toast } from "sonner"
 
 import type {
@@ -17,7 +17,8 @@ import type {
   WorkspaceId,
   WorkspaceSnapshot,
 } from "./luban-api"
-import { fetchApp, fetchConversation, fetchThreads } from "./luban-http"
+import { fetchConversation, fetchThreads } from "./luban-http"
+import { useLubanStore } from "./luban-store"
 import { ACTIVE_WORKSPACE_KEY, activeThreadKey } from "./ui-prefs"
 import { useLubanTransport } from "./luban-transport"
 import {
@@ -58,23 +59,12 @@ type LubanContextValue = {
 const LubanContext = createContext<LubanContextValue | null>(null)
 
 export function LubanProvider({ children }: { children: React.ReactNode }) {
-  const [app, setApp] = useState<AppSnapshot | null>(null)
-  const [activeWorkspaceId, setActiveWorkspaceId] = useState<WorkspaceId | null>(null)
-  const [activeThreadId, setActiveThreadId] = useState<number | null>(null)
-  const [threads, setThreads] = useState<ThreadMeta[]>([])
-  const [conversation, setConversation] = useState<ConversationSnapshot | null>(null)
-
-  const activeWorkspaceIdRef = useRef<WorkspaceId | null>(null)
-  const activeThreadIdRef = useRef<number | null>(null)
-  const threadsRef = useRef<ThreadMeta[]>([])
-  const pendingCreateThreadRef = useRef<{
-    workspaceId: WorkspaceId
-    existingThreadIds: Set<number>
-    requestedAtUnixMs: number
-  } | null>(null)
+  const store = useLubanStore()
+  const { app, activeWorkspaceId, activeThreadId, threads, conversation, activeWorkspace } = store.state
+  const { activeWorkspaceIdRef, activeThreadIdRef, threadsRef, pendingCreateThreadRef } = store.refs
 
   function handleAppChanged(event: Extract<ServerEvent, { type: "app_changed" }>) {
-    setApp(event.snapshot)
+    store.setApp(event.snapshot)
   }
 
   function handleWorkspaceThreadsChanged(
@@ -116,7 +106,7 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     const tid = activeThreadIdRef.current
     if (wid == null || tid == null) return
     if (event.snapshot.workspace_id === wid && event.snapshot.thread_id === tid) {
-      setConversation(event.snapshot)
+      store.setConversation(event.snapshot)
     }
   }
 
@@ -124,24 +114,6 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     console.warn("server toast:", event.message)
     toast(event.message)
   }
-
-  useEffect(() => {
-    activeWorkspaceIdRef.current = activeWorkspaceId
-  }, [activeWorkspaceId])
-
-  useEffect(() => {
-    activeThreadIdRef.current = activeThreadId
-  }, [activeThreadId])
-
-  useEffect(() => {
-    threadsRef.current = threads
-  }, [threads])
-
-  useEffect(() => {
-    fetchApp()
-      .then((snap) => setApp(snap))
-      .catch((err) => console.error("fetchApp failed", err))
-  }, [])
 
   const { wsConnected, sendAction: sendActionTransport, request: requestTransport } = useLubanTransport({
     onEvent: (event) => {
@@ -177,32 +149,12 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     void openWorkspace(stored)
   }, [app, activeWorkspaceId])
 
-  const activeWorkspace = useMemo(() => {
-    if (!app || activeWorkspaceId == null) return null
-    for (const p of app.projects) {
-      const w = p.workspaces.find((x) => x.id === activeWorkspaceId)
-      if (w) return w
-    }
-    return null
-  }, [app, activeWorkspaceId])
-
   function sendAction(action: ClientAction, requestId?: string) {
     sendActionTransport(action, requestId)
   }
 
   function request<T>(action: ClientAction): Promise<T> {
     return requestTransport<T>(action)
-  }
-
-  function markPendingCreateThread(args: {
-    workspaceId: WorkspaceId
-    existingThreadIds: Set<number>
-  }) {
-    pendingCreateThreadRef.current = {
-      workspaceId: args.workspaceId,
-      existingThreadIds: args.existingThreadIds,
-      requestedAtUnixMs: Date.now(),
-    }
   }
 
   function addProject(path: string) {
@@ -230,7 +182,7 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
   }
 
   function toggleProjectExpanded(projectId: number) {
-    setApp((prev) => {
+    store.setApp((prev) => {
       if (!prev) return prev
       return {
         ...prev,
@@ -251,7 +203,7 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function selectThreadInternal(workspaceId: WorkspaceId, threadId: number) {
-    setActiveThreadId(threadId)
+    store.setActiveThreadId(threadId)
     localStorage.setItem(activeThreadKey(workspaceId), String(threadId))
 
     sendAction({
@@ -262,7 +214,7 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
 
     try {
       const convo = await fetchConversation(workspaceId, threadId)
-      setConversation(convo)
+      store.setConversation(convo)
     } catch (err) {
       console.warn("fetchConversation failed", err)
     }
@@ -280,22 +232,22 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     if (created.createdThreadId == null) return false
 
     pendingCreateThreadRef.current = null
-    setThreads(created.threads)
+    store.setThreads(created.threads)
     await selectThreadInternal(args.workspaceId, created.createdThreadId)
     return true
   }
 
   async function openWorkspace(workspaceId: WorkspaceId) {
-    setActiveWorkspaceId(workspaceId)
+    store.setActiveWorkspaceId(workspaceId)
     localStorage.setItem(ACTIVE_WORKSPACE_KEY, String(workspaceId))
-    setThreads([])
-    setConversation(null)
+    store.setThreads([])
+    store.setConversation(null)
 
     sendAction({ type: "open_workspace", workspace_id: workspaceId })
 
     try {
       const snap = await fetchThreads(workspaceId)
-      setThreads(snap.threads)
+      store.setThreads(snap.threads)
 
       const saved = Number(localStorage.getItem(activeThreadKey(workspaceId)) ?? "")
       const initial =
@@ -305,9 +257,9 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
 
       if (initial == null) {
         const existing = new Set<number>()
-        markPendingCreateThread({ workspaceId, existingThreadIds: existing })
+        store.markPendingCreateThread({ workspaceId, existingThreadIds: existing })
         sendAction({ type: "create_workspace_thread", workspace_id: workspaceId })
-        setActiveThreadId(null)
+        store.setActiveThreadId(null)
 
         await waitAndActivateNewThread({ workspaceId, existingThreadIds: existing })
         return
@@ -331,7 +283,7 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
 
     void (async () => {
       const existingThreadIds = new Set(threadsRef.current.map((t) => t.thread_id))
-      markPendingCreateThread({ workspaceId: wid, existingThreadIds })
+      store.markPendingCreateThread({ workspaceId: wid, existingThreadIds })
       sendAction({ type: "open_workspace", workspace_id: wid })
       sendAction({ type: "create_workspace_thread", workspace_id: wid })
 
