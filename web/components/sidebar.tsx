@@ -23,28 +23,12 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useLuban } from "@/lib/luban-context"
-import type { OperationStatus } from "@/lib/luban-api"
-import { worktreeStatusFromWorkspace, type WorktreeStatus } from "@/lib/worktree-ui"
+import type { SidebarProjectVm, SidebarWorktreeVm } from "@/lib/sidebar-view-model"
+import { buildSidebarProjects } from "@/lib/sidebar-view-model"
+import type { WorktreeStatus } from "@/lib/worktree-ui"
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { NewTaskModal } from "./new-task-modal"
-
-interface Worktree {
-  id: string
-  name: string
-  isHome?: boolean
-  status: WorktreeStatus
-  prNumber?: number // PR number if submitted
-  workspaceId: number
-}
-
-interface Project {
-  id: number
-  name: string
-  expanded: boolean
-  createWorkspaceStatus: OperationStatus
-  worktrees: Worktree[]
-}
 
 function WorktreeStatusIndicator({
   status,
@@ -52,7 +36,7 @@ function WorktreeStatusIndicator({
   workspaceId,
   onOpenPullRequest,
   onOpenPullRequestFailedAction,
-}: Pick<Worktree, "status" | "prNumber" | "workspaceId"> & {
+}: Pick<SidebarWorktreeVm, "status" | "prNumber" | "workspaceId"> & {
   onOpenPullRequest: (workspaceId: number) => void
   onOpenPullRequestFailedAction: (workspaceId: number) => void
 }) {
@@ -227,24 +211,9 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
     return () => window.clearTimeout(t)
   }, [app?.rev])
 
-  const projects: Project[] =
-    app?.projects.map((p) => ({
-      id: p.id,
-      name: p.slug,
-      expanded: p.expanded,
-      createWorkspaceStatus: p.create_workspace_status,
-      worktrees: p.workspaces
-        .filter((w) => w.status === "active")
-        .map((w) => ({
-          ...worktreeStatusFromWorkspace(w),
-          id: w.short_id,
-          name: w.branch_name,
-          isHome: w.workspace_name === "main",
-          workspaceId: w.id,
-        })),
-    })) ?? []
+  const projects: SidebarProjectVm[] = buildSidebarProjects(app)
 
-  const getActiveWorktreeCount = (worktrees: Worktree[]) => {
+  const getActiveWorktreeCount = (worktrees: SidebarWorktreeVm[]) => {
     return worktrees.filter((w) => w.status !== "idle").length
   }
 
