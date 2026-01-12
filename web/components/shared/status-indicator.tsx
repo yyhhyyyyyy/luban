@@ -21,6 +21,8 @@ export function statusLabel(status: WorktreeStatus): string {
       return "In review"
     case "pr-ci-passed-merge":
       return "Ready to merge"
+    case "pr-merged":
+      return "Merged"
     case "pr-ci-failed":
       return "CI failed"
   }
@@ -72,6 +74,12 @@ const statusConfig: Record<
     color: "text-status-success",
     bgColor: "bg-status-success/10",
     label: "Ready to merge",
+  },
+  "pr-merged": {
+    icon: GitPullRequest,
+    color: "text-status-success",
+    bgColor: "bg-status-success/10",
+    label: "Merged",
   },
   "pr-ci-failed": {
     icon: GitPullRequest,
@@ -160,6 +168,11 @@ export function StatusIndicator({
       )}
       {status === "pr-ci-passed-merge" && (
         <span title="Ready to merge">
+          <CheckCircle2 className={cn(smallIconSize, "text-status-success")} />
+        </span>
+      )}
+      {status === "pr-merged" && (
+        <span title="Merged">
           <CheckCircle2 className={cn(smallIconSize, "text-status-success")} />
         </span>
       )}

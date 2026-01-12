@@ -2114,6 +2114,56 @@ mod tests {
     }
 
     #[test]
+    fn app_snapshot_marks_merged_pull_requests() {
+        let mut state = AppState::new();
+        let _ = state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/luban-server-test"),
+        });
+
+        let workspace_id = state.projects[0].workspaces[0].id;
+
+        let (events, _) = broadcast::channel::<WsServerMessage>(1);
+        let (tx, _rx) = mpsc::channel::<EngineCommand>(1);
+        let mut engine = Engine {
+            state,
+            rev: 1,
+            services: Arc::new(TestServices),
+            events,
+            tx,
+            cancel_flags: HashMap::new(),
+            pull_requests: HashMap::new(),
+            pull_requests_in_flight: HashSet::new(),
+        };
+
+        engine.pull_requests.insert(
+            workspace_id,
+            PullRequestCacheEntry {
+                info: Some(PullRequestInfo {
+                    number: 7,
+                    is_draft: false,
+                    state: DomainPullRequestState::Merged,
+                    ci_state: Some(DomainPullRequestCiState::Success),
+                    merge_ready: false,
+                }),
+                refreshed_at: Instant::now(),
+            },
+        );
+
+        let snapshot = engine.app_snapshot();
+        let pr = snapshot.projects[0].workspaces[0].pull_request;
+        assert_eq!(
+            pr,
+            Some(PullRequestSnapshot {
+                number: 7,
+                is_draft: false,
+                state: PullRequestState::Merged,
+                ci_state: Some(PullRequestCiState::Success),
+                merge_ready: false,
+            })
+        );
+    }
+
+    #[test]
     fn workspace_threads_changed_includes_tabs_snapshot() {
         let mut state = AppState::new();
         let _ = state.apply(Action::AddProject {

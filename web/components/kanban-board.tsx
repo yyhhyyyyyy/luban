@@ -41,6 +41,7 @@ const cardBorderColors: Record<WorktreeStatus, string> = {
   "pr-ci-running": "border-status-info/30",
   "pr-ci-passed-review": "border-status-info/30",
   "pr-ci-passed-merge": "border-status-success/30",
+  "pr-merged": "border-status-success/30",
   "pr-ci-failed": "border-status-error/30",
 }
 
