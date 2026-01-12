@@ -14,7 +14,8 @@ When there is a mismatch, the design project wins and this repository must be up
 - The frontend must remain compatible with static export served by `luban_server` (Next `output: "export"`).
 - UI implementation should reuse the same design tokens, layout primitives, and component patterns.
 - Do not introduce a second UI design system in this repository.
-- UI-only state that does not affect domain correctness (draft/scroll/layout) must remain in browser `localStorage`.
+- Device-local UI state (draft/scroll/layout) should remain in browser `localStorage`.
+- Durable app settings that are part of the product experience (e.g. appearance and agent defaults) may be persisted in SQLite.
 
 ## Workflow
 

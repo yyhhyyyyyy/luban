@@ -20,18 +20,6 @@ export function followTailKey(workspaceId: number, threadId: number): string {
   return `luban:follow_tail:${workspaceId}:${threadId}`
 }
 
-export function threadOrderKey(workspaceId: number): string {
-  return `luban:ui:thread_order:${workspaceId}`
-}
-
-export function hiddenThreadsKey(workspaceId: number): string {
-  return `luban:ui:hidden_threads:${workspaceId}`
-}
-
-export function closedAtKey(workspaceId: number): string {
-  return `luban:ui:closed_at:${workspaceId}`
-}
-
 export function loadJson<T>(key: string): T | null {
   const raw = localStorage.getItem(key)
   if (!raw) return null

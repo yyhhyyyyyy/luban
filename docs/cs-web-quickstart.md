@@ -49,4 +49,5 @@ prefer `just web run` (single process, same-origin `/api/*`).
 
 - The server binds to loopback only (localhost).
 - Override bind addr/port via `LUBAN_SERVER_ADDR` (e.g. `127.0.0.1:8422`).
-- UI-only state (draft/scroll/layout) lives in browser `localStorage`.
+- Device-local UI state (draft/scroll/layout) lives in browser `localStorage`.
+- Durable app settings (appearance, agent defaults) live in SQLite.

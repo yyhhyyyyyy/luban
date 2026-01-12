@@ -118,8 +118,9 @@ If a thread has `remote_thread_id = None`, the first turn starts a new remote th
 
 Persisted app state includes:
 
-- Server (SQLite): projects/workspaces, threads, conversation entries, agent state.
-- Browser (`localStorage`): tab strip ordering, drafts, and other presentational state.
+- Server (SQLite): projects/workspaces, threads, conversation entries, agent state, and tab strip state
+  (`open_tabs`, `archived_tabs`, `active_tab`).
+- Browser (`localStorage`): drafts and follow-tail preference (device-local).
 
 ## Test strategy
 

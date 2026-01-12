@@ -10,6 +10,32 @@ This document describes what is durable (server-side) and what is UI-only (brows
 - Migrations are applied via `PRAGMA user_version` in `crates/luban_backend/src/sqlite_store.rs`.
 - Domain <-> persisted mapping is centralized in `crates/luban_domain/src/persistence.rs`.
 
+### App settings (durable preferences)
+
+Luban persists a small set of app-level preferences in SQLite so they survive restarts and can be
+shared across multiple instances that point at the same database.
+
+Currently persisted (non-exhaustive):
+
+- Appearance:
+  - theme (`light`/`dark`/`system`)
+  - fonts (UI/chat/code/terminal)
+- Agent defaults:
+  - `agent_default_model_id`
+  - `agent_default_thinking_effort`
+- Workspace UX state:
+  - `last_open_workspace_id`
+  - workspace thread tabs (open/archived/active)
+  - chat scroll position and scroll anchor
+  - unread completion markers
+
+Notes:
+
+- These preferences are persisted through `Effect::SaveAppState`.
+- Storage is implemented via `app_settings` (integer) and `app_settings_text` (string) tables.
+- Persistence of UI-related fields can be disabled by constructing the store with
+  `SqliteStoreOptions { persist_ui_state: false }` (primarily for tests).
+
 ### Workspace-scoped context storage
 
 Attachments are stored on disk under a workspace-scoped directory:
@@ -27,18 +53,26 @@ Attachments are stored on disk under a workspace-scoped directory:
 
 ## UI-only (browser-side)
 
-The web UI is a single-page app. State that does not affect correctness lives in browser
-`localStorage` (and is not required to be durable across machines).
+The web UI is a single-page app. State that is purely presentational or device-specific lives in
+browser `localStorage` and is not required to be durable across machines.
 
-Current keys (non-exhaustive):
+Current keys:
 
+- `luban:active_workspace_id`
 - `luban:ui:right_sidebar_open`
 - `luban:ui:view_mode`
 - `luban:ui:sidebar_width_px`
 - `luban:ui:right_sidebar_width_px`
+- `luban:ui:global_zoom` (Tauri only)
+- `luban:active_thread_id:<workspace_id>`
 - `luban:draft:<workspace_id>:<thread_id>`
 - `luban:follow_tail:<workspace_id>:<thread_id>`
-- `luban:ui:thread_order:<workspace_id>`
+
+Notes:
+
+- Theme and appearance fonts are persisted in SQLite and should not depend on these keys.
+  The web theme implementation may still write a cache key in `localStorage` via `next-themes`,
+  but the durable source of truth is the server `AppSnapshot`.
 
 ## Non-goals
 

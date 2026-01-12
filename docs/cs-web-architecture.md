@@ -18,7 +18,7 @@ UI as the primary frontend.
   - client -> server actions
   - server -> client incremental events (state deltas and streaming updates)
 - Provide an interactive terminal pane in the web UI using `ghostty-web`.
-- Move draft/scroll/layout persistence from SQLite into browser `localStorage`.
+- Persist durable app settings (appearance, agent defaults, workspace UX state) in SQLite.
 - Make attachments fully structured (no tokens embedded in message text).
 
 ## Non-goals
@@ -143,11 +143,11 @@ terminal output is high-volume.
 
 ## Browser `localStorage` (UI-only persistence)
 
-The following state moves from domain/SQLite into browser storage:
+The following state is considered UI-only (device-specific) and lives in browser storage:
 
 - draft text and draft attachments (by `attachment_id`)
 - scroll position / follow-tail preference
-- layout widths (sidebar, terminal pane, dashboard preview)
+- layout widths (sidebar, right sidebar)
 - active workspace/thread selection
 - other purely presentational toggles
 
@@ -156,6 +156,7 @@ The server remains authoritative for:
 - projects/workspaces
 - conversation entries
 - agent runs and streamed events
+- durable app settings (appearance, agent defaults, and other persisted UX state)
 
 ## Serving the Web UI
 

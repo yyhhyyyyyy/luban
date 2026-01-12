@@ -41,5 +41,6 @@ This avoids a blank terminal after refresh while keeping memory bounded.
 
 - The terminal theme is derived from CSS variables and applied by emitting OSC color sequences on
   initialization.
+- Terminal font is controlled by the Appearance settings (durable, stored in SQLite) and applied
+  dynamically in the client.
 - Pane width is resizable and stored in browser `localStorage` (UI-only).
-

@@ -30,14 +30,20 @@ See `docs/cs-web-architecture.md`.
 
 See `docs/ui-design-parity.md`.
 
-## UI-only state lives in `localStorage`
+## UI state: durable vs device-local
 
-State that does not affect correctness is stored in browser `localStorage`, including:
+Luban splits "UI state" into two categories:
 
-- draft text
-- follow-tail / scroll preferences
-- tab strip ordering
-- pane widths and other layout toggles
+- **Durable preferences** stored in SQLite via `Effect::SaveAppState` (shared across instances using
+  the same DB):
+  - appearance (theme + fonts)
+  - agent defaults
+  - workspace UX state (tabs, scroll anchors, unread markers)
+- **Device-local preferences** stored in browser `localStorage` (not shared across machines):
+  - draft text
+  - follow-tail preference
+  - tab strip ordering and other presentation-only toggles
+  - pane widths
 
 See `docs/persistence.md`.
 

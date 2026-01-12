@@ -1772,6 +1772,79 @@ mod tests {
     }
 
     #[test]
+    fn appearance_theme_is_persisted() {
+        let mut state = AppState::new();
+        let effects = state.apply(Action::AppearanceThemeChanged {
+            theme: crate::AppearanceTheme::Dark,
+        });
+        assert_eq!(state.appearance_theme, crate::AppearanceTheme::Dark);
+        assert_eq!(effects.len(), 1);
+        assert!(matches!(effects[0], Effect::SaveAppState));
+
+        let persisted = state.to_persisted();
+        assert_eq!(persisted.appearance_theme.as_deref(), Some("dark"));
+
+        let mut restored = AppState::new();
+        restored.apply(Action::AppStateLoaded {
+            persisted: Box::new(PersistedAppState {
+                projects: Vec::new(),
+                sidebar_width: None,
+                terminal_pane_width: None,
+                appearance_theme: Some("light".to_owned()),
+                appearance_ui_font: None,
+                appearance_chat_font: None,
+                appearance_code_font: None,
+                appearance_terminal_font: None,
+                agent_default_model_id: None,
+                agent_default_thinking_effort: None,
+                last_open_workspace_id: None,
+                workspace_active_thread_id: HashMap::new(),
+                workspace_open_tabs: HashMap::new(),
+                workspace_archived_tabs: HashMap::new(),
+                workspace_next_thread_id: HashMap::new(),
+                workspace_chat_scroll_y10: HashMap::new(),
+                workspace_chat_scroll_anchor: HashMap::new(),
+                workspace_unread_completions: HashMap::new(),
+            }),
+        });
+        assert_eq!(restored.appearance_theme, crate::AppearanceTheme::Light);
+    }
+
+    #[test]
+    fn appearance_fonts_are_persisted() {
+        let mut state = AppState::new();
+        let effects = state.apply(Action::AppearanceFontsChanged {
+            ui_font: "Inter".to_owned(),
+            chat_font: "Roboto".to_owned(),
+            code_font: "Geist Mono".to_owned(),
+            terminal_font: "JetBrains Mono".to_owned(),
+        });
+        assert_eq!(
+            state.appearance_fonts,
+            crate::AppearanceFonts {
+                ui_font: "Inter".to_owned(),
+                chat_font: "Roboto".to_owned(),
+                code_font: "Geist Mono".to_owned(),
+                terminal_font: "JetBrains Mono".to_owned(),
+            }
+        );
+        assert_eq!(effects.len(), 1);
+        assert!(matches!(effects[0], Effect::SaveAppState));
+
+        let persisted = state.to_persisted();
+        assert_eq!(persisted.appearance_ui_font.as_deref(), Some("Inter"));
+        assert_eq!(persisted.appearance_chat_font.as_deref(), Some("Roboto"));
+        assert_eq!(
+            persisted.appearance_code_font.as_deref(),
+            Some("Geist Mono")
+        );
+        assert_eq!(
+            persisted.appearance_terminal_font.as_deref(),
+            Some("JetBrains Mono")
+        );
+    }
+
+    #[test]
     fn workspace_chat_scroll_is_persisted() {
         let mut state = AppState::new();
         let workspace_id = WorkspaceId(42);
