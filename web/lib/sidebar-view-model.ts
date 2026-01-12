@@ -1,14 +1,16 @@
 "use client"
 
 import type { AppSnapshot, OperationStatus } from "./luban-api"
-import { worktreeStatusFromWorkspace, type WorktreeStatus } from "./worktree-ui"
+import { agentStatusFromWorkspace, prStatusFromWorkspace, type AgentStatus, type PRStatus } from "./worktree-ui"
 
 export type SidebarWorktreeVm = {
   id: string
   name: string
   isHome: boolean
-  status: WorktreeStatus
+  agentStatus: AgentStatus
+  prStatus: PRStatus
   prNumber?: number
+  prTitle?: string
   workspaceId: number
 }
 
@@ -30,16 +32,18 @@ export function buildSidebarProjects(app: AppSnapshot | null): SidebarProjectVm[
     worktrees: p.workspaces
       .filter((w) => w.status === "active")
       .map((w) => {
-        const mapped = worktreeStatusFromWorkspace(w)
+        const agentStatus = agentStatusFromWorkspace(w)
+        const pr = prStatusFromWorkspace(w)
         return {
           id: w.short_id,
           name: w.branch_name,
           isHome: w.workspace_name === "main",
-          status: mapped.status,
-          prNumber: mapped.prNumber,
+          agentStatus,
+          prStatus: pr.status,
+          prNumber: pr.prNumber,
+          prTitle: pr.prState === "merged" ? "Merged" : undefined,
           workspaceId: w.id,
         }
       }),
   }))
 }
-

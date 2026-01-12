@@ -2,118 +2,89 @@
 
 import type React from "react"
 
-import { CheckCircle2, Circle, Clock, GitPullRequest, Loader2, MessageCircle, XCircle } from "lucide-react"
+import { CheckCircle2, Circle, Clock, GitMerge, Loader2, MessageCircle, XCircle } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-import type { WorktreeStatus } from "@/lib/worktree-ui"
+import type { AgentStatus, PRStatus } from "@/lib/worktree-ui"
 
-export function statusLabel(status: WorktreeStatus): string {
-  switch (status) {
-    case "idle":
-      return "Idle"
-    case "agent-running":
-      return "Running"
-    case "agent-done":
-      return "Awaiting review"
-    case "pr-ci-running":
-      return "CI running"
-    case "pr-ci-passed-review":
-      return "In review"
-    case "pr-ci-passed-merge":
-      return "Ready to merge"
-    case "pr-merged":
-      return "Merged"
-    case "pr-ci-failed":
-      return "CI failed"
-  }
-}
+export type { AgentStatus, PRStatus }
 
-const statusConfig: Record<
-  WorktreeStatus,
+export const agentStatusConfig: Record<
+  AgentStatus,
   {
     icon: React.ElementType
     color: string
-    bgColor: string
     label: string
     animate?: boolean
   }
 > = {
-  idle: {
-    icon: Circle,
-    color: "text-status-idle",
-    bgColor: "",
-    label: "Idle",
-  },
-  "agent-running": {
-    icon: Loader2,
-    color: "text-status-running",
-    bgColor: "bg-status-running/10",
-    label: "Running",
-    animate: true,
-  },
-  "agent-done": {
-    icon: MessageCircle,
-    color: "text-status-warning",
-    bgColor: "bg-status-warning/10",
-    label: "Awaiting review",
-  },
-  "pr-ci-running": {
-    icon: GitPullRequest,
-    color: "text-status-running",
-    bgColor: "bg-status-info/10",
-    label: "CI Running",
-  },
-  "pr-ci-passed-review": {
-    icon: GitPullRequest,
-    color: "text-status-info",
-    bgColor: "bg-status-info/10",
-    label: "In Review",
-  },
-  "pr-ci-passed-merge": {
-    icon: GitPullRequest,
-    color: "text-status-success",
-    bgColor: "bg-status-success/10",
-    label: "Ready to merge",
-  },
-  "pr-merged": {
-    icon: GitPullRequest,
-    color: "text-status-success",
-    bgColor: "bg-status-success/10",
-    label: "Merged",
-  },
-  "pr-ci-failed": {
-    icon: GitPullRequest,
-    color: "text-status-error",
-    bgColor: "bg-status-error/10",
-    label: "CI Failed",
-  },
+  idle: { icon: Circle, color: "text-status-idle", label: "Idle" },
+  running: { icon: Loader2, color: "text-status-running", label: "Running", animate: true },
+  pending: { icon: MessageCircle, color: "text-status-warning", label: "Awaiting read" },
 }
 
-export function getStatusBgColor(status: WorktreeStatus): string {
-  return statusConfig[status].bgColor
+export const prStatusConfig: Record<
+  PRStatus,
+  {
+    icon: React.ElementType
+    color: string
+    label: string
+    animate?: boolean
+  }
+> = {
+  none: { icon: Circle, color: "text-transparent", label: "" },
+  "ci-running": { icon: Loader2, color: "text-status-warning", label: "CI Running", animate: true },
+  "ci-passed": { icon: CheckCircle2, color: "text-status-success", label: "CI Passed" },
+  "review-pending": { icon: Clock, color: "text-status-info", label: "In Review" },
+  "ready-to-merge": { icon: GitMerge, color: "text-status-success", label: "Ready to merge" },
+  "ci-failed": { icon: XCircle, color: "text-status-error", label: "CI Failed" },
 }
 
-export function StatusIndicator({
+export function AgentStatusIcon({
+  status,
+  size = "sm",
+  className,
+}: {
+  status: AgentStatus
+  size?: "sm" | "md"
+  className?: string
+}) {
+  const config = agentStatusConfig[status]
+  const Icon = config.icon
+  const iconSize = size === "sm" ? "w-3.5 h-3.5" : "w-4 h-4"
+
+  return (
+    <span className={cn("relative flex items-center justify-center flex-shrink-0", config.color, className)}>
+      <Icon className={cn(iconSize, config.animate && "animate-spin")} />
+      {status === "pending" && (
+        <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-status-warning rounded-full" />
+      )}
+    </span>
+  )
+}
+
+export function PRBadge({
   status,
   prNumber,
   workspaceId,
   size = "sm",
-  showLabel = false,
   onOpenPullRequest,
   onOpenPullRequestFailedAction,
+  titleOverride,
 }: {
-  status: WorktreeStatus
+  status: PRStatus
   prNumber?: number
   workspaceId?: number
   size?: "sm" | "md"
-  showLabel?: boolean
   onOpenPullRequest?: (workspaceId: number) => void
   onOpenPullRequestFailedAction?: (workspaceId: number) => void
+  titleOverride?: string
 }) {
-  const config = statusConfig[status]
+  if (status === "none" || prNumber == null) return null
+
+  const config = prStatusConfig[status]
   const Icon = config.icon
-  const iconSize = size === "sm" ? "w-3 h-3" : "w-4 h-4"
-  const smallIconSize = size === "sm" ? "w-2.5 h-2.5" : "w-3 h-3"
+  const iconSize = size === "sm" ? "w-2.5 h-2.5" : "w-3 h-3"
 
   const canOpenPr = workspaceId != null && onOpenPullRequest != null
   const canOpenCi = workspaceId != null && onOpenPullRequestFailedAction != null
@@ -130,19 +101,7 @@ export function StatusIndicator({
     onOpenPullRequestFailedAction(workspaceId)
   }
 
-  if (status === "idle" || status === "agent-running" || status === "agent-done") {
-    return (
-      <span className={cn("flex items-center gap-1.5 flex-shrink-0", config.color)}>
-        <span className="relative">
-          <Icon className={cn(smallIconSize, config.animate && "animate-spin")} />
-          {status === "agent-done" && (
-            <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-status-warning rounded-full" />
-          )}
-        </span>
-        {showLabel && <span className="text-xs">{config.label}</span>}
-      </span>
-    )
-  }
+  const title = titleOverride ?? config.label
 
   return (
     <div className="flex items-center gap-1.5 flex-shrink-0">
@@ -150,42 +109,26 @@ export function StatusIndicator({
         onClick={handlePrClick}
         disabled={!canOpenPr}
         className={cn(
-          "flex items-center gap-1 text-xs hover:opacity-80 transition-opacity",
-          config.color,
-          !canOpenPr && "opacity-70 cursor-default hover:opacity-70",
+          "text-xs font-mono text-muted-foreground hover:text-foreground transition-colors",
+          !canOpenPr && "opacity-70 cursor-default hover:text-muted-foreground",
         )}
-        title={prNumber != null ? `Open PR #${prNumber}` : "Open PR"}
+        title={`Open PR #${prNumber}`}
       >
-        <GitPullRequest className={iconSize} />
-        <span>#{prNumber}</span>
+        #{prNumber}
       </button>
-
-      {status === "pr-ci-running" && <Loader2 className={cn(smallIconSize, "text-status-warning animate-spin")} />}
-      {status === "pr-ci-passed-review" && (
-        <span title="Waiting for review">
-          <Clock className={cn(smallIconSize, "text-status-warning")} />
-        </span>
-      )}
-      {status === "pr-ci-passed-merge" && (
-        <span title="Ready to merge">
-          <CheckCircle2 className={cn(smallIconSize, "text-status-success")} />
-        </span>
-      )}
-      {status === "pr-merged" && (
-        <span title="Merged">
-          <CheckCircle2 className={cn(smallIconSize, "text-status-success")} />
-        </span>
-      )}
-      {status === "pr-ci-failed" && (
+      {status === "ci-failed" ? (
         <button
           onClick={handleCiClick}
           disabled={!canOpenCi}
           className={cn(!canOpenCi && "opacity-70 cursor-default")}
-          title="CI failed - Click to view"
+          title={title}
         >
-          <XCircle className={cn(smallIconSize, "text-status-error hover:opacity-80 transition-opacity")} />
+          <Icon className={cn(iconSize, config.color, "hover:opacity-80 transition-opacity")} />
         </button>
+      ) : (
+        <Icon className={cn(iconSize, config.color, config.animate && "animate-spin")} title={title} />
       )}
     </div>
   )
 }
+

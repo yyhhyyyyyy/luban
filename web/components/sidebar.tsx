@@ -19,11 +19,10 @@ import { cn } from "@/lib/utils"
 import { useLuban } from "@/lib/luban-context"
 import type { SidebarProjectVm, SidebarWorktreeVm } from "@/lib/sidebar-view-model"
 import { buildSidebarProjects } from "@/lib/sidebar-view-model"
-import type { WorktreeStatus } from "@/lib/worktree-ui"
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { NewTaskModal } from "./new-task-modal"
-import { StatusIndicator, getStatusBgColor } from "./shared/status-indicator"
+import { AgentStatusIcon, PRBadge } from "./shared/status-indicator"
 import { focusChatInput } from "@/lib/focus-chat-input"
 
 interface SidebarProps {
@@ -120,7 +119,7 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
   const projects: SidebarProjectVm[] = buildSidebarProjects(app)
 
   const getActiveWorktreeCount = (worktrees: SidebarWorktreeVm[]) => {
-    return worktrees.filter((w) => w.status !== "idle").length
+    return worktrees.filter((w) => w.agentStatus !== "idle" || w.prStatus !== "none").length
   }
 
   const handleAddProjectClick = async () => {
@@ -219,7 +218,6 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
 	                      key={worktree.workspaceId}
 	                      className={cn(
 	                        "group/worktree flex items-center gap-2 px-2 py-1.5 hover:bg-sidebar-accent/30 transition-all cursor-pointer rounded-sm mx-1",
-	                        getStatusBgColor(worktree.status),
 	                        worktree.workspaceId === activeWorkspaceId && "bg-sidebar-accent/30",
 	                        newlyCreatedWorkspaceId === worktree.workspaceId &&
 	                          "animate-in slide-in-from-left-2 fade-in duration-300 bg-primary/15 ring-1 ring-primary/30",
@@ -250,13 +248,17 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
                             {worktree.id}
                           </span>
 	                      </div>
-	                      <StatusIndicator
-	                        status={worktree.status}
-	                        prNumber={worktree.prNumber}
-	                        workspaceId={worktree.workspaceId}
-	                        onOpenPullRequest={openWorkspacePullRequest}
-	                        onOpenPullRequestFailedAction={openWorkspacePullRequestFailedAction}
-	                      />
+                        <div className="flex items-center gap-2">
+                          <AgentStatusIcon status={worktree.agentStatus} size="sm" />
+                          <PRBadge
+                            status={worktree.prStatus}
+                            prNumber={worktree.prNumber}
+                            workspaceId={worktree.workspaceId}
+                            onOpenPullRequest={openWorkspacePullRequest}
+                            onOpenPullRequestFailedAction={openWorkspacePullRequestFailedAction}
+                            titleOverride={worktree.prTitle}
+                          />
+                        </div>
                       {/* Archive button only for non-home worktrees */}
                       {worktree.isHome ? (
                         <span className="p-0.5 text-muted-foreground/50" title="Main worktree">

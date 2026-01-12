@@ -2,19 +2,23 @@
 
 import type { AppSnapshot } from "./luban-api"
 import {
-  kanbanColumnForStatus,
   kanbanColumns,
-  worktreeStatusFromWorkspace,
+  agentStatusFromWorkspace,
+  kanbanColumnForWorktree,
+  prStatusFromWorkspace,
   type KanbanColumn,
-  type WorktreeStatus,
+  type AgentStatus,
+  type PRStatus,
 } from "./worktree-ui"
 
 export type KanbanWorktreeVm = {
   id: string
   name: string
   projectName: string
-  status: WorktreeStatus
+  agentStatus: AgentStatus
+  prStatus: PRStatus
   prNumber?: number
+  prTitle?: string
   workspaceId: number
 }
 
@@ -29,13 +33,16 @@ export function buildKanbanWorktrees(app: AppSnapshot | null): KanbanWorktreeVm[
   for (const p of app.projects) {
     for (const w of p.workspaces) {
       if (w.status !== "active") continue
-      const mapped = worktreeStatusFromWorkspace(w)
+      const agentStatus = agentStatusFromWorkspace(w)
+      const pr = prStatusFromWorkspace(w)
       out.push({
         id: w.short_id,
         name: w.branch_name,
         projectName: p.slug,
-        status: mapped.status,
-        prNumber: mapped.prNumber,
+        agentStatus,
+        prStatus: pr.status,
+        prNumber: pr.prNumber,
+        prTitle: pr.prState === "merged" ? "Merged" : undefined,
         workspaceId: w.id,
       })
     }
@@ -48,7 +55,9 @@ export function groupKanbanWorktreesByColumn(
 ): Record<KanbanColumn, KanbanWorktreeVm[]> {
   return kanbanColumns.reduce(
     (acc, col) => {
-      acc[col.id] = worktrees.filter((w) => kanbanColumnForStatus(w.status) === col.id)
+      acc[col.id] = worktrees.filter(
+        (w) => kanbanColumnForWorktree({ agentStatus: w.agentStatus, prStatus: w.prStatus }) === col.id,
+      )
       return acc
     },
     {} as Record<KanbanColumn, KanbanWorktreeVm[]>,
@@ -59,4 +68,3 @@ export function buildKanbanBoardVm(app: AppSnapshot | null): KanbanBoardVm {
   const worktrees = buildKanbanWorktrees(app)
   return { worktrees, worktreesByColumn: groupKanbanWorktreesByColumn(worktrees) }
 }
-

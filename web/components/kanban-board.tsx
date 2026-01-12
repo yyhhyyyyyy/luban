@@ -6,19 +6,13 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import {
   ArrowRight,
   Brain,
-  CheckCircle2,
   ChevronDown,
-  Clock,
   FolderGit2,
-  GitBranch,
-  GitPullRequest,
   LayoutGrid,
   Loader2,
-  MessageCircle,
   Send,
   Settings2,
   X,
-  XCircle,
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -27,23 +21,12 @@ import { fetchConversation, fetchThreads } from "@/lib/luban-http"
 import { agentModelLabel, buildMessages, thinkingEffortLabel, type Message } from "@/lib/conversation-ui"
 import type { ConversationEntry, ConversationSnapshot } from "@/lib/luban-api"
 import { ConversationView } from "@/components/conversation-view"
-import { StatusIndicator, getStatusBgColor } from "@/components/shared/status-indicator"
+import { AgentStatusIcon, PRBadge } from "@/components/shared/status-indicator"
 import { buildKanbanBoardVm, type KanbanWorktreeVm } from "@/lib/kanban-view-model"
-import { kanbanColumns, type KanbanColumn, type WorktreeStatus } from "@/lib/worktree-ui"
+import { kanbanColumns, type KanbanColumn } from "@/lib/worktree-ui"
 import { pickThreadId } from "@/lib/thread-ui"
 
 type Worktree = KanbanWorktreeVm
-
-const cardBorderColors: Record<WorktreeStatus, string> = {
-  idle: "border-border",
-  "agent-running": "border-status-running/30",
-  "agent-done": "border-status-warning/30",
-  "pr-ci-running": "border-status-info/30",
-  "pr-ci-passed-review": "border-status-info/30",
-  "pr-ci-passed-merge": "border-status-success/30",
-  "pr-merged": "border-status-success/30",
-  "pr-ci-failed": "border-status-error/30",
-}
 
 function WorktreeCard({
   worktree,
@@ -62,9 +45,7 @@ function WorktreeCard({
     <div
       onClick={onClick}
       className={cn(
-        "group p-3 rounded-lg border cursor-pointer transition-all",
-        cardBorderColors[worktree.status],
-        getStatusBgColor(worktree.status),
+        "group p-3 rounded-lg border border-border cursor-pointer transition-all",
         isSelected ? "shadow-lg shadow-primary/20 bg-accent/50 border-primary/50" : "hover:bg-accent/50",
       )}
     >
@@ -73,20 +54,20 @@ function WorktreeCard({
         <span className="text-[10px] text-muted-foreground">{worktree.projectName}</span>
       </div>
 
-      <div className="flex items-center gap-2 mb-1">
-        <GitBranch className="w-3.5 h-3.5 text-foreground/70" />
-        <span className="text-sm font-medium truncate">{worktree.name}</span>
+      <div className="flex items-center gap-2 mb-2">
+        <AgentStatusIcon status={worktree.agentStatus} size="md" />
+        <span className="text-sm font-medium truncate flex-1">{worktree.name}</span>
       </div>
 
       <div className="flex items-center justify-between">
         <span className="text-[10px] text-muted-foreground/50 font-mono">{worktree.id}</span>
-        <StatusIndicator
-          status={worktree.status}
+        <PRBadge
+          status={worktree.prStatus}
           prNumber={worktree.prNumber}
           workspaceId={worktree.workspaceId}
           onOpenPullRequest={onOpenPullRequest}
           onOpenPullRequestFailedAction={onOpenPullRequestFailedAction}
-          showLabel
+          titleOverride={worktree.prTitle}
         />
       </div>
     </div>
@@ -172,13 +153,10 @@ function WorktreePreviewPanel({
     <div className="w-[420px] flex flex-col border-l border-border bg-background">
       <div className="h-11 px-4 border-b border-border flex items-center justify-between">
         <div className="flex items-center gap-2 min-w-0">
-          <FolderGit2 className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+          <AgentStatusIcon status={worktree.agentStatus} size="md" />
           <span className="text-sm font-medium truncate">{worktree.projectName}</span>
           <span className="text-muted-foreground">/</span>
-          <div className="flex items-center gap-1 text-muted-foreground">
-            <GitBranch className="w-3.5 h-3.5" />
-            <span className="text-xs">{worktree.name}</span>
-          </div>
+          <span className="text-xs text-muted-foreground">{worktree.name}</span>
         </div>
         <div className="flex items-center gap-1">
           <button
@@ -216,6 +194,7 @@ function WorktreePreviewPanel({
 
             <ConversationView
               messages={messages}
+              workspaceId={worktree.workspaceId}
               emptyState={
                 !isLoading && !error ? (
                   <div className="text-xs text-muted-foreground">No conversation yet.</div>
@@ -223,7 +202,7 @@ function WorktreePreviewPanel({
               }
             />
 
-            {worktree.status === "agent-running" && (
+            {worktree.agentStatus === "running" && (
               <div className="flex items-center gap-2 py-2 px-2 rounded text-xs text-primary">
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
                 <span>Agent is working...</span>
