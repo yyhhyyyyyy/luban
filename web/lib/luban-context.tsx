@@ -19,7 +19,7 @@ import type {
 import { fetchApp, fetchConversation, fetchThreads } from "./luban-http"
 import { ACTIVE_WORKSPACE_KEY, activeThreadKey } from "./ui-prefs"
 import { useLubanTransport } from "./luban-transport"
-import { waitForNewThread } from "./luban-thread-flow"
+import { pickCreatedThreadId, waitForNewThread } from "./luban-thread-flow"
 
 type LubanContextValue = {
   app: AppSnapshot | null
@@ -101,10 +101,10 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
 
           const pending = pendingCreateThreadRef.current
           if (pending && pending.workspaceId === wid) {
-            const created = event.threads
-              .map((t) => t.thread_id)
-              .filter((id) => !pending.existingThreadIds.has(id))
-              .sort((a, b) => b - a)[0]
+            const created = pickCreatedThreadId({
+              threads: event.threads,
+              existingThreadIds: pending.existingThreadIds,
+            })
             if (created != null) {
               pendingCreateThreadRef.current = null
               void selectThreadInternal(wid, created)

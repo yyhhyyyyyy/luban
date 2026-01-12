@@ -2,6 +2,18 @@
 
 import type { ThreadMeta, WorkspaceId } from "./luban-api"
 
+export function pickCreatedThreadId(args: {
+  threads: ThreadMeta[]
+  existingThreadIds: Set<number>
+}): number | null {
+  const created = args.threads
+    .map((t) => t.thread_id)
+    .filter((id) => !args.existingThreadIds.has(id))
+    .sort((a, b) => b - a)[0]
+
+  return created ?? null
+}
+
 export async function waitForNewThread(args: {
   workspaceId: WorkspaceId
   existingThreadIds: Set<number>
@@ -16,11 +28,11 @@ export async function waitForNewThread(args: {
   while (Date.now() - startedAt < timeoutMs) {
     try {
       const snap = await args.fetchThreads(args.workspaceId)
-      const created = snap.threads
-        .map((t) => t.thread_id)
-        .filter((id) => !args.existingThreadIds.has(id))
-        .sort((a, b) => b - a)[0]
-      return { threads: snap.threads, createdThreadId: created ?? null }
+      const createdThreadId = pickCreatedThreadId({
+        threads: snap.threads,
+        existingThreadIds: args.existingThreadIds,
+      })
+      return { threads: snap.threads, createdThreadId }
     } catch {
       // ignore and retry
     }
@@ -28,4 +40,3 @@ export async function waitForNewThread(args: {
   }
   return { threads: [], createdThreadId: null }
 }
-
