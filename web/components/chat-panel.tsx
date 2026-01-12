@@ -371,16 +371,16 @@ export function ChatPanel() {
         </div>
       </div>
 
-      <div className="flex items-center h-10 border-b border-border bg-card/50">
+      <div className="flex items-center h-10 border-b border-border bg-muted/30">
         <div className="flex-1 flex items-center min-w-0 overflow-x-auto scrollbar-none">
           {tabs.map((tab) => (
             <div
               key={tab.id}
               onClick={() => handleTabClick(tab.id)}
               className={cn(
-                "group flex items-center gap-2 h-10 px-3 border-r border-border cursor-pointer transition-colors min-w-0 max-w-[180px]",
+                "group relative flex items-center gap-2 h-10 px-3 cursor-pointer transition-colors min-w-0 max-w-[180px]",
                 tab.id === activeTabId
-                  ? "bg-background text-foreground"
+                  ? "text-foreground bg-background"
                   : "text-muted-foreground hover:text-foreground hover:bg-muted/50",
               )}
             >
@@ -396,24 +396,26 @@ export function ChatPanel() {
                   <X className="w-3 h-3" />
                 </button>
               )}
+              {tab.id === activeTabId && (
+                <div className="absolute bottom-0 left-2 right-2 h-0.5 bg-primary rounded-full" />
+              )}
             </div>
           ))}
-        </div>
-
-        <div className="flex items-center border-l border-border">
           <button
             onClick={handleAddTab}
-            className="flex items-center justify-center w-9 h-10 text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+            className="flex items-center justify-center w-8 h-10 text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors flex-shrink-0"
             title="New tab"
           >
             <Plus className="w-4 h-4" />
           </button>
+        </div>
 
+        <div className="flex items-center px-1">
           <div className="relative">
             <button
               onClick={() => setShowTabDropdown(!showTabDropdown)}
               className={cn(
-                "flex items-center justify-center w-9 h-10 text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors",
+                "flex items-center justify-center w-8 h-8 text-muted-foreground hover:text-foreground hover:bg-muted rounded transition-colors",
                 showTabDropdown && "bg-muted text-foreground",
               )}
               title="All tabs"
