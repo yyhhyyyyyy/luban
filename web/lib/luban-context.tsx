@@ -19,6 +19,7 @@ import type {
 import { fetchApp, fetchConversation, fetchThreads } from "./luban-http"
 import { ACTIVE_WORKSPACE_KEY, activeThreadKey } from "./ui-prefs"
 import { useLubanTransport } from "./luban-transport"
+import { waitForNewThread } from "./luban-thread-flow"
 
 type LubanContextValue = {
   app: AppSnapshot | null
@@ -174,27 +175,6 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     return requestTransport<T>(action)
   }
 
-  async function waitForNewThread(
-    workspaceId: WorkspaceId,
-    existingThreadIds: Set<number>,
-  ): Promise<{ threads: ThreadMeta[]; createdThreadId: number | null }> {
-    const startedAt = Date.now()
-    while (Date.now() - startedAt < 5_000) {
-      try {
-        const snap = await fetchThreads(workspaceId)
-        const created = snap.threads
-          .map((t) => t.thread_id)
-          .filter((id) => !existingThreadIds.has(id))
-          .sort((a, b) => b - a)[0]
-        return { threads: snap.threads, createdThreadId: created ?? null }
-      } catch {
-        // ignore and retry
-      }
-      await new Promise((r) => setTimeout(r, 250))
-    }
-    return { threads: [], createdThreadId: null }
-  }
-
   function addProject(path: string) {
     sendAction({ type: "add_project", path })
   }
@@ -286,7 +266,11 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
         sendAction({ type: "create_workspace_thread", workspace_id: workspaceId })
         setActiveThreadId(null)
 
-        const created = await waitForNewThread(workspaceId, existing)
+        const created = await waitForNewThread({
+          workspaceId,
+          existingThreadIds: existing,
+          fetchThreads,
+        })
         if (created.createdThreadId != null) {
           pendingCreateThreadRef.current = null
           setThreads(created.threads)
@@ -321,7 +305,11 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
       sendAction({ type: "open_workspace", workspace_id: wid })
       sendAction({ type: "create_workspace_thread", workspace_id: wid })
 
-      const created = await waitForNewThread(wid, existingThreadIds)
+      const created = await waitForNewThread({
+        workspaceId: wid,
+        existingThreadIds,
+        fetchThreads,
+      })
       if (created.createdThreadId != null) {
         pendingCreateThreadRef.current = null
         setThreads(created.threads)
