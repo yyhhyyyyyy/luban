@@ -13,6 +13,7 @@ import {
   Archive,
   Loader2,
   Home,
+  Trash2,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useLuban } from "@/lib/luban-context"
@@ -23,6 +24,8 @@ import { toast } from "sonner"
 import { NewTaskModal } from "./new-task-modal"
 import { AgentStatusIcon, PRBadge } from "./shared/status-indicator"
 import { focusChatInput } from "@/lib/focus-chat-input"
+import { Dialog, DialogContent } from "@/components/ui/dialog"
+import { Button } from "@/components/ui/button"
 
 interface SidebarProps {
   viewMode: "workspace" | "kanban"
@@ -46,6 +49,7 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
     openWorkspace,
     addProject,
     pickProjectPath,
+    deleteProject,
   } = useLuban()
 
   const pendingCreateRef = useRef<{ projectId: number; existingWorkspaceIds: Set<number> } | null>(null)
@@ -55,6 +59,8 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
   const [optimisticArchivingWorkspaceIds, setOptimisticArchivingWorkspaceIds] = useState<Set<number>>(
     () => new Set(),
   )
+  const [deletingProjectId, setDeletingProjectId] = useState<number | null>(null)
+  const [projectToDelete, setProjectToDelete] = useState<{ id: number; name: string } | null>(null)
   const [newTaskOpen, setNewTaskOpen] = useState(false)
 
   useEffect(() => {
@@ -87,6 +93,13 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
       }
       return changed ? next : prev
     })
+
+    if (deletingProjectId != null) {
+      const stillExists = app.projects.some((p) => p.id === deletingProjectId)
+      if (!stillExists) {
+        setDeletingProjectId(null)
+      }
+    }
 
     const pendingProjectPath = pendingAddProjectPathRef.current
     if (pendingProjectPath) {
@@ -163,6 +176,18 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
     }
   }
 
+  const confirmDeleteProject = () => {
+    if (!projectToDelete) return
+    const projectId = projectToDelete.id
+    setProjectToDelete(null)
+    setDeletingProjectId(projectId)
+    deleteProject(projectId)
+
+    window.setTimeout(() => {
+      setDeletingProjectId((prev) => (prev === projectId ? null : prev))
+    }, 30_000)
+  }
+
   return (
     <aside
       className="flex-shrink-0 border-r border-border bg-sidebar flex flex-col"
@@ -191,54 +216,66 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
 	          const activeCount = getActiveWorktreeCount(project.worktrees)
 	          const isCreating =
 	            project.createWorkspaceStatus === "running" || optimisticCreatingProjectId === project.id
+	          const isDeleting = deletingProjectId === project.id
 	          return (
-            <div key={project.id} className="group/project">
-              <div className="flex items-center">
+            <div
+              key={project.id}
+              className={cn("group/project", isDeleting && "animate-pulse opacity-50 pointer-events-none")}
+            >
+              <div className="flex items-center hover:bg-sidebar-accent/50 transition-colors">
                 <button
                   onClick={() => toggleProjectExpanded(project.id)}
-                  className="flex-1 flex items-center gap-2 px-3 py-1.5 text-left hover:bg-sidebar-accent/50 transition-colors"
+                  className="flex-1 flex items-center gap-2 px-3 py-1.5 text-left"
                 >
                   {project.expanded ? (
                     <ChevronDown className="w-3 h-3 text-muted-foreground flex-shrink-0" />
                   ) : (
                     <ChevronRight className="w-3 h-3 text-muted-foreground flex-shrink-0" />
                   )}
-                  <span className="text-[13px] text-muted-foreground truncate flex-1" title={project.name}>
+                  <span className="text-sm text-muted-foreground truncate flex-1" title={project.name}>
                     {project.name}
                   </span>
                   {!project.expanded && activeCount > 0 && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/20 text-primary font-medium">
+                    <span className="text-xs px-1.5 py-0.5 rounded-full bg-primary/20 text-primary font-medium">
                       {activeCount}
                     </span>
                   )}
                 </button>
-	                <button
-	                  className={cn(
-	                    "p-1 mr-2 text-muted-foreground hover:text-foreground transition-all",
-	                    isCreating ? "opacity-100" : "opacity-0 group-hover/project:opacity-100",
-	                  )}
-	                  title="Add worktree"
-	                  onClick={() => {
+                <div className="flex items-center gap-0.5 pr-2 opacity-0 group-hover/project:opacity-100 transition-opacity">
+                  <button
+                    className="p-1 text-muted-foreground hover:text-foreground transition-colors"
+                    title="Add worktree"
+                    onClick={() => {
                       if (isCreating) return
-	                    if (!project.expanded) {
-	                      toggleProjectExpanded(project.id)
-	                    }
+                      if (!project.expanded) {
+                        toggleProjectExpanded(project.id)
+                      }
                       const fullProject = app?.projects.find((p) => p.id === project.id) ?? null
                       const existingWorkspaceIds = new Set<number>(
                         fullProject?.workspaces.map((w) => w.id) ?? project.worktrees.map((w) => w.workspaceId),
                       )
                       pendingCreateRef.current = { projectId: project.id, existingWorkspaceIds }
                       setOptimisticCreatingProjectId(project.id)
-	                    createWorkspace(project.id)
-	                  }}
-	                  disabled={isCreating}
-	                >
-	                  {isCreating ? (
-	                    <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
-	                  ) : (
-	                    <Plus className="w-3.5 h-3.5" />
-	                  )}
-	                </button>
+                      createWorkspace(project.id)
+                    }}
+                    disabled={isCreating}
+                  >
+                    {isCreating ? (
+                      <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                    ) : (
+                      <Plus className="w-4 h-4" />
+                    )}
+                  </button>
+                  <button
+                    data-testid="project-delete-button"
+                    onClick={() => setProjectToDelete({ id: project.id, name: project.name })}
+                    disabled={isDeleting}
+                    className="p-1 text-muted-foreground hover:text-destructive transition-colors"
+                    title="Delete project"
+                  >
+                    {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                  </button>
+                </div>
 	              </div>
 
 	                  {project.expanded && (
@@ -367,6 +404,48 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
       </div>
 
       <NewTaskModal open={newTaskOpen} onOpenChange={setNewTaskOpen} />
+
+      <Dialog open={projectToDelete !== null} onOpenChange={(open) => !open && setProjectToDelete(null)}>
+        <DialogContent
+          data-testid="project-delete-dialog"
+          showCloseButton={false}
+          className="sm:max-w-[400px] p-0 gap-0 bg-background border-border overflow-hidden rounded-lg"
+        >
+          <div className="px-5 py-4 border-b border-border">
+            <h2 className="text-base font-medium flex items-center gap-2">
+              <Trash2 className="w-4 h-4 text-destructive" />
+              Delete Project
+            </h2>
+          </div>
+
+          <div className="p-5">
+            <p className="text-sm text-muted-foreground">
+              Are you sure you want to delete{" "}
+              <span className="font-medium text-foreground">&quot;{projectToDelete?.name ?? ""}&quot;</span>? This action
+              cannot be undone.
+            </p>
+          </div>
+
+          <div className="px-5 py-4 border-t border-border bg-secondary/30 flex items-center justify-end gap-2">
+            <Button
+              data-testid="project-delete-cancel"
+              variant="outline"
+              size="sm"
+              onClick={() => setProjectToDelete(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              data-testid="project-delete-confirm"
+              variant="destructive"
+              size="sm"
+              onClick={confirmDeleteProject}
+            >
+              Delete
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </aside>
   )
 }
