@@ -47,7 +47,7 @@ export async function ensureWorkspace(page: Page) {
 
   await page.getByText("e2e-project", { exact: true }).waitFor({ timeout: 15_000 })
 
-  const projectToggle = page.getByRole("button", { name: "e2e-project" })
+  const projectToggle = page.getByRole("button", { name: "e2e-project", exact: true })
   const projectContainer = projectToggle.locator("..").locator("..")
 
   // Ensure the project is expanded. Avoid toggling it closed if a parallel test already expanded it.

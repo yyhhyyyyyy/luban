@@ -4,15 +4,14 @@ import { ensureWorkspace } from "./helpers"
 test("long tokens wrap without horizontal overflow", async ({ page }) => {
   await ensureWorkspace(page)
 
-  const longToken = `e2e-${"a".repeat(600)}`
-  const bubbles = page.getByTestId("user-message-bubble")
-  const beforeCount = await bubbles.count()
+  const runId = Math.random().toString(16).slice(2)
+  const marker = `e2e-${runId}-`
+  const longToken = `${marker}${"a".repeat(600)}`
   await page.getByTestId("chat-input").fill(longToken)
   await page.getByTestId("chat-send").click()
 
-  await expect(bubbles).toHaveCount(beforeCount + 1, { timeout: 20_000 })
-  const bubble = bubbles.nth(beforeCount)
-  await expect(bubble).toContainText("e2e-")
+  const bubble = page.getByTestId("user-message-bubble").filter({ hasText: marker }).first()
+  await expect(bubble).toBeVisible({ timeout: 20_000 })
 
   const overflow = await bubble.evaluate((el) => {
     const e = el as HTMLElement
