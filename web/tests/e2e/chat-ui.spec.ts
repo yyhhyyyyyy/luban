@@ -23,12 +23,13 @@ test("long tokens wrap without horizontal overflow", async ({ page }) => {
 test("scroll-to-bottom button appears only when away from bottom", async ({ page }) => {
   await ensureWorkspace(page)
 
-  const payload = Array.from({ length: 160 }, (_, i) => `line ${i + 1}`).join("\n")
+  const runId = Math.random().toString(16).slice(2)
+  const payload = Array.from({ length: 160 }, (_, i) => `line ${i + 1} ${runId}`).join("\n")
   await page.getByTestId("chat-input").fill(payload)
   await page.getByTestId("chat-send").click()
-  await expect(page.getByTestId("user-message-bubble").filter({ hasText: "line 160" })).toBeVisible({
-    timeout: 20_000,
-  })
+  await expect(page.getByTestId("user-message-bubble").filter({ hasText: `line 160 ${runId}` }).first()).toBeVisible(
+    { timeout: 20_000 },
+  )
 
   const button = page.getByRole("button", { name: "Scroll to bottom" })
   await expect(button).toHaveCount(0)
@@ -41,10 +42,15 @@ test("scroll-to-bottom button appears only when away from bottom", async ({ page
   await button.click()
   await expect(button).toHaveCount(0)
 
-  const atBottom = await scroller.evaluate((el) => {
-    const e = el as HTMLElement
-    const distance = e.scrollHeight - e.scrollTop - e.clientHeight
-    return distance < 24
-  })
-  expect(atBottom).toBeTruthy()
+  await expect
+    .poll(
+      async () =>
+        await scroller.evaluate((el) => {
+          const e = el as HTMLElement
+          const distance = e.scrollHeight - e.scrollTop - e.clientHeight
+          return distance < 24
+        }),
+      { timeout: 5_000 },
+    )
+    .toBeTruthy()
 })

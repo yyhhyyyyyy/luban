@@ -65,7 +65,10 @@ export async function ensureWorkspace(page: Page) {
   }
   await branches.first().click()
 
-  const firstTab = page.getByTestId("thread-tab-title").first()
-  await firstTab.waitFor({ timeout: 60_000 })
+  const firstTabTitle = page.getByTestId("thread-tab-title").first()
+  await firstTabTitle.waitFor({ state: "attached", timeout: 60_000 })
+
+  const firstTab = firstTabTitle.locator("..")
+  await firstTab.scrollIntoViewIfNeeded()
   await firstTab.click()
 }

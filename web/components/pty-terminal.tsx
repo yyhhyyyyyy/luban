@@ -151,6 +151,7 @@ export function PtyTerminal() {
     let keydownCapture: ((ev: KeyboardEvent) => void) | null = null
     let pasteCapture: ((ev: Event) => void) | null = null
     let contextMenuCapture: ((ev: MouseEvent) => void) | null = null
+    let focusCapture: (() => void) | null = null
 
     function sendInput(text: string) {
       if (ws?.readyState !== WebSocket.OPEN) return
@@ -208,6 +209,15 @@ export function PtyTerminal() {
           }
         }
 
+        focusCapture = () => {
+          try {
+            container.focus({ preventScroll: true })
+            term.focus()
+          } catch {
+            // ignore
+          }
+        }
+
         pasteCapture = (ev: Event) => {
           const clipboard = (ev as any).clipboardData
           const text = clipboard?.getData?.("text/plain")
@@ -245,6 +255,8 @@ export function PtyTerminal() {
             })
         }
 
+        container.addEventListener("mousedown", focusCapture, true)
+        container.addEventListener("touchstart", focusCapture, true)
         container.addEventListener("keydown", keydownCapture, true)
         container.addEventListener("paste", pasteCapture, true)
         container.addEventListener("contextmenu", contextMenuCapture, true)
@@ -285,6 +297,8 @@ export function PtyTerminal() {
 
     return () => {
       disposed = true
+      if (focusCapture) container.removeEventListener("mousedown", focusCapture, true)
+      if (focusCapture) container.removeEventListener("touchstart", focusCapture, true)
       if (keydownCapture) container.removeEventListener("keydown", keydownCapture, true)
       if (pasteCapture) container.removeEventListener("paste", pasteCapture, true)
       if (contextMenuCapture) container.removeEventListener("contextmenu", contextMenuCapture, true)
@@ -299,6 +313,7 @@ export function PtyTerminal() {
     <div
       ref={containerRef}
       data-testid="pty-terminal"
+      tabIndex={0}
       className="h-full w-full p-3 font-mono text-xs overflow-auto bg-card text-card-foreground"
     />
   )
