@@ -69,10 +69,11 @@ pub enum OperationStatus {
     Running,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum AppearanceTheme {
     Light,
     Dark,
+    #[default]
     System,
 }
 
@@ -92,12 +93,6 @@ impl AppearanceTheme {
             "system" => Some(Self::System),
             _ => None,
         }
-    }
-}
-
-impl Default for AppearanceTheme {
-    fn default() -> Self {
-        Self::System
     }
 }
 
