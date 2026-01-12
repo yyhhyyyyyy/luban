@@ -176,6 +176,13 @@ export type ClientAction =
   | { type: "open_workspace_pull_request"; workspace_id: WorkspaceId }
   | { type: "open_workspace_pull_request_failed_action"; workspace_id: WorkspaceId }
   | { type: "archive_workspace"; workspace_id: WorkspaceId }
+  | { type: "chat_model_changed"; workspace_id: WorkspaceId; thread_id: WorkspaceThreadId; model_id: string }
+  | {
+      type: "thinking_effort_changed"
+      workspace_id: WorkspaceId
+      thread_id: WorkspaceThreadId
+      thinking_effort: ThinkingEffort
+    }
   | {
       type: "send_agent_message"
       workspace_id: WorkspaceId

@@ -1365,6 +1365,16 @@ fn conversation_key_for_action(action: &Action) -> Option<(WorkspaceId, Workspac
             workspace_id,
             thread_id,
         } => Some((*workspace_id, *thread_id)),
+        Action::ChatModelChanged {
+            workspace_id,
+            thread_id,
+            ..
+        } => Some((*workspace_id, *thread_id)),
+        Action::ThinkingEffortChanged {
+            workspace_id,
+            thread_id,
+            ..
+        } => Some((*workspace_id, *thread_id)),
         _ => None,
     }
 }
@@ -1543,6 +1553,29 @@ fn map_client_action(action: luban_api::ClientAction) -> Option<Action> {
                 workspace_id: WorkspaceId::from_u64(workspace_id.0),
             })
         }
+        luban_api::ClientAction::ChatModelChanged {
+            workspace_id,
+            thread_id,
+            model_id,
+        } => Some(Action::ChatModelChanged {
+            workspace_id: WorkspaceId::from_u64(workspace_id.0),
+            thread_id: WorkspaceThreadId::from_u64(thread_id.0),
+            model_id,
+        }),
+        luban_api::ClientAction::ThinkingEffortChanged {
+            workspace_id,
+            thread_id,
+            thinking_effort,
+        } => Some(Action::ThinkingEffortChanged {
+            workspace_id: WorkspaceId::from_u64(workspace_id.0),
+            thread_id: WorkspaceThreadId::from_u64(thread_id.0),
+            thinking_effort: match thinking_effort {
+                luban_api::ThinkingEffort::Low => ThinkingEffort::Low,
+                luban_api::ThinkingEffort::Medium => ThinkingEffort::Medium,
+                luban_api::ThinkingEffort::High => ThinkingEffort::High,
+                luban_api::ThinkingEffort::XHigh => ThinkingEffort::XHigh,
+            },
+        }),
         luban_api::ClientAction::SendAgentMessage {
             workspace_id,
             thread_id,

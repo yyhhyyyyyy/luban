@@ -319,6 +319,16 @@ pub enum ClientAction {
     ArchiveWorkspace {
         workspace_id: WorkspaceId,
     },
+    ChatModelChanged {
+        workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
+        model_id: String,
+    },
+    ThinkingEffortChanged {
+        workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
+        thinking_effort: ThinkingEffort,
+    },
     SendAgentMessage {
         workspace_id: WorkspaceId,
         thread_id: WorkspaceThreadId,
