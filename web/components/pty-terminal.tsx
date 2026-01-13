@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react"
 import { FitAddon, Terminal } from "ghostty-web"
 import type { ITheme } from "ghostty-web"
+import { useTheme } from "next-themes"
 
 import { useLuban } from "@/lib/luban-context"
 import { useAppearance } from "@/components/appearance-provider"
@@ -129,16 +130,42 @@ function isValidTerminalSize(cols: number, rows: number): boolean {
 export function PtyTerminal() {
   const { activeWorkspaceId } = useLuban()
   const { fonts } = useAppearance()
+  const { resolvedTheme } = useTheme()
   const containerRef = useRef<HTMLDivElement | null>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
+  const lastThemeDigestRef = useRef<string | null>(null)
 
   useEffect(() => {
     const term = termRef.current
     if (!term) return
-    term.setFontFamily(terminalFontFamily(fonts.terminalFont))
+    const renderer = (term as any).renderer as { setFontFamily?: (family: string) => void } | undefined
+    renderer?.setFontFamily?.(terminalFontFamily(fonts.terminalFont))
     fitAddonRef.current?.fit()
   }, [fonts.terminalFont])
+
+  useEffect(() => {
+    const term = termRef.current
+    if (!term) return
+
+    let cancelled = false
+    window.requestAnimationFrame(() => {
+      if (cancelled) return
+
+      const theme = terminalThemeFromCss()
+      const digest = JSON.stringify(theme)
+      if (lastThemeDigestRef.current === digest) return
+      lastThemeDigestRef.current = digest
+
+      const renderer = (term as any).renderer as { setTheme?: (theme: ITheme) => void } | undefined
+      renderer?.setTheme?.(theme)
+      writeOscTheme(term)
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [resolvedTheme])
 
   useEffect(() => {
     const container = containerRef.current

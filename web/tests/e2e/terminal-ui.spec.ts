@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test"
 import { PNG } from "pngjs"
-import { ensureWorkspace } from "./helpers"
+import { ensureWorkspace, sendWsAction } from "./helpers"
 
 function parseRgb(color: string): { r: number; g: number; b: number } | null {
   const m = /^rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$/.exec(color.trim())
@@ -79,4 +79,41 @@ test("terminal paste sends input frames", async ({ page }) => {
   )
 
   await sentFrame
+})
+
+test("terminal theme follows app theme changes", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  const terminal = page.getByTestId("pty-terminal")
+  await expect(terminal.locator("canvas")).toHaveCount(1, { timeout: 20_000 })
+
+  await sendWsAction(page, { type: "appearance_theme_changed", theme: "light" })
+  await expect
+    .poll(async () => await page.evaluate(() => document.documentElement.classList.contains("dark")), { timeout: 10_000 })
+    .toBe(false)
+
+  await sendWsAction(page, { type: "appearance_theme_changed", theme: "dark" })
+  await expect
+    .poll(async () => await page.evaluate(() => document.documentElement.classList.contains("dark")), {
+      timeout: 10_000,
+    })
+    .toBe(true)
+
+  const expected = await terminal.evaluate((el) => getComputedStyle(el as Element).backgroundColor)
+  const rgb = parseRgb(expected)
+  expect(rgb, `unexpected terminal background: ${expected}`).not.toBeNull()
+
+  const tol = 10
+  await expect
+    .poll(async () => {
+      const shot = await terminal.screenshot()
+      const png = PNG.sync.read(shot)
+      const pixel = samplePixel(png, Math.floor(png.width / 2), Math.max(0, png.height - 10))
+      return (
+        Math.abs(pixel.r - (rgb?.r ?? 0)) <= tol &&
+        Math.abs(pixel.g - (rgb?.g ?? 0)) <= tol &&
+        Math.abs(pixel.b - (rgb?.b ?? 0)) <= tol
+      )
+    })
+    .toBe(true)
 })
