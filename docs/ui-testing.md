@@ -46,8 +46,8 @@ UI tests run against an isolated Luban instance by default:
 
 - A temporary `LUBAN_E2E_ROOT` is created under your OS temp dir.
 - The server binds to a random loopback port (via `LUBAN_E2E_PORT`).
-- `HOME` and `LUBAN_ROOT` are pointed at directories inside `LUBAN_E2E_ROOT`, so the SQLite DB and
-  on-disk state used by tests never touch your production instance.
+- `LUBAN_ROOT` is pointed at a directory inside `LUBAN_E2E_ROOT`, so the SQLite DB and on-disk state
+  used by tests never touch your production instance.
 
 You can override this behavior:
 
