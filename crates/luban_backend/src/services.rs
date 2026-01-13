@@ -274,12 +274,19 @@ impl ProjectWorkspaceService for GitWorkspaceService {
         project_slug: String,
     ) -> Result<CreatedWorkspace, String> {
         let result: anyhow::Result<CreatedWorkspace> = (|| {
-            let remote = self.select_remote(&project_path)?;
+            let remote = "origin";
+            self.run_git(&project_path, ["remote", "get-url", remote])
+                .with_context(|| format!("remote '{remote}' not found"))?;
 
-            self.run_git(&project_path, ["fetch", "--prune", &remote])
-                .with_context(|| format!("failed to fetch remote '{remote}'"))?;
+            self.run_git(&project_path, ["fetch", "--prune", remote, "main"])
+                .with_context(|| format!("failed to fetch '{remote}/main'"))?;
 
-            let upstream_ref = self.resolve_default_upstream_ref(&project_path, &remote)?;
+            let upstream_commit = self
+                .run_git(
+                    &project_path,
+                    ["rev-parse", "--verify", "origin/main^{commit}"],
+                )
+                .context("failed to resolve origin/main commit")?;
 
             std::fs::create_dir_all(self.worktrees_root.join(&project_slug))
                 .context("failed to create worktrees root")?;
@@ -308,19 +315,15 @@ impl ProjectWorkspaceService for GitWorkspaceService {
 
                 self.run_git(
                     &project_path,
-                    ["branch", "--track", &branch_name, &upstream_ref],
-                )
-                .with_context(|| format!("failed to create branch '{branch_name}'"))?;
-
-                self.run_git(
-                    &project_path,
                     [
                         "worktree",
                         "add",
+                        "-b",
+                        &branch_name,
                         worktree_path
                             .to_str()
                             .ok_or_else(|| anyhow!("invalid worktree path"))?,
-                        &branch_name,
+                        upstream_commit.trim(),
                     ],
                 )
                 .with_context(|| {
@@ -1354,6 +1357,123 @@ mod tests {
         )
         .expect("archive_workspace should remove dirty worktree with --force");
         assert!(!worktree_path.exists(), "worktree path should be removed");
+
+        drop(service);
+        let _ = std::fs::remove_dir_all(&base_dir);
+    }
+
+    fn git_rev_parse(repo_path: &Path, rev: &str) -> String {
+        let out = run_git(repo_path, &["rev-parse", "--verify", rev]);
+        assert!(
+            out.status.success(),
+            "git rev-parse {rev} failed:\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&out.stdout).trim(),
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+        String::from_utf8_lossy(&out.stdout).trim().to_owned()
+    }
+
+    #[test]
+    fn create_workspace_bases_on_origin_main_and_does_not_track_upstream() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be valid")
+            .as_nanos();
+        let base_dir = std::env::temp_dir().join(format!(
+            "luban-create-workspace-origin-main-{}-{}",
+            std::process::id(),
+            unique
+        ));
+
+        std::fs::create_dir_all(&base_dir).expect("temp dir should be created");
+
+        let remote_dir = base_dir.join("remote.git");
+        std::fs::create_dir_all(&remote_dir).expect("remote dir should be created");
+        assert_git_success(&remote_dir, &["init", "--bare"]);
+        assert_git_success(&remote_dir, &["symbolic-ref", "HEAD", "refs/heads/main"]);
+
+        let project_dir = base_dir.join("repo");
+        std::fs::create_dir_all(&project_dir).expect("repo dir should be created");
+        assert_git_success(&project_dir, &["init"]);
+        assert_git_success(&project_dir, &["config", "user.name", "Test User"]);
+        assert_git_success(&project_dir, &["config", "user.email", "test@example.com"]);
+        assert_git_success(&project_dir, &["checkout", "-b", "main"]);
+
+        std::fs::write(project_dir.join("README.md"), "init\n").expect("write should succeed");
+        assert_git_success(&project_dir, &["add", "."]);
+        assert_git_success(&project_dir, &["commit", "-m", "init"]);
+        assert_git_success(
+            &project_dir,
+            &[
+                "remote",
+                "add",
+                "origin",
+                remote_dir.to_str().expect("remote path should be utf-8"),
+            ],
+        );
+        assert_git_success(&project_dir, &["push", "-u", "origin", "main"]);
+        assert_git_success(&project_dir, &["fetch", "--prune", "origin", "main"]);
+
+        let upstream_clone = base_dir.join("upstream");
+        assert_git_success(
+            &base_dir,
+            &[
+                "clone",
+                remote_dir.to_str().expect("remote path should be utf-8"),
+                upstream_clone
+                    .to_str()
+                    .expect("upstream clone path should be utf-8"),
+            ],
+        );
+        assert_git_success(&upstream_clone, &["config", "user.name", "Upstream User"]);
+        assert_git_success(
+            &upstream_clone,
+            &["config", "user.email", "upstream@example.com"],
+        );
+        std::fs::write(upstream_clone.join("CHANGELOG.md"), "upstream\n")
+            .expect("write should succeed");
+        assert_git_success(&upstream_clone, &["add", "."]);
+        assert_git_success(&upstream_clone, &["commit", "-m", "upstream"]);
+        assert_git_success(&upstream_clone, &["push", "origin", "main"]);
+        let upstream_head = git_rev_parse(&upstream_clone, "HEAD^{commit}");
+
+        std::fs::write(project_dir.join("LOCAL.md"), "local only\n").expect("write should succeed");
+        assert_git_success(&project_dir, &["add", "."]);
+        assert_git_success(&project_dir, &["commit", "-m", "local"]);
+
+        let sqlite =
+            SqliteStore::new(paths::sqlite_path(&base_dir)).expect("sqlite init should work");
+        let service = GitWorkspaceService {
+            worktrees_root: paths::worktrees_root(&base_dir),
+            conversations_root: paths::conversations_root(&base_dir),
+            sqlite,
+        };
+
+        let created = ProjectWorkspaceService::create_workspace(
+            &service,
+            project_dir.clone(),
+            "proj".to_owned(),
+        )
+        .expect("create_workspace should succeed");
+
+        let head = git_rev_parse(&created.worktree_path, "HEAD^{commit}");
+        assert_eq!(
+            head, upstream_head,
+            "expected workspace to be created from origin/main (after fetch)"
+        );
+
+        let upstream_config_key = format!("branch.{}.remote", created.branch_name);
+        let config = Command::new("git")
+            .args(["config", "--get", &upstream_config_key])
+            .current_dir(&project_dir)
+            .output()
+            .expect("git config should spawn");
+        assert!(
+            !config.status.success(),
+            "expected branch to not track upstream, but {} is set to {:?}",
+            upstream_config_key,
+            String::from_utf8_lossy(&config.stdout).trim()
+        );
 
         drop(service);
         let _ = std::fs::remove_dir_all(&base_dir);
