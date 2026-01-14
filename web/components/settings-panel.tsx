@@ -146,6 +146,9 @@ function TaskPromptEditor({
   const [selected, setSelected] = useState<TaskIntentKind>("fix")
   const [value, setValue] = useState(() => templateByKind.current.get("fix") ?? "")
   const saveTimerRef = useRef<number | null>(null)
+  const editorRef = useRef<HTMLTextAreaElement | null>(null)
+  const previewRef = useRef<HTMLDivElement | null>(null)
+  const isSyncScrollingRef = useRef(false)
 
   useEffect(() => {
     setValue(templateByKind.current.get(selected) ?? "")
@@ -167,6 +170,28 @@ function TaskPromptEditor({
       }
     }
   }, [selected, value, setTaskPromptTemplate])
+
+  const syncScroll = (
+    source: "editor" | "preview",
+    sourceEl: HTMLTextAreaElement | HTMLDivElement,
+    targetEl: HTMLTextAreaElement | HTMLDivElement,
+  ) => {
+    if (isSyncScrollingRef.current) return
+    isSyncScrollingRef.current = true
+
+    const sourceScrollTop = sourceEl.scrollTop
+    const sourceScrollHeight = sourceEl.scrollHeight
+    const sourceClientHeight = sourceEl.clientHeight
+    const ratio = sourceScrollTop / Math.max(1, sourceScrollHeight - sourceClientHeight)
+
+    const targetScrollHeight = targetEl.scrollHeight
+    const targetClientHeight = targetEl.clientHeight
+    targetEl.scrollTop = ratio * Math.max(1, targetScrollHeight - targetClientHeight)
+
+    window.requestAnimationFrame(() => {
+      isSyncScrollingRef.current = false
+    })
+  }
 
   return (
     <div data-testid="task-prompt-editor" className="border border-border rounded-xl overflow-hidden bg-card shadow-sm">
@@ -195,19 +220,22 @@ function TaskPromptEditor({
       <div className="flex divide-x divide-border h-[400px]">
         <div className="flex-1 flex flex-col min-w-0">
           <textarea
+            ref={editorRef}
             data-testid="task-prompt-template"
             value={value}
             onChange={(e) => setValue(e.target.value)}
+            onScroll={() => {
+              const editor = editorRef.current
+              const preview = previewRef.current
+              if (!editor || !preview) return
+              syncScroll("editor", editor, preview)
+            }}
             className="flex-1 w-full bg-transparent text-xs font-mono leading-relaxed resize-none focus:outline-none text-foreground p-3"
             spellCheck={false}
             placeholder="Edit the task prompt template..."
           />
         </div>
         <div className="flex-1 flex flex-col min-w-0 bg-background overflow-hidden">
-          <div className="px-3 py-2 border-b border-border bg-muted/30">
-            <span className="text-xs font-medium text-muted-foreground">Preview</span>
-          </div>
-
           <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border bg-muted/30 opacity-40">
             <div className="h-2.5 w-24 rounded bg-muted-foreground/30" />
             <div className="h-2 w-8 rounded bg-muted-foreground/20" />
@@ -220,7 +248,16 @@ function TaskPromptEditor({
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-3">
+          <div
+            ref={previewRef}
+            className="flex-1 overflow-y-auto p-3"
+            onScroll={() => {
+              const editor = editorRef.current
+              const preview = previewRef.current
+              if (!editor || !preview) return
+              syncScroll("preview", preview, editor)
+            }}
+          >
             <div className="flex justify-end">
               <div className="max-w-[85%] border border-border rounded-lg px-3 py-2.5 bg-muted/30 luban-font-chat">
                 <Markdown content={renderTaskPromptPreview(value, selected)} className="text-[12px]" />
