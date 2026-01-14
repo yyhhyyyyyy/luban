@@ -46,6 +46,8 @@ interface SettingsPanelProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   initialSectionId?: "theme" | "fonts" | "agent" | "task"
+  initialAgentId?: string
+  initialAgentFilePath?: string
 }
 
 type TocItem = {
@@ -936,7 +938,13 @@ function CodexConfigTree({
   )
 }
 
-function CodexSettings() {
+function CodexSettings({
+  initialSelectedFilePath,
+  autoFocusEditor = false,
+}: {
+  initialSelectedFilePath?: string | null
+  autoFocusEditor?: boolean
+}) {
   const { app, setCodexEnabled, checkCodex, getCodexConfigTree, readCodexConfigFile, writeCodexConfigFile } =
     useLuban()
   const [enabled, setEnabled] = useState(true)
@@ -948,6 +956,7 @@ function CodexSettings() {
   const [fileContents, setFileContents] = useState<Record<string, string>>({})
   const saveTimeoutRef = useRef<number | null>(null)
   const saveIdleTimeoutRef = useRef<number | null>(null)
+  const initialSelectionRef = useRef<string | null>(null)
   const editorRef = useRef<HTMLTextAreaElement>(null)
   const highlightRef = useRef<HTMLDivElement>(null)
   const highlighter = useShikiHighlighter()
@@ -963,6 +972,57 @@ function CodexSettings() {
       .then((entries) => setTree(entries))
       .catch((err) => toast.error(err instanceof Error ? err.message : String(err)))
   }, [enabled, getCodexConfigTree])
+
+  useEffect(() => {
+    if (!enabled) return
+    const target = initialSelectedFilePath?.trim()
+    if (!target) return
+    if (tree.length === 0) return
+    if (selectedFile?.path === target) return
+    if (initialSelectionRef.current === target) return
+
+    const findEntry = (
+      entries: CodexConfigEntrySnapshot[],
+      path: string,
+    ): CodexConfigEntrySnapshot | null => {
+      for (const entry of entries) {
+        if (entry.path === path) return entry
+        if (entry.kind === "folder" && entry.children.length > 0) {
+          const found = findEntry(entry.children, path)
+          if (found) return found
+        }
+      }
+      return null
+    }
+
+    const entry = findEntry(tree, target)
+    if (!entry || entry.kind !== "file") return
+
+    const segments = target.split("/").filter(Boolean)
+    if (segments.length > 1) {
+      setExpandedFolders((prev) => {
+        const next = new Set(prev)
+        let prefix = ""
+        for (const segment of segments.slice(0, -1)) {
+          prefix = prefix ? `${prefix}/${segment}` : segment
+          next.add(prefix)
+        }
+        return next
+      })
+    }
+
+    initialSelectionRef.current = target
+    void handleSelectFile({ path: entry.path, name: entry.name })
+  }, [enabled, initialSelectedFilePath, selectedFile?.path, tree])
+
+  useEffect(() => {
+    if (!autoFocusEditor) return
+    const target = initialSelectionRef.current
+    if (!target) return
+    if (!selectedFile || selectedFile.path !== target) return
+    if (fileContents[selectedFile.path] == null) return
+    editorRef.current?.focus()
+  }, [autoFocusEditor, fileContents, selectedFile])
 
   useEffect(() => {
     return () => {
@@ -1220,7 +1280,13 @@ function CodexSettings() {
   )
 }
 
-function AllSettings() {
+function AllSettings({
+  initialAgentId,
+  initialAgentFilePath,
+}: {
+  initialAgentId?: string | null
+  initialAgentFilePath?: string | null
+}) {
   const { theme, setTheme } = useTheme()
   const { fonts, setFonts } = useAppearance()
   const { app, setAppearanceTheme, setAppearanceFonts, setTaskPromptTemplate } = useLuban()
@@ -1310,7 +1376,10 @@ function AllSettings() {
           Agent
         </h3>
         <div className="space-y-4">
-          <CodexSettings />
+          <CodexSettings
+            initialSelectedFilePath={initialAgentId === "codex" ? initialAgentFilePath : null}
+            autoFocusEditor={initialAgentId === "codex" && initialAgentFilePath != null}
+          />
         </div>
       </section>
 
@@ -1329,7 +1398,13 @@ function AllSettings() {
   )
 }
 
-export function SettingsPanel({ open, onOpenChange, initialSectionId }: SettingsPanelProps) {
+export function SettingsPanel({
+  open,
+  onOpenChange,
+  initialSectionId,
+  initialAgentId,
+  initialAgentFilePath,
+}: SettingsPanelProps) {
   const [expandedItems, setExpandedItems] = useState<Set<string>>(() => {
     const next = new Set<string>(["appearance"])
     if (initialSectionId === "theme" || initialSectionId === "fonts") next.add("appearance")
@@ -1456,7 +1531,7 @@ export function SettingsPanel({ open, onOpenChange, initialSectionId }: Settings
         </div>
         <div ref={contentRef} className="flex-1 overflow-y-auto p-8">
           <div className="max-w-4xl">
-            <AllSettings />
+            <AllSettings initialAgentId={initialAgentId} initialAgentFilePath={initialAgentFilePath} />
           </div>
         </div>
       </div>

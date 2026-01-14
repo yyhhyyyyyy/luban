@@ -115,3 +115,33 @@ test("agent selector defaults come from Codex config", async ({ page }) => {
   const effort = menu.getByRole("button", { name: "High", exact: true })
   await expect(effort.locator("..").getByText("default", { exact: true })).toHaveCount(1)
 })
+
+test("default selector button opens Codex config editor", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  const selector = page.getByTestId("codex-agent-selector")
+  await selector.click()
+
+  const menu = page
+    .locator("div")
+    .filter({ hasText: "Agent" })
+    .filter({ hasText: "Model" })
+    .filter({ hasText: "Reasoning" })
+    .first()
+
+  const defaultModel = menu.getByRole("button", { name: "GPT-5.2-Codex", exact: true })
+  await defaultModel.hover()
+
+  const openDefaults = menu.getByTitle("Edit Codex defaults").first()
+  await openDefaults.click()
+
+  await expect(page.getByTestId("settings-panel")).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByTestId("settings-codex-editor")).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByTestId("settings-codex-editor")).toHaveValue(/model\s*=\s*"gpt-5\.2-codex"/)
+
+  await expect
+    .poll(async () => {
+      return await page.getByTestId("settings-codex-editor").evaluate((el) => document.activeElement === el)
+    })
+    .toBeTruthy()
+})

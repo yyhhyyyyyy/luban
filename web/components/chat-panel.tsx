@@ -856,7 +856,9 @@ export function ChatPanel({
                     thinkingEffort={conversation?.thinking_effort}
                     defaultModelId={app?.agent.default_model_id ?? null}
                     defaultThinkingEffort={app?.agent.default_thinking_effort ?? null}
-                    onOpenAgentSettings={() => openSettingsPanel("agent")}
+                    onOpenAgentSettings={(agentId, agentFilePath) =>
+                      openSettingsPanel("agent", { agentId, agentFilePath })
+                    }
                     onChangeModelId={(modelId) => {
                       if (activeWorkspaceId == null || activeThreadId == null) return
                       setChatModel(activeWorkspaceId, activeThreadId, modelId)

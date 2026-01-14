@@ -35,7 +35,7 @@ export function CodexAgentSelector({
   onChangeThinkingEffort: (effort: ThinkingEffort) => void
   defaultModelId?: string | null
   defaultThinkingEffort?: ThinkingEffort | null
-  onOpenAgentSettings?: (agentId: string) => void
+  onOpenAgentSettings?: (agentId: string, filePath?: string) => void
   disabled?: boolean
   dropdownPosition?: "top" | "bottom"
   className?: string
@@ -133,7 +133,7 @@ export function CodexAgentSelector({
                         <span className="pr-10">{m.label}</span>
                       </button>
                       {isDefault && (
-                        <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1 px-1.5 py-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-popover/95 rounded">
+                        <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1 px-1.5 py-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity bg-popover/95 rounded">
                           <span className="text-[10px] text-muted-foreground pointer-events-none select-none">
                             default
                           </span>
@@ -143,7 +143,7 @@ export function CodexAgentSelector({
                               onClick={(e) => {
                                 e.stopPropagation()
                                 close()
-                                onOpenAgentSettings("codex")
+                                onOpenAgentSettings("codex", "config.toml")
                               }}
                               className="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
                               title="Edit Codex defaults"
@@ -178,7 +178,7 @@ export function CodexAgentSelector({
                         <span className="pr-10">{thinkingEffortLabel(effort)}</span>
                       </button>
                       {isDefault && (
-                        <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1 px-1.5 py-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-popover/95 rounded">
+                        <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1 px-1.5 py-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity bg-popover/95 rounded">
                           <span className="text-[10px] text-muted-foreground pointer-events-none select-none">
                             default
                           </span>
@@ -188,7 +188,7 @@ export function CodexAgentSelector({
                               onClick={(e) => {
                                 e.stopPropagation()
                                 close()
-                                onOpenAgentSettings("codex")
+                                onOpenAgentSettings("codex", "config.toml")
                               }}
                               className="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
                               title="Edit Codex defaults"

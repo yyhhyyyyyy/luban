@@ -28,7 +28,7 @@ import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { SettingsPanel } from "@/components/settings-panel"
 import type { AgentStatus } from "@/lib/worktree-ui"
-import type { SettingsSectionId } from "@/lib/open-settings"
+import type { OpenSettingsDetail, SettingsSectionId } from "@/lib/open-settings"
 import type { WorkspaceId } from "@/lib/luban-api"
 
 interface SidebarProps {
@@ -71,11 +71,15 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
   const [newTaskOpen, setNewTaskOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsInitialSectionId, setSettingsInitialSectionId] = useState<SettingsSectionId | null>(null)
+  const [settingsInitialAgentId, setSettingsInitialAgentId] = useState<string | null>(null)
+  const [settingsInitialAgentFilePath, setSettingsInitialAgentFilePath] = useState<string | null>(null)
 
   useEffect(() => {
     const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ sectionId?: SettingsSectionId } | null>).detail
+      const detail = (event as CustomEvent<OpenSettingsDetail | null>).detail
       setSettingsInitialSectionId(detail?.sectionId ?? "agent")
+      setSettingsInitialAgentId(detail?.agentId ?? null)
+      setSettingsInitialAgentFilePath(detail?.agentFilePath ?? null)
       setSettingsOpen(true)
     }
     window.addEventListener("luban:open-settings", handler)
@@ -513,7 +517,12 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
         </button>
         <button
           data-testid="sidebar-open-settings"
-          onClick={() => setSettingsOpen(true)}
+          onClick={() => {
+            setSettingsInitialSectionId(null)
+            setSettingsInitialAgentId(null)
+            setSettingsInitialAgentFilePath(null)
+            setSettingsOpen(true)
+          }}
           className="p-2 text-muted-foreground hover:text-foreground hover:bg-sidebar-accent rounded transition-colors"
           title="Settings"
         >
@@ -526,9 +535,15 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
         open={settingsOpen}
         onOpenChange={(open) => {
           setSettingsOpen(open)
-          if (!open) setSettingsInitialSectionId(null)
+          if (!open) {
+            setSettingsInitialSectionId(null)
+            setSettingsInitialAgentId(null)
+            setSettingsInitialAgentFilePath(null)
+          }
         }}
         initialSectionId={settingsInitialSectionId ?? undefined}
+        initialAgentId={settingsInitialAgentId ?? undefined}
+        initialAgentFilePath={settingsInitialAgentFilePath ?? undefined}
       />
 
       <Dialog open={projectToDelete !== null} onOpenChange={(open) => !open && setProjectToDelete(null)}>
