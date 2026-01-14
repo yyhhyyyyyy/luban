@@ -152,7 +152,7 @@ function TaskPromptEditor({
   const pendingSyncRef = useRef<{
     sourceEl: HTMLTextAreaElement | HTMLDivElement
     targetEl: HTMLTextAreaElement | HTMLDivElement
-    ratio: number
+    sourceScrollTop: number
   } | null>(null)
   const syncRafRef = useRef<number | null>(null)
 
@@ -183,12 +183,7 @@ function TaskPromptEditor({
   ) => {
     if (isSyncScrollingRef.current) return
 
-    const sourceScrollTop = sourceEl.scrollTop
-    const sourceScrollHeight = sourceEl.scrollHeight
-    const sourceClientHeight = sourceEl.clientHeight
-    const ratio = sourceScrollTop / Math.max(1, sourceScrollHeight - sourceClientHeight)
-
-    pendingSyncRef.current = { sourceEl, targetEl, ratio }
+    pendingSyncRef.current = { sourceEl, targetEl, sourceScrollTop: sourceEl.scrollTop }
     if (syncRafRef.current != null) return
 
     syncRafRef.current = window.requestAnimationFrame(() => {
@@ -197,9 +192,15 @@ function TaskPromptEditor({
       pendingSyncRef.current = null
       if (!pending) return
 
+      const sourceScrollHeight = pending.sourceEl.scrollHeight
+      const sourceClientHeight = pending.sourceEl.clientHeight
+      const sourceScrollable = Math.max(1, sourceScrollHeight - sourceClientHeight)
+      const ratio = pending.sourceScrollTop / sourceScrollable
+
       const targetScrollHeight = pending.targetEl.scrollHeight
       const targetClientHeight = pending.targetEl.clientHeight
-      const nextScrollTop = pending.ratio * Math.max(1, targetScrollHeight - targetClientHeight)
+      const targetScrollable = Math.max(1, targetScrollHeight - targetClientHeight)
+      const nextScrollTop = ratio * targetScrollable
 
       isSyncScrollingRef.current = true
       pending.targetEl.scrollTop = nextScrollTop
