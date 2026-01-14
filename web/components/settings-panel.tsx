@@ -2,7 +2,7 @@
 
 import type { ElementType, MouseEvent } from "react"
 
-import { useEffect, useRef, useState } from "react"
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react"
 import { useTheme } from "next-themes"
 import {
   Check,
@@ -149,6 +149,12 @@ function TaskPromptEditor({
   const editorRef = useRef<HTMLTextAreaElement | null>(null)
   const previewRef = useRef<HTMLDivElement | null>(null)
   const isSyncScrollingRef = useRef(false)
+  const pendingSyncRef = useRef<{
+    sourceEl: HTMLTextAreaElement | HTMLDivElement
+    targetEl: HTMLTextAreaElement | HTMLDivElement
+    ratio: number
+  } | null>(null)
+  const syncRafRef = useRef<number | null>(null)
 
   useEffect(() => {
     setValue(templateByKind.current.get(selected) ?? "")
@@ -171,27 +177,43 @@ function TaskPromptEditor({
     }
   }, [selected, value, setTaskPromptTemplate])
 
-  const syncScroll = (
-    source: "editor" | "preview",
+  const scheduleScrollSync = (
     sourceEl: HTMLTextAreaElement | HTMLDivElement,
     targetEl: HTMLTextAreaElement | HTMLDivElement,
   ) => {
     if (isSyncScrollingRef.current) return
-    isSyncScrollingRef.current = true
 
     const sourceScrollTop = sourceEl.scrollTop
     const sourceScrollHeight = sourceEl.scrollHeight
     const sourceClientHeight = sourceEl.clientHeight
     const ratio = sourceScrollTop / Math.max(1, sourceScrollHeight - sourceClientHeight)
 
-    const targetScrollHeight = targetEl.scrollHeight
-    const targetClientHeight = targetEl.clientHeight
-    targetEl.scrollTop = ratio * Math.max(1, targetScrollHeight - targetClientHeight)
+    pendingSyncRef.current = { sourceEl, targetEl, ratio }
+    if (syncRafRef.current != null) return
 
-    window.requestAnimationFrame(() => {
-      isSyncScrollingRef.current = false
+    syncRafRef.current = window.requestAnimationFrame(() => {
+      syncRafRef.current = null
+      const pending = pendingSyncRef.current
+      pendingSyncRef.current = null
+      if (!pending) return
+
+      const targetScrollHeight = pending.targetEl.scrollHeight
+      const targetClientHeight = pending.targetEl.clientHeight
+      const nextScrollTop = pending.ratio * Math.max(1, targetScrollHeight - targetClientHeight)
+
+      isSyncScrollingRef.current = true
+      pending.targetEl.scrollTop = nextScrollTop
+      window.requestAnimationFrame(() => {
+        isSyncScrollingRef.current = false
+      })
     })
   }
+
+  const deferredValue = useDeferredValue(value)
+  const previewContent = useMemo(
+    () => renderTaskPromptPreview(deferredValue, selected),
+    [deferredValue, selected],
+  )
 
   return (
     <div data-testid="task-prompt-editor" className="border border-border rounded-xl overflow-hidden bg-card shadow-sm">
@@ -228,7 +250,7 @@ function TaskPromptEditor({
               const editor = editorRef.current
               const preview = previewRef.current
               if (!editor || !preview) return
-              syncScroll("editor", editor, preview)
+              scheduleScrollSync(editor, preview)
             }}
             className="flex-1 w-full bg-transparent text-xs font-mono leading-relaxed resize-none focus:outline-none text-foreground p-3"
             spellCheck={false}
@@ -255,12 +277,12 @@ function TaskPromptEditor({
               const editor = editorRef.current
               const preview = previewRef.current
               if (!editor || !preview) return
-              syncScroll("preview", preview, editor)
+              scheduleScrollSync(preview, editor)
             }}
           >
             <div className="flex justify-end">
               <div className="max-w-[85%] border border-border rounded-lg px-3 py-2.5 bg-muted/30 luban-font-chat">
-                <Markdown content={renderTaskPromptPreview(value, selected)} className="text-[12px]" />
+                <Markdown content={previewContent} className="text-[12px]" />
               </div>
             </div>
           </div>
