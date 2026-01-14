@@ -29,6 +29,7 @@ import { Button } from "@/components/ui/button"
 import { SettingsPanel } from "@/components/settings-panel"
 import type { AgentStatus } from "@/lib/worktree-ui"
 import type { SettingsSectionId } from "@/lib/open-settings"
+import type { WorkspaceId } from "@/lib/luban-api"
 
 interface SidebarProps {
   viewMode: "workspace" | "kanban"
@@ -51,12 +52,15 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
     toggleProjectExpanded,
     openWorkspace,
     addProject,
+    ensureMainWorkspace,
     pickProjectPath,
     deleteProject,
   } = useLuban()
 
   const pendingCreateRef = useRef<{ projectId: number; existingWorkspaceIds: Set<number> } | null>(null)
   const pendingAddProjectPathRef = useRef<string | null>(null)
+  const pendingAddProjectAndOpenPathRef = useRef<string | null>(null)
+  const ensuringMainWorkspaceForProjectIdsRef = useRef<Set<number>>(new Set())
   const [optimisticCreatingProjectId, setOptimisticCreatingProjectId] = useState<number | null>(null)
   const [newlyCreatedWorkspaceId, setNewlyCreatedWorkspaceId] = useState<number | null>(null)
   const [optimisticArchivingWorkspaceIds, setOptimisticArchivingWorkspaceIds] = useState<Set<number>>(
@@ -77,6 +81,21 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
     window.addEventListener("luban:open-settings", handler)
     return () => window.removeEventListener("luban:open-settings", handler)
   }, [])
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ path?: string } | null>).detail
+      const path = detail?.path?.trim()
+      if (!path) return
+      pendingAddProjectAndOpenPathRef.current = path
+      addProject(path)
+      setSettingsOpen(false)
+      setSettingsInitialSectionId(null)
+      onViewModeChange("workspace")
+    }
+    window.addEventListener("luban:add-project-and-open", handler)
+    return () => window.removeEventListener("luban:add-project-and-open", handler)
+  }, [addProject, onViewModeChange])
 
   useEffect(() => {
     if (!app) return
@@ -135,6 +154,36 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
         if (main) {
           void openWorkspace(main.id).then(() => focusChatInput())
         }
+      }
+    }
+
+    const pendingOpenPath = pendingAddProjectAndOpenPathRef.current
+    if (pendingOpenPath) {
+      const match = app.projects.find((p) => normalizePathLike(p.path) === normalizePathLike(pendingOpenPath))
+      if (match) {
+        const activeWorkspaces = match.workspaces.filter((w) => w.status === "active")
+        if (activeWorkspaces.length === 0) {
+          if (!ensuringMainWorkspaceForProjectIdsRef.current.has(match.id)) {
+            ensuringMainWorkspaceForProjectIdsRef.current.add(match.id)
+            ensureMainWorkspace(match.id)
+          }
+          return
+        }
+
+        ensuringMainWorkspaceForProjectIdsRef.current.delete(match.id)
+        pendingAddProjectAndOpenPathRef.current = null
+
+        if (!match.expanded) {
+          toggleProjectExpanded(match.id)
+        }
+
+        const main =
+          activeWorkspaces.find((w) => w.workspace_name === "main" && w.worktree_path === match.path) ??
+          activeWorkspaces[0] ??
+          null
+        if (!main) return
+
+        void openWorkspace(main.id as WorkspaceId).then(() => focusChatInput())
       }
     }
 

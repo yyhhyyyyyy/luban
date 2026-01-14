@@ -2,6 +2,7 @@ use crate::{
     AttachmentRef, CodexThreadEvent, ContextItem, ConversationSnapshot, ConversationThreadMeta,
     PersistedAppState,
 };
+use std::collections::HashMap;
 use std::{path::PathBuf, sync::Arc, sync::atomic::AtomicBool};
 
 #[derive(Clone, Debug)]
@@ -275,6 +276,22 @@ pub trait ProjectWorkspaceService: Send + Sync {
     fn task_preview(&self, input: String) -> Result<TaskDraft, String>;
 
     fn task_prepare_project(&self, spec: TaskProjectSpec) -> Result<PathBuf, String>;
+
+    fn task_prompt_templates_load(&self) -> Result<HashMap<TaskIntentKind, String>, String> {
+        Ok(HashMap::new())
+    }
+
+    fn task_prompt_template_store(
+        &self,
+        _intent_kind: TaskIntentKind,
+        _template: String,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn task_prompt_template_delete(&self, _intent_kind: TaskIntentKind) -> Result<(), String> {
+        Ok(())
+    }
 
     fn codex_check(&self) -> Result<(), String> {
         Err("unimplemented".to_owned())

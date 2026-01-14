@@ -1,9 +1,24 @@
-use crate::{AgentRunConfig, AttachmentRef, ProjectId, WorkspaceId, WorkspaceThreadId};
+use crate::{
+    AgentRunConfig, AttachmentRef, ProjectId, TaskIntentKind, WorkspaceId, WorkspaceThreadId,
+};
+use std::collections::HashMap;
 
 #[derive(Clone, Debug)]
 pub enum Effect {
     LoadAppState,
     SaveAppState,
+
+    LoadTaskPromptTemplates,
+    MigrateLegacyTaskPromptTemplates {
+        templates: HashMap<TaskIntentKind, String>,
+    },
+    StoreTaskPromptTemplate {
+        intent_kind: TaskIntentKind,
+        template: String,
+    },
+    DeleteTaskPromptTemplate {
+        intent_kind: TaskIntentKind,
+    },
 
     CreateWorkspace {
         project_id: ProjectId,

@@ -269,6 +269,7 @@ export type ClientAction =
   | { type: "delete_project"; project_id: ProjectId }
   | { type: "toggle_project_expanded"; project_id: ProjectId }
   | { type: "create_workspace"; project_id: ProjectId }
+  | { type: "ensure_main_workspace"; project_id: ProjectId }
   | { type: "open_workspace"; workspace_id: WorkspaceId }
   | { type: "open_workspace_in_ide"; workspace_id: WorkspaceId }
   | { type: "open_workspace_pull_request"; workspace_id: WorkspaceId }

@@ -487,6 +487,9 @@ pub enum ClientAction {
     ArchiveWorkspace {
         workspace_id: WorkspaceId,
     },
+    EnsureMainWorkspace {
+        project_id: ProjectId,
+    },
     ChatModelChanged {
         workspace_id: WorkspaceId,
         thread_id: WorkspaceThreadId,

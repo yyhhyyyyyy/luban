@@ -28,6 +28,20 @@ pub(crate) fn apply_persisted_app_state(
         return Vec::new();
     }
 
+    let legacy_templates: HashMap<TaskIntentKind, String> = persisted
+        .task_prompt_templates
+        .iter()
+        .filter_map(|(key, template)| {
+            let kind = TaskIntentKind::parse_key(key);
+            let trimmed = template.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            Some((kind, trimmed.to_owned()))
+        })
+        .collect();
+    let clear_legacy_templates = !persisted.task_prompt_templates.is_empty();
+
     let agent_default_model_id = persisted
         .agent_default_model_id
         .filter(|id| !id.trim().is_empty())
@@ -44,23 +58,7 @@ pub(crate) fn apply_persisted_app_state(
     state.agent_default_thinking_effort = agent_default_thinking_effort;
     state.agent_codex_enabled = persisted.agent_codex_enabled.unwrap_or(true);
 
-    let mut templates = default_task_prompt_templates();
-    for (key, template) in persisted.task_prompt_templates.iter() {
-        let normalized = key.trim().to_ascii_lowercase();
-        let kind = TaskIntentKind::ALL
-            .iter()
-            .copied()
-            .find(|kind| kind.as_key() == normalized);
-        let Some(kind) = kind else {
-            continue;
-        };
-        let trimmed = template.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        templates.insert(kind, trimmed.to_owned());
-    }
-    state.task_prompt_templates = templates;
+    state.task_prompt_templates = default_task_prompt_templates();
 
     let (projects, projects_upgraded) = load_projects(persisted.projects);
     state.projects = projects;
@@ -191,11 +189,16 @@ pub(crate) fn apply_persisted_app_state(
     state.right_pane = RightPane::None;
     state.dashboard_preview_workspace_id = None;
 
-    let mut effects = if projects_upgraded {
-        vec![Effect::SaveAppState]
-    } else {
-        Vec::new()
-    };
+    let mut effects = Vec::new();
+    if !legacy_templates.is_empty() {
+        effects.push(Effect::MigrateLegacyTaskPromptTemplates {
+            templates: legacy_templates,
+        });
+    }
+    effects.push(Effect::LoadTaskPromptTemplates);
+    if projects_upgraded || clear_legacy_templates {
+        effects.push(Effect::SaveAppState);
+    }
 
     let restored_workspace_id = state.last_open_workspace_id.and_then(|workspace_id| {
         state
@@ -312,11 +315,7 @@ pub(crate) fn to_persisted_app_state(state: &AppState) -> PersistedAppState {
             .iter()
             .map(|workspace_id| (workspace_id.0, true))
             .collect(),
-        task_prompt_templates: state
-            .task_prompt_templates
-            .iter()
-            .map(|(kind, template)| (kind.as_key().to_owned(), template.clone()))
-            .collect(),
+        task_prompt_templates: HashMap::new(),
     }
 }
 

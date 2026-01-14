@@ -7,8 +7,9 @@ use crate::{
     Action, AgentRunConfig, AppState, CodexThreadEvent, ConversationEntry, DraftAttachment, Effect,
     MainPane, OperationStatus, PersistedAppState, Project, ProjectId, QueuedPrompt, RightPane,
     ThinkingEffort, Workspace, WorkspaceConversation, WorkspaceId, WorkspaceStatus, WorkspaceTabs,
-    WorkspaceThreadId, default_agent_model_id, default_task_prompt_templates,
-    default_thinking_effort, normalize_thinking_effort, thinking_effort_supported,
+    WorkspaceThreadId, default_agent_model_id, default_task_prompt_template,
+    default_task_prompt_templates, default_thinking_effort, normalize_thinking_effort,
+    thinking_effort_supported,
 };
 use std::collections::VecDeque;
 use std::{
@@ -176,6 +177,38 @@ impl AppState {
                     }
                 }
                 vec![Effect::CreateWorkspace { project_id }]
+            }
+            Action::EnsureMainWorkspace { project_id } => {
+                let Some(project) = self.projects.iter().find(|p| p.id == project_id) else {
+                    return Vec::new();
+                };
+
+                let has_main = project
+                    .workspaces
+                    .iter()
+                    .any(|w| Self::workspace_is_main(project, w));
+                if has_main {
+                    return Vec::new();
+                }
+
+                let workspace_id = self.insert_main_workspace(project_id);
+                let initial_thread_id = WorkspaceThreadId(1);
+                self.workspace_tabs.insert(
+                    workspace_id,
+                    WorkspaceTabs::new_with_initial(initial_thread_id),
+                );
+                self.conversations.insert(
+                    (workspace_id, initial_thread_id),
+                    self.default_conversation(initial_thread_id),
+                );
+
+                vec![
+                    Effect::SaveAppState,
+                    Effect::EnsureConversation {
+                        workspace_id,
+                        thread_id: initial_thread_id,
+                    },
+                ]
             }
             Action::WorkspaceCreated {
                 project_id,
@@ -911,7 +944,27 @@ impl AppState {
                 }
                 self.task_prompt_templates
                     .insert(intent_kind, trimmed.to_owned());
-                vec![Effect::SaveAppState]
+                let default = default_task_prompt_template(intent_kind);
+                if trimmed == default.trim() {
+                    vec![Effect::DeleteTaskPromptTemplate { intent_kind }]
+                } else {
+                    vec![Effect::StoreTaskPromptTemplate {
+                        intent_kind,
+                        template: trimmed.to_owned(),
+                    }]
+                }
+            }
+            Action::TaskPromptTemplatesLoaded { templates } => {
+                let mut next = default_task_prompt_templates();
+                for (kind, template) in templates {
+                    let trimmed = template.trim();
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+                    next.insert(kind, trimmed.to_owned());
+                }
+                self.task_prompt_templates = next;
+                Vec::new()
             }
             Action::WorkspaceChatScrollSaved {
                 workspace_id,
@@ -2332,10 +2385,11 @@ mod tests {
             "expected main pane to restore workspace"
         );
         assert_eq!(loaded.right_pane, RightPane::Terminal);
-        assert_eq!(effects.len(), 2);
-        assert!(matches!(effects[0], Effect::LoadWorkspaceThreads { .. }));
+        assert_eq!(effects.len(), 3);
+        assert!(matches!(effects[0], Effect::LoadTaskPromptTemplates));
+        assert!(matches!(effects[1], Effect::LoadWorkspaceThreads { .. }));
         assert!(matches!(
-            effects[1],
+            effects[2],
             Effect::LoadConversation { workspace_id: id, .. } if id == workspace_id
         ));
     }

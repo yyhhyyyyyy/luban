@@ -968,6 +968,83 @@ impl Engine {
                 };
                 Ok(VecDeque::from([action]))
             }
+            Effect::LoadTaskPromptTemplates => {
+                let services = self.services.clone();
+                let loaded =
+                    tokio::task::spawn_blocking(move || services.task_prompt_templates_load())
+                        .await
+                        .ok()
+                        .unwrap_or_else(|| {
+                            Err("failed to join task prompt templates load task".to_owned())
+                        });
+                match loaded {
+                    Ok(templates) => Ok(VecDeque::from([Action::TaskPromptTemplatesLoaded {
+                        templates,
+                    }])),
+                    Err(message) => {
+                        tracing::warn!(message = %message, "failed to load task prompt templates");
+                        Ok(VecDeque::new())
+                    }
+                }
+            }
+            Effect::MigrateLegacyTaskPromptTemplates { templates } => {
+                if templates.is_empty() {
+                    return Ok(VecDeque::new());
+                }
+                let services = self.services.clone();
+                let migrated = tokio::task::spawn_blocking(move || {
+                    let existing = services.task_prompt_templates_load().unwrap_or_default();
+                    if !existing.is_empty() {
+                        return Ok::<(), String>(());
+                    }
+                    for (kind, template) in templates {
+                        services.task_prompt_template_store(kind, template)?;
+                    }
+                    Ok(())
+                })
+                .await
+                .ok()
+                .unwrap_or_else(|| {
+                    Err("failed to join task prompt templates migrate task".to_owned())
+                });
+                if let Err(message) = migrated {
+                    tracing::warn!(message = %message, "failed to migrate legacy task prompt templates");
+                }
+                Ok(VecDeque::new())
+            }
+            Effect::StoreTaskPromptTemplate {
+                intent_kind,
+                template,
+            } => {
+                let services = self.services.clone();
+                let saved = tokio::task::spawn_blocking(move || {
+                    services.task_prompt_template_store(intent_kind, template)
+                })
+                .await
+                .ok()
+                .unwrap_or_else(|| {
+                    Err("failed to join task prompt template store task".to_owned())
+                });
+                if let Err(message) = saved {
+                    tracing::warn!(message = %message, "failed to store task prompt template");
+                }
+                Ok(VecDeque::new())
+            }
+            Effect::DeleteTaskPromptTemplate { intent_kind } => {
+                let services = self.services.clone();
+                let deleted = tokio::task::spawn_blocking(move || {
+                    services.task_prompt_template_delete(intent_kind)
+                })
+                .await
+                .ok()
+                .unwrap_or_else(|| {
+                    Err("failed to join task prompt template delete task".to_owned())
+                });
+                if let Err(message) = deleted {
+                    tracing::warn!(message = %message, "failed to delete task prompt template");
+                }
+                Ok(VecDeque::new())
+            }
             Effect::CreateWorkspace { project_id } => {
                 let Some(project) = self.state.projects.iter().find(|p| p.id == project_id) else {
                     return Ok(VecDeque::from([Action::WorkspaceCreateFailed {
@@ -1891,6 +1968,11 @@ fn map_client_action(action: luban_api::ClientAction) -> Option<Action> {
         luban_api::ClientAction::ArchiveWorkspace { workspace_id } => {
             Some(Action::ArchiveWorkspace {
                 workspace_id: WorkspaceId::from_u64(workspace_id.0),
+            })
+        }
+        luban_api::ClientAction::EnsureMainWorkspace { project_id } => {
+            Some(Action::EnsureMainWorkspace {
+                project_id: luban_domain::ProjectId::from_u64(project_id.0),
             })
         }
         luban_api::ClientAction::ChatModelChanged {

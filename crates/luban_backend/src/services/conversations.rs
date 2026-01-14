@@ -321,6 +321,7 @@ mod tests {
         let svc = GitWorkspaceService {
             worktrees_root,
             conversations_root: conversations_root.clone(),
+            task_prompts_root: root.join("task-prompts"),
             sqlite,
         };
 
@@ -367,6 +368,7 @@ mod tests {
         let svc = GitWorkspaceService {
             worktrees_root,
             conversations_root: conversations_root.clone(),
+            task_prompts_root: root.join("task-prompts"),
             sqlite: sqlite.clone(),
         };
 

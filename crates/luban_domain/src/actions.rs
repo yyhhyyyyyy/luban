@@ -3,6 +3,7 @@ use crate::{
     ConversationSnapshot, ConversationThreadMeta, PersistedAppState, ProjectId, TaskIntentKind,
     ThinkingEffort, WorkspaceId, WorkspaceThreadId,
 };
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 #[derive(Clone, Debug)]
@@ -30,6 +31,9 @@ pub enum Action {
     },
 
     CreateWorkspace {
+        project_id: ProjectId,
+    },
+    EnsureMainWorkspace {
         project_id: ProjectId,
     },
     WorkspaceCreated {
@@ -208,6 +212,9 @@ pub enum Action {
     TaskPromptTemplateChanged {
         intent_kind: TaskIntentKind,
         template: String,
+    },
+    TaskPromptTemplatesLoaded {
+        templates: HashMap<TaskIntentKind, String>,
     },
     WorkspaceChatScrollSaved {
         workspace_id: WorkspaceId,

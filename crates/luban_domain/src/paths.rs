@@ -19,6 +19,10 @@ pub fn sqlite_path(luban_root: &Path) -> PathBuf {
     luban_root.join("luban.db")
 }
 
+pub fn task_prompts_root(luban_root: &Path) -> PathBuf {
+    luban_root.join("task")
+}
+
 pub fn workspace_conversation_dir(
     conversations_root: &Path,
     project_slug: &str,
@@ -46,6 +50,7 @@ mod tests {
         assert_eq!(projects_root(&base), base.join("projects"));
         assert_eq!(conversations_root(&base), base.join("conversations"));
         assert_eq!(sqlite_path(&base), base.join("luban.db"));
+        assert_eq!(task_prompts_root(&base), base.join("task"));
     }
 
     #[test]

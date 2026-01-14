@@ -40,6 +40,7 @@ import { useAppearance } from "@/components/appearance-provider"
 import { useLuban } from "@/lib/luban-context"
 import { cn } from "@/lib/utils"
 import type { AppearanceTheme, CodexConfigEntrySnapshot, TaskIntentKind } from "@/lib/luban-api"
+import { addProjectAndOpen } from "@/lib/add-project-and-open"
 
 interface SettingsPanelProps {
   open: boolean
@@ -399,6 +400,14 @@ function TaskPromptEditor({
                 Reset
               </button>
               <button
+                data-testid="task-prompt-edit-in-luban"
+                onClick={() => addProjectAndOpen("~/luban")}
+                className="flex items-center gap-1.5 px-2 py-1 rounded text-xs bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+              >
+                <Pencil className="w-3.5 h-3.5" />
+                Edit in Luban
+              </button>
+              <button
                 data-testid="task-prompt-save"
                 disabled={saveDisabled}
                 onClick={() => {
@@ -412,8 +421,8 @@ function TaskPromptEditor({
                     : "bg-primary text-primary-foreground hover:bg-primary/90",
                 )}
               >
-                <Pencil className="w-3.5 h-3.5" />
-                Edit in Luban
+                <Check className="w-3.5 h-3.5" />
+                Save
               </button>
             </div>
           </div>
@@ -928,7 +937,8 @@ function CodexConfigTree({
 }
 
 function CodexSettings() {
-  const { app, setCodexEnabled, checkCodex, addProject, getCodexConfigTree, readCodexConfigFile, writeCodexConfigFile } = useLuban()
+  const { app, setCodexEnabled, checkCodex, getCodexConfigTree, readCodexConfigFile, writeCodexConfigFile } =
+    useLuban()
   const [enabled, setEnabled] = useState(true)
   const [checkStatus, setCheckStatus] = useState<CheckStatus>("idle")
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle")
@@ -995,8 +1005,7 @@ function CodexSettings() {
 
   const handleEditInLuban = (e: MouseEvent) => {
     e.stopPropagation()
-    addProject("~/.codex")
-    toast("Added ~/.codex as a project.")
+    addProjectAndOpen("~/.codex")
   }
 
   const handleToggleFolder = (path: string) => {

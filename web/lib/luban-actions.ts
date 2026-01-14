@@ -24,6 +24,7 @@ export type LubanActions = {
   addProject: (path: string) => void
   deleteProject: (projectId: number) => void
   createWorkspace: (projectId: number) => void
+  ensureMainWorkspace: (projectId: number) => void
   openWorkspaceInIde: (workspaceId: WorkspaceId) => void
   openWorkspacePullRequest: (workspaceId: WorkspaceId) => void
   openWorkspacePullRequestFailedAction: (workspaceId: WorkspaceId) => void
@@ -87,6 +88,10 @@ export function createLubanActions(args: {
     args.sendAction({ type: "create_workspace", project_id: projectId })
   }
 
+  function ensureMainWorkspace(projectId: number) {
+    args.sendAction({ type: "ensure_main_workspace", project_id: projectId })
+  }
+
   function openWorkspaceInIde(workspaceId: WorkspaceId) {
     args.sendAction({ type: "open_workspace_in_ide", workspace_id: workspaceId })
   }
@@ -125,6 +130,7 @@ export function createLubanActions(args: {
     store.setApp((prev) => {
       if (!prev) return prev
       const existing = prev.task?.prompt_templates ?? []
+      const defaults = prev.task?.default_prompt_templates ?? []
       const nextTemplates = [...existing]
       const idx = nextTemplates.findIndex((t) => t.intent_kind === intentKind)
       if (idx >= 0) nextTemplates[idx] = { intent_kind: intentKind, template: trimmed }
@@ -133,6 +139,7 @@ export function createLubanActions(args: {
         ...prev,
         task: {
           prompt_templates: nextTemplates,
+          default_prompt_templates: defaults,
         },
       }
     })
@@ -387,6 +394,7 @@ export function createLubanActions(args: {
     addProject,
     deleteProject,
     createWorkspace,
+    ensureMainWorkspace,
     openWorkspaceInIde,
     openWorkspacePullRequest,
     openWorkspacePullRequestFailedAction,

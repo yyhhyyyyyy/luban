@@ -5,7 +5,7 @@ use luban_domain::{
     AttachmentKind, AttachmentRef, CodexConfigEntry, CodexConfigEntryKind, CodexThreadEvent,
     CodexThreadItem, ContextImage, ConversationEntry, ConversationSnapshot, CreatedWorkspace,
     PersistedAppState, ProjectWorkspaceService, PullRequestCiState, PullRequestInfo,
-    PullRequestState, RunAgentTurnRequest,
+    PullRequestState, RunAgentTurnRequest, TaskIntentKind,
 };
 use rand::{Rng as _, rngs::OsRng};
 use std::{
@@ -199,6 +199,7 @@ fn resolve_luban_root() -> anyhow::Result<PathBuf> {
 pub struct GitWorkspaceService {
     worktrees_root: PathBuf,
     conversations_root: PathBuf,
+    task_prompts_root: PathBuf,
     sqlite: SqliteStore,
 }
 
@@ -215,13 +216,21 @@ impl GitWorkspaceService {
 
         let worktrees_root = paths::worktrees_root(&luban_root);
         let conversations_root = paths::conversations_root(&luban_root);
+        let task_prompts_root = paths::task_prompts_root(&luban_root);
         let sqlite_path = paths::sqlite_path(&luban_root);
         let sqlite = SqliteStore::new_with_options(sqlite_path, options)
             .context("failed to init sqlite store")?;
+        std::fs::create_dir_all(&task_prompts_root).with_context(|| {
+            format!(
+                "failed to create task prompts dir {}",
+                task_prompts_root.display()
+            )
+        })?;
 
         Ok(Arc::new(Self {
             worktrees_root,
             conversations_root,
+            task_prompts_root,
             sqlite,
         }))
     }
@@ -239,6 +248,10 @@ impl GitWorkspaceService {
         path.push(project_slug);
         path.push(workspace_name);
         path
+    }
+
+    fn task_prompt_template_path(&self, kind: TaskIntentKind) -> PathBuf {
+        self.task_prompts_root.join(format!("{}.md", kind.as_key()))
     }
 
     fn codex_executable(&self) -> PathBuf {
@@ -1040,6 +1053,102 @@ impl ProjectWorkspaceService for GitWorkspaceService {
         task::task_prepare_project(self, spec).map_err(|e| format!("{e:#}"))
     }
 
+    fn task_prompt_templates_load(
+        &self,
+    ) -> Result<std::collections::HashMap<TaskIntentKind, String>, String> {
+        fn inner(
+            service: &GitWorkspaceService,
+        ) -> anyhow::Result<std::collections::HashMap<TaskIntentKind, String>> {
+            let mut out = std::collections::HashMap::new();
+            for kind in TaskIntentKind::ALL {
+                let path = service.task_prompt_template_path(kind);
+                let contents = match std::fs::read_to_string(&path) {
+                    Ok(contents) => contents,
+                    Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+                    Err(err) => {
+                        return Err(anyhow!(err).context(format!(
+                            "failed to read task prompt template {}",
+                            path.display()
+                        )));
+                    }
+                };
+                let trimmed = contents.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                out.insert(kind, trimmed.to_owned());
+            }
+            Ok(out)
+        }
+
+        inner(self).map_err(|e| format!("{e:#}"))
+    }
+
+    fn task_prompt_template_store(
+        &self,
+        intent_kind: TaskIntentKind,
+        template: String,
+    ) -> Result<(), String> {
+        fn inner(
+            service: &GitWorkspaceService,
+            intent_kind: TaskIntentKind,
+            template: String,
+        ) -> anyhow::Result<()> {
+            std::fs::create_dir_all(&service.task_prompts_root).with_context(|| {
+                format!(
+                    "failed to create task prompts dir {}",
+                    service.task_prompts_root.display()
+                )
+            })?;
+
+            let path = service.task_prompt_template_path(intent_kind);
+            let nanos = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            let pid = std::process::id();
+            let tmp = service.task_prompts_root.join(format!(
+                ".{}.{}.{}.tmp",
+                intent_kind.as_key(),
+                pid,
+                nanos
+            ));
+
+            let mut normalized = template;
+            if !normalized.ends_with('\n') {
+                normalized.push('\n');
+            }
+
+            std::fs::write(&tmp, normalized.as_bytes())
+                .with_context(|| format!("failed to write {}", tmp.display()))?;
+
+            if std::fs::rename(&tmp, &path).is_err() {
+                if path.exists() {
+                    let _ = std::fs::remove_file(&path);
+                }
+                std::fs::rename(&tmp, &path).with_context(|| {
+                    format!("failed to replace task prompt template {}", path.display())
+                })?;
+            }
+
+            Ok(())
+        }
+
+        inner(self, intent_kind, template).map_err(|e| format!("{e:#}"))
+    }
+
+    fn task_prompt_template_delete(&self, intent_kind: TaskIntentKind) -> Result<(), String> {
+        let path = self.task_prompt_template_path(intent_kind);
+        match std::fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(format!(
+                "{:#}",
+                anyhow!(err).context(format!("failed to remove {}", path.display()))
+            )),
+        }
+    }
+
     fn codex_check(&self) -> Result<(), String> {
         let result: anyhow::Result<()> = (|| {
             let codex = self.codex_executable();
@@ -1375,6 +1484,51 @@ mod tests {
     }
 
     #[test]
+    fn task_prompt_templates_roundtrip_via_files() {
+        let _guard = lock_env();
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be valid")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "luban-task-prompts-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&root).expect("temp dir should be created");
+        unsafe {
+            std::env::set_var(paths::LUBAN_ROOT_ENV, root.as_os_str());
+        }
+
+        let service = GitWorkspaceService::new().expect("service should init");
+        service
+            .task_prompt_template_store(TaskIntentKind::Fix, "hello".to_owned())
+            .expect("store should succeed");
+
+        let loaded = service
+            .task_prompt_templates_load()
+            .expect("load should succeed");
+        assert_eq!(
+            loaded.get(&TaskIntentKind::Fix).map(String::as_str),
+            Some("hello")
+        );
+
+        service
+            .task_prompt_template_delete(TaskIntentKind::Fix)
+            .expect("delete should succeed");
+        let loaded = service
+            .task_prompt_templates_load()
+            .expect("load should succeed");
+        assert!(!loaded.contains_key(&TaskIntentKind::Fix));
+
+        unsafe {
+            std::env::remove_var(paths::LUBAN_ROOT_ENV);
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn codex_runner_reports_missing_executable() {
         let _guard = lock_env();
 
@@ -1399,6 +1553,7 @@ mod tests {
         let service = GitWorkspaceService {
             worktrees_root: paths::worktrees_root(&base_dir),
             conversations_root: paths::conversations_root(&base_dir),
+            task_prompts_root: paths::task_prompts_root(&base_dir),
             sqlite,
         };
 
@@ -1573,6 +1728,7 @@ mod tests {
         let service = GitWorkspaceService {
             worktrees_root: paths::worktrees_root(&base_dir),
             conversations_root: paths::conversations_root(&base_dir),
+            task_prompts_root: paths::task_prompts_root(&base_dir),
             sqlite,
         };
 
@@ -1672,6 +1828,7 @@ mod tests {
         let service = GitWorkspaceService {
             worktrees_root: paths::worktrees_root(&base_dir),
             conversations_root: paths::conversations_root(&base_dir),
+            task_prompts_root: paths::task_prompts_root(&base_dir),
             sqlite,
         };
 
@@ -1735,6 +1892,7 @@ mod tests {
         let service = GitWorkspaceService {
             worktrees_root: paths::worktrees_root(&base_dir),
             conversations_root: paths::conversations_root(&base_dir),
+            task_prompts_root: paths::task_prompts_root(&base_dir),
             sqlite,
         };
 
@@ -1781,6 +1939,7 @@ mod tests {
         let service = GitWorkspaceService {
             worktrees_root: paths::worktrees_root(&base_dir),
             conversations_root: paths::conversations_root(&base_dir),
+            task_prompts_root: paths::task_prompts_root(&base_dir),
             sqlite,
         };
 
@@ -1829,6 +1988,7 @@ mod tests {
         let service = GitWorkspaceService {
             worktrees_root: paths::worktrees_root(&base_dir),
             conversations_root: paths::conversations_root(&base_dir),
+            task_prompts_root: paths::task_prompts_root(&base_dir),
             sqlite,
         };
 

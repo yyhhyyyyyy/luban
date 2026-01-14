@@ -1,5 +1,6 @@
 use crate::services::GitWorkspaceService;
 use anyhow::{Context as _, anyhow};
+use luban_domain::ProjectWorkspaceService;
 use luban_domain::{
     TaskDraft, TaskIntentKind, TaskIssueInfo, TaskProjectSpec, TaskPullRequestInfo, TaskRepoInfo,
 };
@@ -621,14 +622,9 @@ pub(super) fn task_preview(
     let summary = compose_task_summary(intent_kind, &project, &repo, &issue, &pull_request, &notes);
     let known_context = render_known_context(&project, &repo, &issue, &pull_request);
     let template = service
-        .load_app_state_internal()
+        .task_prompt_templates_load()
         .ok()
-        .and_then(|state| {
-            state
-                .task_prompt_templates
-                .get(intent_kind.as_key())
-                .cloned()
-        })
+        .and_then(|templates| templates.get(&intent_kind).cloned())
         .filter(|template| !template.trim().is_empty())
         .unwrap_or_else(|| luban_domain::default_task_prompt_template(intent_kind));
     let prompt = render_task_prompt_template(
