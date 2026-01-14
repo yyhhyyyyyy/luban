@@ -86,3 +86,32 @@ test("task prompt templates persist across reload", async ({ page }) => {
   await page.waitForTimeout(1200)
   await page.getByTitle("Close settings").click()
 })
+
+test("agent selector defaults come from Codex config", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  await expect
+    .poll(async () => {
+      const res = await page.request.get("/api/app")
+      if (!res.ok()) return null
+      const app = (await res.json()) as { agent?: { default_model_id?: string | null } }
+      return app.agent?.default_model_id ?? null
+    })
+    .toBe("gpt-5.2-codex")
+
+  const selector = page.getByTestId("codex-agent-selector")
+  await selector.click()
+
+  const menu = page
+    .locator("div")
+    .filter({ hasText: "Agent" })
+    .filter({ hasText: "Model" })
+    .filter({ hasText: "Reasoning" })
+    .first()
+
+  const model = menu.getByRole("button", { name: "GPT-5.2-Codex", exact: true })
+  await expect(model.locator("..").getByText("default", { exact: true })).toHaveCount(1)
+
+  const effort = menu.getByRole("button", { name: "High", exact: true })
+  await expect(effort.locator("..").getByText("default", { exact: true })).toHaveCount(1)
+})

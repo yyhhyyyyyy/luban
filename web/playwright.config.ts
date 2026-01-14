@@ -52,6 +52,13 @@ const port = resolvePort()
 const baseURL = `http://127.0.0.1:${port}`
 const e2eLubanRoot = path.join(e2eRoot, "luban-root")
 fs.mkdirSync(e2eLubanRoot, { recursive: true })
+const e2eCodexRoot = path.join(e2eRoot, "codex-root")
+fs.mkdirSync(e2eCodexRoot, { recursive: true })
+fs.writeFileSync(
+  path.join(e2eCodexRoot, "config.toml"),
+  ['model = "gpt-5.2-codex"', 'model_reasoning_effort = "high"', ""].join("\n"),
+  "utf8",
+)
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -85,6 +92,7 @@ export default defineConfig({
       "CARGO_HOME=${CARGO_HOME:-$HOME/.cargo} " +
       `LUBAN_E2E_ROOT=${shellQuote(e2eRoot)} ` +
       `LUBAN_ROOT=${shellQuote(e2eLubanRoot)} ` +
+      `LUBAN_CODEX_ROOT=${shellQuote(e2eCodexRoot)} ` +
       "LUBAN_WEB_DIST_DIR=web/out " +
       `LUBAN_SERVER_ADDR=127.0.0.1:${port} ` +
       "LUBAN_CODEX_BIN=/usr/bin/false " +

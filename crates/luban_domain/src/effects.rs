@@ -8,6 +8,8 @@ pub enum Effect {
     LoadAppState,
     SaveAppState,
 
+    LoadCodexDefaults,
+
     LoadTaskPromptTemplates,
     MigrateLegacyTaskPromptTemplates {
         templates: HashMap<TaskIntentKind, String>,

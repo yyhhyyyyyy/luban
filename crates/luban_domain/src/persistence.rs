@@ -195,6 +195,7 @@ pub(crate) fn apply_persisted_app_state(
             templates: legacy_templates,
         });
     }
+    effects.push(Effect::LoadCodexDefaults);
     effects.push(Effect::LoadTaskPromptTemplates);
     if projects_upgraded || clear_legacy_templates {
         effects.push(Effect::SaveAppState);

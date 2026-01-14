@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 pub const LUBAN_CODEX_BIN_ENV: &str = "LUBAN_CODEX_BIN";
+pub const LUBAN_CODEX_ROOT_ENV: &str = "LUBAN_CODEX_ROOT";
 pub const LUBAN_ROOT_ENV: &str = "LUBAN_ROOT";
 
 pub fn worktrees_root(luban_root: &Path) -> PathBuf {
@@ -51,6 +52,9 @@ mod tests {
         assert_eq!(conversations_root(&base), base.join("conversations"));
         assert_eq!(sqlite_path(&base), base.join("luban.db"));
         assert_eq!(task_prompts_root(&base), base.join("task"));
+        assert_eq!(LUBAN_CODEX_BIN_ENV, "LUBAN_CODEX_BIN");
+        assert_eq!(LUBAN_CODEX_ROOT_ENV, "LUBAN_CODEX_ROOT");
+        assert_eq!(LUBAN_ROOT_ENV, "LUBAN_ROOT");
     }
 
     #[test]

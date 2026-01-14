@@ -556,16 +556,19 @@ impl Engine {
                     self.process_action_queue(Action::OpenWorkspace { workspace_id })
                         .await;
 
+                    let default_model_id = self.state.agent_default_model_id().to_owned();
+                    let default_effort = self.state.agent_default_thinking_effort();
+
                     self.process_action_queue(Action::ChatModelChanged {
                         workspace_id,
                         thread_id,
-                        model_id: "gpt-5.2-codex".to_owned(),
+                        model_id: default_model_id,
                     })
                     .await;
                     self.process_action_queue(Action::ThinkingEffortChanged {
                         workspace_id,
                         thread_id,
-                        thinking_effort: ThinkingEffort::Low,
+                        thinking_effort: default_effort,
                     })
                     .await;
 
@@ -967,6 +970,33 @@ impl Engine {
                     Err(message) => Action::AppStateSaveFailed { message },
                 };
                 Ok(VecDeque::from([action]))
+            }
+            Effect::LoadCodexDefaults => {
+                let services = self.services.clone();
+                let loaded = tokio::task::spawn_blocking(move || {
+                    services.codex_config_read_file("config.toml".to_owned())
+                })
+                .await
+                .ok()
+                .unwrap_or_else(|| Err("failed to join codex config read task".to_owned()));
+
+                let contents = match loaded {
+                    Ok(contents) => contents,
+                    Err(message) => {
+                        tracing::debug!(message = %message, "codex defaults unavailable");
+                        return Ok(VecDeque::new());
+                    }
+                };
+
+                let (model_id, thinking_effort) = parse_codex_defaults_toml(&contents);
+                if model_id.is_none() && thinking_effort.is_none() {
+                    return Ok(VecDeque::new());
+                }
+
+                Ok(VecDeque::from([Action::CodexDefaultsLoaded {
+                    model_id,
+                    thinking_effort,
+                }]))
             }
             Effect::LoadTaskPromptTemplates => {
                 let services = self.services.clone();
@@ -1784,6 +1814,96 @@ fn threads_event_for_action(
         } => Some((*workspace_id, threads.clone())),
         _ => None,
     }
+}
+
+fn parse_codex_defaults_toml(contents: &str) -> (Option<String>, Option<ThinkingEffort>) {
+    fn strip_comment(line: &str) -> &str {
+        let mut in_single = false;
+        let mut in_double = false;
+        for (idx, ch) in line.char_indices() {
+            match ch {
+                '\'' if !in_double => in_single = !in_single,
+                '"' if !in_single => in_double = !in_double,
+                '#' if !in_single && !in_double => return &line[..idx],
+                _ => {}
+            }
+        }
+        line
+    }
+
+    fn parse_string_value(raw: &str) -> Option<String> {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        if let Some(rest) = trimmed.strip_prefix('"') {
+            let end = rest.find('"')?;
+            return Some(rest[..end].to_owned());
+        }
+        if let Some(rest) = trimmed.strip_prefix('\'') {
+            let end = rest.find('\'')?;
+            return Some(rest[..end].to_owned());
+        }
+        None
+    }
+
+    fn parse_effort(raw: &str) -> Option<ThinkingEffort> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "minimal" => Some(ThinkingEffort::Minimal),
+            "low" => Some(ThinkingEffort::Low),
+            "medium" => Some(ThinkingEffort::Medium),
+            "high" => Some(ThinkingEffort::High),
+            "xhigh" => Some(ThinkingEffort::XHigh),
+            _ => None,
+        }
+    }
+
+    let mut in_root = true;
+    let mut model_id: Option<String> = None;
+    let mut effort: Option<ThinkingEffort> = None;
+
+    for raw_line in contents.lines() {
+        let line = strip_comment(raw_line).trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line.starts_with('[') {
+            in_root = false;
+            continue;
+        }
+        if !in_root {
+            continue;
+        }
+
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        let value = value.trim();
+
+        if key == "model" && model_id.is_none() {
+            model_id = parse_string_value(value).map(|v| v.trim().to_owned());
+            continue;
+        }
+        if key == "model_reasoning_effort" && effort.is_none() {
+            if let Some(value) = parse_string_value(value) {
+                effort = parse_effort(&value);
+            }
+            continue;
+        }
+    }
+
+    (
+        model_id.and_then(|v| {
+            let trimmed = v.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_owned())
+            }
+        }),
+        effort,
+    )
 }
 
 fn map_pull_request_info(info: PullRequestInfo) -> PullRequestSnapshot {

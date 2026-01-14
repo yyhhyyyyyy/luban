@@ -195,6 +195,24 @@ fn resolve_luban_root() -> anyhow::Result<PathBuf> {
     Ok(PathBuf::from(home).join("luban"))
 }
 
+fn resolve_codex_root() -> anyhow::Result<PathBuf> {
+    if let Some(root) = std::env::var_os(paths::LUBAN_CODEX_ROOT_ENV) {
+        let root = root.to_string_lossy();
+        let trimmed = root.trim();
+        if trimmed.is_empty() {
+            return Err(anyhow!("{} is set but empty", paths::LUBAN_CODEX_ROOT_ENV));
+        }
+        return Ok(PathBuf::from(trimmed));
+    }
+
+    if cfg!(test) {
+        return Ok(PathBuf::from(".codex"));
+    }
+
+    let home = std::env::var_os("HOME").ok_or_else(|| anyhow!("HOME is not set"))?;
+    Ok(PathBuf::from(home).join(".codex"))
+}
+
 #[derive(Clone)]
 pub struct GitWorkspaceService {
     worktrees_root: PathBuf,
@@ -1177,10 +1195,7 @@ impl ProjectWorkspaceService for GitWorkspaceService {
 
     fn codex_config_tree(&self) -> Result<Vec<CodexConfigEntry>, String> {
         let result: anyhow::Result<Vec<CodexConfigEntry>> = (|| {
-            let root = match std::env::var_os("HOME") {
-                Some(home) => PathBuf::from(home).join(".codex"),
-                None => PathBuf::from(".codex"),
-            };
+            let root = resolve_codex_root()?;
 
             if !root.exists() {
                 return Ok(Vec::new());
@@ -1277,10 +1292,7 @@ impl ProjectWorkspaceService for GitWorkspaceService {
 
     fn codex_config_read_file(&self, path: String) -> Result<String, String> {
         let result: anyhow::Result<String> = (|| {
-            let root = match std::env::var_os("HOME") {
-                Some(home) => PathBuf::from(home).join(".codex"),
-                None => PathBuf::from(".codex"),
-            };
+            let root = resolve_codex_root()?;
 
             let rel = path.trim();
             if rel.is_empty() {
@@ -1322,10 +1334,7 @@ impl ProjectWorkspaceService for GitWorkspaceService {
 
     fn codex_config_write_file(&self, path: String, contents: String) -> Result<(), String> {
         let result: anyhow::Result<()> = (|| {
-            let root = match std::env::var_os("HOME") {
-                Some(home) => PathBuf::from(home).join(".codex"),
-                None => PathBuf::from(".codex"),
-            };
+            let root = resolve_codex_root()?;
 
             let rel = path.trim();
             if rel.is_empty() {

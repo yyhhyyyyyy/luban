@@ -478,16 +478,14 @@ impl AppState {
                 thread_id,
                 model_id,
             } => {
-                let thinking_effort = {
+                {
                     let conversation = self.ensure_conversation_mut(workspace_id, thread_id);
-                    conversation.agent_model_id = model_id.clone();
-                    conversation.thinking_effort =
+                    let normalized =
                         normalize_thinking_effort(&model_id, conversation.thinking_effort);
-                    conversation.thinking_effort
-                };
-                self.agent_default_model_id = model_id;
-                self.agent_default_thinking_effort = thinking_effort;
-                vec![Effect::SaveAppState]
+                    conversation.agent_model_id = model_id;
+                    conversation.thinking_effort = normalized;
+                }
+                Vec::new()
             }
             Action::ThinkingEffortChanged {
                 workspace_id,
@@ -501,8 +499,7 @@ impl AppState {
                     }
                     conversation.thinking_effort = thinking_effort;
                 }
-                self.agent_default_thinking_effort = thinking_effort;
-                vec![Effect::SaveAppState]
+                Vec::new()
             }
             Action::ChatDraftChanged {
                 workspace_id,
@@ -926,6 +923,33 @@ impl AppState {
                 }
                 self.agent_codex_enabled = enabled;
                 vec![Effect::SaveAppState]
+            }
+            Action::CodexDefaultsLoaded {
+                model_id,
+                thinking_effort,
+            } => {
+                if let Some(model_id) = model_id
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                    .map(ToOwned::to_owned)
+                {
+                    self.agent_default_model_id = model_id;
+                }
+
+                if let Some(next_effort) = thinking_effort {
+                    let normalized =
+                        normalize_thinking_effort(&self.agent_default_model_id, next_effort);
+                    self.agent_default_thinking_effort = normalized;
+                } else {
+                    let normalized = normalize_thinking_effort(
+                        &self.agent_default_model_id,
+                        self.agent_default_thinking_effort,
+                    );
+                    self.agent_default_thinking_effort = normalized;
+                }
+
+                Vec::new()
             }
             Action::TaskPromptTemplateChanged {
                 intent_kind,
@@ -1458,7 +1482,7 @@ mod tests {
     }
 
     #[test]
-    fn new_threads_use_last_selected_agent_settings() {
+    fn new_threads_use_codex_defaults() {
         let mut state = AppState::new();
         state.apply(Action::AddProject {
             path: PathBuf::from("/tmp/repo"),
@@ -1476,21 +1500,21 @@ mod tests {
         let workspace_id = workspace_id_by_name(&state, "w1");
         let thread_id = WorkspaceThreadId(1);
 
-        let effects = state.apply(Action::ChatModelChanged {
+        state.apply(Action::ChatModelChanged {
             workspace_id,
             thread_id,
-            model_id: "gpt-5.2-codex".to_owned(),
+            model_id: "gpt-5.2".to_owned(),
         });
-        assert_eq!(effects.len(), 1);
-        assert!(matches!(effects[0], Effect::SaveAppState));
+        state.apply(Action::ThinkingEffortChanged {
+            workspace_id,
+            thread_id,
+            thinking_effort: ThinkingEffort::Low,
+        });
 
-        let effects = state.apply(Action::ThinkingEffortChanged {
-            workspace_id,
-            thread_id,
-            thinking_effort: ThinkingEffort::High,
+        state.apply(Action::CodexDefaultsLoaded {
+            model_id: Some("gpt-5.2-codex".to_owned()),
+            thinking_effort: Some(ThinkingEffort::High),
         });
-        assert_eq!(effects.len(), 1);
-        assert!(matches!(effects[0], Effect::SaveAppState));
 
         state.apply(Action::CreateWorkspaceThread { workspace_id });
         let created_thread_id = state
@@ -2385,11 +2409,12 @@ mod tests {
             "expected main pane to restore workspace"
         );
         assert_eq!(loaded.right_pane, RightPane::Terminal);
-        assert_eq!(effects.len(), 3);
-        assert!(matches!(effects[0], Effect::LoadTaskPromptTemplates));
-        assert!(matches!(effects[1], Effect::LoadWorkspaceThreads { .. }));
+        assert_eq!(effects.len(), 4);
+        assert!(matches!(effects[0], Effect::LoadCodexDefaults));
+        assert!(matches!(effects[1], Effect::LoadTaskPromptTemplates));
+        assert!(matches!(effects[2], Effect::LoadWorkspaceThreads { .. }));
         assert!(matches!(
-            effects[2],
+            effects[3],
             Effect::LoadConversation { workspace_id: id, .. } if id == workspace_id
         ));
     }

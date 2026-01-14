@@ -209,6 +209,10 @@ pub enum Action {
     AgentCodexEnabledChanged {
         enabled: bool,
     },
+    CodexDefaultsLoaded {
+        model_id: Option<String>,
+        thinking_effort: Option<ThinkingEffort>,
+    },
     TaskPromptTemplateChanged {
         intent_kind: TaskIntentKind,
         template: String,

@@ -70,6 +70,7 @@ export function CodexAgentSelector({
   return (
     <div className={cn("relative", className)}>
       <button
+        data-testid="codex-agent-selector"
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => {
           if (disabled) return
@@ -133,7 +134,9 @@ export function CodexAgentSelector({
                       </button>
                       {isDefault && (
                         <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1 px-1.5 py-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-popover/95 rounded">
-                          <span className="text-[10px] text-muted-foreground">default</span>
+                          <span className="text-[10px] text-muted-foreground pointer-events-none select-none">
+                            default
+                          </span>
                           {onOpenAgentSettings && (
                             <button
                               onMouseDown={(e) => e.preventDefault()}
@@ -176,7 +179,9 @@ export function CodexAgentSelector({
                       </button>
                       {isDefault && (
                         <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1 px-1.5 py-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-popover/95 rounded">
-                          <span className="text-[10px] text-muted-foreground">default</span>
+                          <span className="text-[10px] text-muted-foreground pointer-events-none select-none">
+                            default
+                          </span>
                           {onOpenAgentSettings && (
                             <button
                               onMouseDown={(e) => e.preventDefault()}
