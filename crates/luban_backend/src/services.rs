@@ -1829,6 +1829,7 @@ impl GitWorkspaceService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use luban_domain::{PersistedProject, PersistedWorkspace, WorkspaceStatus};
     use std::path::{Path, PathBuf};
 
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -2181,6 +2182,134 @@ mod tests {
             String::from_utf8_lossy(&out.stderr).trim()
         );
         String::from_utf8_lossy(&out.stdout).trim().to_owned()
+    }
+
+    #[test]
+    fn load_app_state_archives_missing_worktrees() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be valid")
+            .as_nanos();
+        let base_dir = std::env::temp_dir().join(format!(
+            "luban-load-archives-missing-worktree-{}-{}",
+            std::process::id(),
+            unique
+        ));
+
+        std::fs::create_dir_all(&base_dir).expect("temp dir should be created");
+
+        let repo_path = base_dir.join("repo");
+        std::fs::create_dir_all(&repo_path).expect("repo dir should be created");
+
+        assert_git_success(&repo_path, &["init"]);
+        assert_git_success(&repo_path, &["config", "user.name", "Test User"]);
+        assert_git_success(&repo_path, &["config", "user.email", "test@example.com"]);
+        assert_git_success(&repo_path, &["checkout", "-b", "main"]);
+
+        std::fs::write(repo_path.join("README.md"), "init\n").expect("write should succeed");
+        assert_git_success(&repo_path, &["add", "."]);
+        assert_git_success(&repo_path, &["commit", "-m", "init"]);
+
+        let worktree_path = base_dir.join("worktree");
+        let branch_name = format!("luban/review-lance-{}", unique % 10_000);
+        assert_git_success(
+            &repo_path,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                &branch_name,
+                worktree_path
+                    .to_str()
+                    .expect("worktree path should be utf-8"),
+            ],
+        );
+        assert!(worktree_path.exists(), "worktree path should exist");
+
+        assert_git_success(
+            &repo_path,
+            &[
+                "worktree",
+                "remove",
+                "--force",
+                worktree_path
+                    .to_str()
+                    .expect("worktree path should be utf-8"),
+            ],
+        );
+        assert!(!worktree_path.exists(), "worktree path should be removed");
+
+        let sqlite =
+            SqliteStore::new(paths::sqlite_path(&base_dir)).expect("sqlite init should work");
+        let service = GitWorkspaceService {
+            worktrees_root: paths::worktrees_root(&base_dir),
+            conversations_root: paths::conversations_root(&base_dir),
+            task_prompts_root: paths::task_prompts_root(&base_dir),
+            sqlite,
+        };
+
+        let snapshot = PersistedAppState {
+            projects: vec![PersistedProject {
+                id: 1,
+                name: "repo".to_owned(),
+                path: repo_path.clone(),
+                slug: "repo".to_owned(),
+                is_git: true,
+                expanded: true,
+                workspaces: vec![PersistedWorkspace {
+                    id: 1,
+                    workspace_name: "review-lance-5713".to_owned(),
+                    branch_name: branch_name.clone(),
+                    worktree_path: worktree_path.clone(),
+                    status: WorkspaceStatus::Active,
+                    last_activity_at_unix_seconds: None,
+                }],
+            }],
+            sidebar_width: None,
+            terminal_pane_width: None,
+            appearance_theme: None,
+            appearance_ui_font: None,
+            appearance_chat_font: None,
+            appearance_code_font: None,
+            appearance_terminal_font: None,
+            agent_default_model_id: None,
+            agent_default_thinking_effort: None,
+            agent_codex_enabled: Some(true),
+            last_open_workspace_id: None,
+            workspace_active_thread_id: std::collections::HashMap::new(),
+            workspace_open_tabs: std::collections::HashMap::new(),
+            workspace_archived_tabs: std::collections::HashMap::new(),
+            workspace_next_thread_id: std::collections::HashMap::new(),
+            workspace_chat_scroll_y10: std::collections::HashMap::new(),
+            workspace_chat_scroll_anchor: std::collections::HashMap::new(),
+            workspace_unread_completions: std::collections::HashMap::new(),
+            task_prompt_templates: std::collections::HashMap::new(),
+        };
+
+        service
+            .sqlite
+            .save_app_state(snapshot)
+            .expect("sqlite save should succeed");
+
+        let loaded = service
+            .load_app_state_internal()
+            .expect("load_app_state_internal should succeed");
+        assert_eq!(
+            loaded.projects[0].workspaces[0].status,
+            WorkspaceStatus::Archived
+        );
+
+        let persisted = service
+            .sqlite
+            .load_app_state()
+            .expect("sqlite load should succeed");
+        assert_eq!(
+            persisted.projects[0].workspaces[0].status,
+            WorkspaceStatus::Archived
+        );
+
+        drop(service);
+        let _ = std::fs::remove_dir_all(&base_dir);
     }
 
     #[test]

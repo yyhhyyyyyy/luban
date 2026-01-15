@@ -1,6 +1,6 @@
 use super::GitWorkspaceService;
 use anyhow::Context as _;
-use luban_domain::{ConversationEntry, ConversationSnapshot, PersistedAppState};
+use luban_domain::{ConversationEntry, ConversationSnapshot, PersistedAppState, WorkspaceStatus};
 use std::{
     io::{BufRead as _, BufReader},
     path::PathBuf,
@@ -157,24 +157,47 @@ impl GitWorkspaceService {
 
     pub(super) fn load_app_state_internal(&self) -> anyhow::Result<PersistedAppState> {
         let mut state = self.sqlite.load_app_state()?;
+        let mut dirty = false;
         for project in &mut state.projects {
             if !project.is_git {
                 continue;
             }
             for workspace in &mut project.workspaces {
+                if workspace.status == WorkspaceStatus::Active
+                    && workspace.workspace_name != "main"
+                    && !workspace.worktree_path.exists()
+                {
+                    workspace.status = WorkspaceStatus::Archived;
+                    dirty = true;
+                    continue;
+                }
+
                 let resolved = self.run_git(
                     &workspace.worktree_path,
                     ["rev-parse", "--abbrev-ref", "HEAD"],
                 );
                 let Ok(resolved) = resolved else {
+                    if workspace.status == WorkspaceStatus::Active
+                        && workspace.workspace_name != "main"
+                    {
+                        workspace.status = WorkspaceStatus::Archived;
+                        dirty = true;
+                    }
                     continue;
                 };
                 let trimmed = resolved.trim();
                 if trimmed.is_empty() {
                     continue;
                 }
-                workspace.branch_name = trimmed.to_owned();
+                if workspace.branch_name != trimmed {
+                    workspace.branch_name = trimmed.to_owned();
+                    dirty = true;
+                }
             }
+        }
+
+        if dirty {
+            let _ = self.sqlite.save_app_state(state.clone());
         }
         Ok(state)
     }
