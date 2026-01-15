@@ -432,8 +432,12 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
                           >
                             {worktree.name}
                           </span>
-                          <span data-testid="worktree-short-id" className="text-[10px] text-muted-foreground/50 font-mono">
-                            {worktree.id}
+                          <span
+                            data-testid="worktree-worktree-name"
+                            className="text-[10px] text-muted-foreground/50 font-mono truncate"
+                            title={worktree.id}
+                          >
+                            {worktree.worktreeName}
                           </span>
                         </div>
 

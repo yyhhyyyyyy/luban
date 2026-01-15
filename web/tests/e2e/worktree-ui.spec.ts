@@ -24,17 +24,17 @@ function samplePixel(png: PNG, x: number, y: number): { r: number; g: number; b:
   }
 }
 
-test("worktree item shows branch name above short id", async ({ page }) => {
+test("worktree item shows branch name above worktree name", async ({ page }) => {
   await ensureWorkspace(page)
 
-  const worktreeId = page.getByTestId("worktree-short-id").first()
+  const worktreeName = page.getByTestId("worktree-worktree-name").first()
   const branchName = page.getByTestId("worktree-branch-name").first()
 
-  const idBox = await worktreeId.boundingBox()
+  const nameBox = await worktreeName.boundingBox()
   const branchBox = await branchName.boundingBox()
-  expect(idBox, "worktree short id should be visible").not.toBeNull()
+  expect(nameBox, "worktree name should be visible").not.toBeNull()
   expect(branchBox, "worktree branch name should be visible").not.toBeNull()
-  expect((branchBox?.y ?? 0) < (idBox?.y ?? 0)).toBeTruthy()
+  expect((branchBox?.y ?? 0) < (nameBox?.y ?? 0)).toBeTruthy()
 })
 
 test("main worktree home icon is only visible on hover", async ({ page }) => {
@@ -391,19 +391,19 @@ test("archiving a worktree shows an executing animation", async ({ page }) => {
       const workspace =
         project.workspaces.find((w) => w.workspace_name !== "main" && w.status === "active") ?? null
       if (!workspace) return null
-      return { workspaceId: workspace.id, shortId: workspace.short_id }
+      return { workspaceId: workspace.id, worktreeName: workspace.workspace_name }
     }, projectPath)
 
   await expect.poll(async () => await resolveWorkspace(), { timeout: 90_000 }).not.toBeNull()
 
   const resolved = await resolveWorkspace()
   if (!resolved) throw new Error("workspace not found after creation")
-  const shortId = resolved.shortId
+  const worktreeName = resolved.worktreeName
 
   const ensureExpanded = async () => {
     const count = await projectContainer
-      .getByTestId("worktree-short-id")
-      .filter({ hasText: shortId })
+      .getByTestId("worktree-worktree-name")
+      .filter({ hasText: worktreeName })
       .count()
     if (count > 0) return
     await projectToggle.click()
@@ -411,13 +411,13 @@ test("archiving a worktree shows an executing animation", async ({ page }) => {
 
   await ensureExpanded()
   await expect
-    .poll(async () => await projectContainer.getByTestId("worktree-short-id").filter({ hasText: shortId }).count(), {
+    .poll(async () => await projectContainer.getByTestId("worktree-worktree-name").filter({ hasText: worktreeName }).count(), {
       timeout: 20_000,
     })
     .toBeGreaterThan(0)
   const row = projectContainer
-    .getByTestId("worktree-short-id")
-    .filter({ hasText: shortId })
+    .getByTestId("worktree-worktree-name")
+    .filter({ hasText: worktreeName })
     .locator("..")
     .locator("..")
 

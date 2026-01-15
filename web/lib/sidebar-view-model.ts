@@ -6,6 +6,7 @@ import { agentStatusFromWorkspace, prStatusFromWorkspace, type AgentStatus, type
 export type SidebarWorktreeVm = {
   id: string
   name: string
+  worktreeName: string
   isHome: boolean
   isArchiving: boolean
   agentStatus: AgentStatus
@@ -46,6 +47,7 @@ export function buildSidebarProjects(
         return {
           id: w.short_id,
           name: w.branch_name,
+          worktreeName: w.workspace_name,
           isHome: w.workspace_name === "main",
           isArchiving: w.archive_status === "running" || optimisticArchiving?.has(w.id) === true,
           agentStatus,
