@@ -59,6 +59,18 @@ fs.writeFileSync(
   ['model = "gpt-5.2-codex"', 'model_reasoning_effort = "high"', ""].join("\n"),
   "utf8",
 )
+const e2eCodexPrompts = path.join(e2eCodexRoot, "prompts")
+fs.mkdirSync(e2eCodexPrompts, { recursive: true })
+fs.writeFileSync(
+  path.join(e2eCodexPrompts, "review.md"),
+  ["Review a change locally.", "", "- Inspect diffs and tests.", "- Provide actionable feedback.", ""].join("\n"),
+  "utf8",
+)
+fs.writeFileSync(
+  path.join(e2eCodexPrompts, "fix.md"),
+  ["Fix a bug.", "", "- Reproduce first.", "- Add a regression test.", ""].join("\n"),
+  "utf8",
+)
 
 export default defineConfig({
   testDir: "./tests/e2e",

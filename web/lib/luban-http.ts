@@ -2,8 +2,10 @@ import type {
   AppSnapshot,
   AttachmentKind,
   AttachmentRef,
+  CodexCustomPromptSnapshot,
   ContextSnapshot,
   ConversationSnapshot,
+  MentionItemSnapshot,
   ThreadsSnapshot,
   WorkspaceChangesSnapshot,
   WorkspaceDiffSnapshot,
@@ -83,4 +85,28 @@ export async function fetchWorkspaceDiff(workspaceId: number): Promise<Workspace
   const res = await fetch(`/api/workspaces/${workspaceId}/diff`)
   if (!res.ok) throw new Error(`GET /api/workspaces/${workspaceId}/diff failed: ${res.status}`)
   return (await res.json()) as WorkspaceDiffSnapshot
+}
+
+export async function fetchCodexCustomPrompts(): Promise<CodexCustomPromptSnapshot[]> {
+  const res = await fetch("/api/codex/prompts")
+  if (!res.ok) throw new Error(`GET /api/codex/prompts failed: ${res.status}`)
+  return (await res.json()) as CodexCustomPromptSnapshot[]
+}
+
+export async function fetchMentionItems(args: {
+  workspaceId: number
+  query: string
+}): Promise<MentionItemSnapshot[]> {
+  const q = args.query.trim()
+  if (!q) return []
+  const res = await fetch(
+    `/api/workspaces/${args.workspaceId}/mentions?q=${encodeURIComponent(q)}`,
+  )
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw new Error(
+      `GET /api/workspaces/${args.workspaceId}/mentions failed: ${res.status}${text ? `: ${text}` : ""}`,
+    )
+  }
+  return (await res.json()) as MentionItemSnapshot[]
 }

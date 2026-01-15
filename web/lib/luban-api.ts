@@ -376,3 +376,19 @@ export type WsServerMessage =
   | { type: "event"; rev: number; event: ServerEvent }
   | { type: "error"; request_id: string | null; message: string }
   | { type: "pong" }
+
+export type MentionItemKind = "file" | "folder"
+
+export type MentionItemSnapshot = {
+  id: string
+  name: string
+  path: string
+  kind: MentionItemKind
+}
+
+export type CodexCustomPromptSnapshot = {
+  id: string
+  label: string
+  description: string
+  contents: string
+}

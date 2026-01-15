@@ -207,3 +207,37 @@ test("queued messages can be reordered and edited", async ({ page }) => {
   await lastItem.locator('[data-testid="queued-prompt-cancel"]').click({ force: true, timeout: 20_000 })
   await expect(queuedItems).toHaveCount(1, { timeout: 20_000 })
 })
+
+test("/command autocompletes Codex custom prompts", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  const input = page.getByTestId("chat-input")
+  await input.fill("/rev")
+
+  const menu = page.getByTestId("chat-command-menu")
+  await expect(menu).toBeVisible({ timeout: 20_000 })
+
+  const item = page.getByTestId("chat-command-item").filter({ hasText: "review" }).first()
+  await expect(item).toBeVisible({ timeout: 20_000 })
+  await item.click()
+
+  await expect.poll(async () => await input.inputValue(), { timeout: 10_000 }).toContain("Review a change locally.")
+  await expect(menu).toHaveCount(0)
+})
+
+test("@mention autocompletes workspace files", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  const input = page.getByTestId("chat-input")
+  await input.fill("@README")
+
+  const menu = page.getByTestId("chat-mention-menu")
+  await expect(menu).toBeVisible({ timeout: 20_000 })
+
+  const item = page.getByTestId("chat-mention-item").filter({ hasText: "README.md" }).first()
+  await expect(item).toBeVisible({ timeout: 20_000 })
+  await item.click()
+
+  await expect.poll(async () => await input.inputValue(), { timeout: 10_000 }).toBe("@README.md ")
+  await expect(menu).toHaveCount(0)
+})

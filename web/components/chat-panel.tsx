@@ -27,6 +27,8 @@ import {
   ImageIcon,
   FileText,
   FileCode,
+  File,
+  Folder,
   Columns2,
   AlignJustify,
 } from "lucide-react"
@@ -34,8 +36,14 @@ import { cn } from "@/lib/utils"
 import { useLuban } from "@/lib/luban-context"
 import { buildMessages } from "@/lib/conversation-ui"
 import { ConversationView } from "@/components/conversation-view"
-import { fetchWorkspaceDiff, uploadAttachment } from "@/lib/luban-http"
-import type { AttachmentRef, QueuedPromptSnapshot, ThinkingEffort } from "@/lib/luban-api"
+import { fetchCodexCustomPrompts, fetchMentionItems, fetchWorkspaceDiff, uploadAttachment } from "@/lib/luban-http"
+import type {
+  AttachmentRef,
+  CodexCustomPromptSnapshot,
+  MentionItemSnapshot,
+  QueuedPromptSnapshot,
+  ThinkingEffort,
+} from "@/lib/luban-api"
 import { onAddChatAttachments } from "@/lib/chat-attachment-events"
 import { emitContextChanged } from "@/lib/context-events"
 import {
@@ -81,6 +89,9 @@ function ChatComposerCard({
   onFileSelect,
   onPaste,
   onAddAttachmentRef,
+  workspaceId,
+  commands,
+  messageHistory,
   placeholder,
   disabled,
   autoFocus,
@@ -96,6 +107,9 @@ function ChatComposerCard({
   onFileSelect: (files: FileList | null) => void
   onPaste: (e: React.ClipboardEvent) => void
   onAddAttachmentRef?: (attachment: AttachmentRef) => void
+  workspaceId?: number | null
+  commands?: CodexCustomPromptSnapshot[]
+  messageHistory?: string[]
   placeholder: string
   disabled: boolean
   autoFocus?: boolean
@@ -124,6 +138,21 @@ function ChatComposerCard({
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [isFocused, setIsFocused] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
+  const history = messageHistory ?? []
+
+  const [showCommandMenu, setShowCommandMenu] = useState(false)
+  const [commandQuery, setCommandQuery] = useState("")
+  const [commandSelectedIndex, setCommandSelectedIndex] = useState(0)
+
+  const [showMentionMenu, setShowMentionMenu] = useState(false)
+  const [mentionQuery, setMentionQuery] = useState("")
+  const [mentionSelectedIndex, setMentionSelectedIndex] = useState(0)
+  const [mentionStartPos, setMentionStartPos] = useState<number | null>(null)
+  const [mentionItems, setMentionItems] = useState<MentionItemSnapshot[]>([])
+  const mentionRequestIdRef = useRef(0)
+
+  const [historyIndex, setHistoryIndex] = useState(-1)
+  const [savedInput, setSavedInput] = useState("")
 
   useEffect(() => {
     const el = textareaRef.current
@@ -154,6 +183,292 @@ function ChatComposerCard({
     }
     onFileSelect(e.dataTransfer.files)
   }
+
+  const filteredCommands = useMemo(() => {
+    const list = commands ?? []
+    if (!showCommandMenu) return list
+    const q = commandQuery.trim().toLowerCase()
+    if (!q) return list
+    return list.filter((cmd) => {
+      const label = cmd.label.toLowerCase()
+      const desc = cmd.description.toLowerCase()
+      return label.includes(q) || desc.includes(q)
+    })
+  }, [commands, commandQuery, showCommandMenu])
+
+  const filteredMentions = useMemo(() => {
+    if (!showMentionMenu) return []
+    const q = mentionQuery.trim().toLowerCase()
+    if (!q) return mentionItems
+    return mentionItems.filter(
+      (item) => item.path.toLowerCase().includes(q) || item.name.toLowerCase().includes(q),
+    )
+  }, [mentionItems, mentionQuery, showMentionMenu])
+
+  useEffect(() => {
+    if (!showMentionMenu) return
+    const q = mentionQuery.trim()
+    if (!q) {
+      setMentionItems([])
+      return
+    }
+    if (workspaceId == null) return
+
+    const requestId = ++mentionRequestIdRef.current
+    const timer = window.setTimeout(() => {
+      void fetchMentionItems({ workspaceId, query: q })
+        .then((items) => {
+          if (mentionRequestIdRef.current !== requestId) return
+          setMentionItems(items)
+        })
+        .catch((err) => {
+          console.warn("mention search failed:", err)
+          if (mentionRequestIdRef.current !== requestId) return
+          setMentionItems([])
+        })
+    }, 120)
+
+    return () => window.clearTimeout(timer)
+  }, [mentionQuery, showMentionMenu, workspaceId])
+
+  function getMentionIcon(item: MentionItemSnapshot) {
+    if (item.kind === "folder") return <Folder className="w-3.5 h-3.5 text-blue-500" />
+    const ext = item.name.split(".").pop()?.toLowerCase()
+    switch (ext) {
+      case "tsx":
+      case "ts":
+      case "js":
+      case "jsx":
+        return <FileCode className="w-3.5 h-3.5 text-blue-400" />
+      case "css":
+        return <FileText className="w-3.5 h-3.5 text-pink-400" />
+      case "json":
+      case "toml":
+      case "yaml":
+      case "yml":
+        return <FileCode className="w-3.5 h-3.5 text-amber-500" />
+      default:
+        return <File className="w-3.5 h-3.5 text-muted-foreground" />
+    }
+  }
+
+  const handleCommandSelect = useCallback(
+    (command: CodexCustomPromptSnapshot) => {
+      const raw = text
+      const offset = raw.length - raw.trimStart().length
+      const trimmed = raw.trimStart()
+      if (!trimmed.startsWith("/")) return
+
+      const afterSlash = trimmed.slice(1)
+      const spaceIdx = afterSlash.search(/\s/)
+      const token = spaceIdx === -1 ? afterSlash : afterSlash.slice(0, spaceIdx)
+      const rest = raw.slice(offset + 1 + token.length)
+      const restTrimmed = rest.trimStart()
+
+      const joiner = restTrimmed ? "\n\n" : ""
+      const next = `${command.contents}${joiner}${restTrimmed}`
+
+      onTextChange(next)
+      setShowCommandMenu(false)
+      setCommandQuery("")
+      setCommandSelectedIndex(0)
+
+      window.setTimeout(() => {
+        const el = textareaRef.current
+        if (!el) return
+        el.focus()
+        const pos = el.value.length
+        el.setSelectionRange(pos, pos)
+      }, 0)
+    },
+    [onTextChange, text],
+  )
+
+  const handleMentionSelect = useCallback(
+    (item: MentionItemSnapshot) => {
+      if (mentionStartPos == null) return
+      const el = textareaRef.current
+      const cursor = el?.selectionStart ?? mentionStartPos
+      const before = text.slice(0, mentionStartPos)
+      const after = text.slice(cursor)
+      const mention = `@${item.path} `
+      const next = before + mention + after
+
+      onTextChange(next)
+      setShowMentionMenu(false)
+      setMentionQuery("")
+      setMentionStartPos(null)
+      setMentionSelectedIndex(0)
+
+      window.setTimeout(() => {
+        const el = textareaRef.current
+        if (!el) return
+        const pos = before.length + mention.length
+        el.focus()
+        el.setSelectionRange(pos, pos)
+      }, 0)
+    },
+    [mentionStartPos, onTextChange, text],
+  )
+
+  const handleTextChange = useCallback(
+    (next: string, cursorPos: number | null) => {
+      onTextChange(next)
+      setHistoryIndex(-1)
+
+      const trimmed = next.trimStart()
+      if (trimmed.startsWith("/") && !trimmed.slice(1).includes(" ")) {
+        setShowCommandMenu(true)
+        setCommandQuery(trimmed.slice(1))
+        setCommandSelectedIndex(0)
+      } else {
+        setShowCommandMenu(false)
+        setCommandQuery("")
+      }
+
+      if (cursorPos == null) {
+        setShowMentionMenu(false)
+        setMentionStartPos(null)
+        return
+      }
+
+      const beforeCursor = next.slice(0, cursorPos)
+      const lastAtIndex = beforeCursor.lastIndexOf("@")
+      if (lastAtIndex >= 0) {
+        const charBefore = lastAtIndex === 0 ? " " : beforeCursor[lastAtIndex - 1] ?? " "
+        const isWordStart = /\s/.test(charBefore)
+        if (isWordStart) {
+          const textAfterAt = beforeCursor.slice(lastAtIndex + 1)
+          if (textAfterAt.length > 0 && !/\s/.test(textAfterAt)) {
+            setShowMentionMenu(true)
+            setMentionQuery(textAfterAt)
+            setMentionSelectedIndex(0)
+            setMentionStartPos(lastAtIndex)
+            return
+          }
+        }
+      }
+
+      setShowMentionMenu(false)
+      setMentionStartPos(null)
+    },
+    [onTextChange],
+  )
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (showCommandMenu) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault()
+          setCommandSelectedIndex((i) => Math.min(i + 1, Math.max(filteredCommands.length - 1, 0)))
+          return
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault()
+          setCommandSelectedIndex((i) => Math.max(i - 1, 0))
+          return
+        }
+        if (e.key === "Enter" || e.key === "Tab") {
+          e.preventDefault()
+          const target = filteredCommands[commandSelectedIndex]
+          if (target) handleCommandSelect(target)
+          return
+        }
+        if (e.key === "Escape") {
+          e.preventDefault()
+          setShowCommandMenu(false)
+          setCommandQuery("")
+          return
+        }
+      }
+
+      if (showMentionMenu) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault()
+          setMentionSelectedIndex((i) => Math.min(i + 1, Math.max(filteredMentions.length - 1, 0)))
+          return
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault()
+          setMentionSelectedIndex((i) => Math.max(i - 1, 0))
+          return
+        }
+        if (e.key === "Enter" || e.key === "Tab") {
+          e.preventDefault()
+          const target = filteredMentions[mentionSelectedIndex]
+          if (target) handleMentionSelect(target)
+          return
+        }
+        if (e.key === "Escape") {
+          e.preventDefault()
+          setShowMentionMenu(false)
+          setMentionStartPos(null)
+          return
+        }
+      }
+
+      if (e.key === "ArrowUp" && !showCommandMenu && !showMentionMenu) {
+        const el = textareaRef.current
+        if (el) {
+          const atStart = el.selectionStart === 0 && el.selectionEnd === 0
+          const isEmpty = text === ""
+          if ((atStart || isEmpty) && history.length > 0) {
+            e.preventDefault()
+            if (historyIndex === -1) setSavedInput(text)
+            const nextIndex = Math.min(historyIndex + 1, history.length - 1)
+            setHistoryIndex(nextIndex)
+            onTextChange(history[history.length - 1 - nextIndex] ?? "")
+            return
+          }
+        }
+      }
+
+      if (e.key === "ArrowDown" && !showCommandMenu && !showMentionMenu) {
+        const el = textareaRef.current
+        if (el && historyIndex >= 0) {
+          const atEnd = el.selectionStart === text.length
+          if (atEnd) {
+            e.preventDefault()
+            const nextIndex = historyIndex - 1
+            if (nextIndex < 0) {
+              setHistoryIndex(-1)
+              onTextChange(savedInput)
+            } else {
+              setHistoryIndex(nextIndex)
+              onTextChange(history[history.length - 1 - nextIndex] ?? "")
+            }
+            return
+          }
+        }
+      }
+
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault()
+        if (primaryAction.disabled) return
+        primaryAction.onClick()
+      }
+      if (e.key === "Escape" && secondaryAction) {
+        e.preventDefault()
+        secondaryAction.onClick()
+      }
+    },
+    [
+      commandSelectedIndex,
+      filteredCommands,
+      filteredMentions,
+      handleCommandSelect,
+      handleMentionSelect,
+      history,
+      historyIndex,
+      onTextChange,
+      primaryAction,
+      savedInput,
+      secondaryAction,
+      showCommandMenu,
+      showMentionMenu,
+      text,
+    ],
+  )
 
   return (
     <div
@@ -240,12 +555,77 @@ function ChatComposerCard({
         </div>
       )}
 
-      <div className="px-2.5 pt-2">
+      <div className="relative px-2.5 pt-2">
+        {showCommandMenu && (
+          <div
+            data-testid="chat-command-menu"
+            className="absolute bottom-full left-0 right-0 mb-2 bg-popover border border-border rounded-lg shadow-xl overflow-hidden z-50"
+          >
+            {filteredCommands.length === 0 ? (
+              <div className="px-3 py-4 text-center text-sm text-muted-foreground">No commands</div>
+            ) : (
+              <div className="max-h-56 overflow-auto">
+                {filteredCommands.slice(0, 20).map((cmd, idx) => (
+                  <button
+                    key={cmd.id}
+                    type="button"
+                    data-testid="chat-command-item"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => handleCommandSelect(cmd)}
+                    className={cn(
+                      "w-full text-left px-3 py-2 flex flex-col gap-0.5 hover:bg-accent transition-colors",
+                      idx === commandSelectedIndex && "bg-accent",
+                    )}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-foreground">{cmd.label}</span>
+                    </div>
+                    {cmd.description && (
+                      <span className="text-xs text-muted-foreground line-clamp-1">{cmd.description}</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        {showMentionMenu && (
+          <div
+            data-testid="chat-mention-menu"
+            className="absolute bottom-full left-0 right-0 mb-2 bg-popover border border-border rounded-lg shadow-xl overflow-hidden z-50"
+          >
+            {filteredMentions.length === 0 ? (
+              <div className="px-3 py-4 text-center text-sm text-muted-foreground">No matches</div>
+            ) : (
+              <div className="max-h-56 overflow-auto">
+                {filteredMentions.slice(0, 20).map((item, idx) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    data-testid="chat-mention-item"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => handleMentionSelect(item)}
+                    className={cn(
+                      "w-full text-left px-3 py-2 flex items-center gap-2 hover:bg-accent transition-colors",
+                      idx === mentionSelectedIndex && "bg-accent",
+                    )}
+                  >
+                    <span className="shrink-0">{getMentionIcon(item)}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-medium text-foreground truncate">{item.name}</div>
+                      <div className="text-xs text-muted-foreground truncate">{item.path}</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         <textarea
           ref={textareaRef}
           data-testid={testIds.textInput}
           value={text}
-          onChange={(e) => onTextChange(e.target.value)}
+          onChange={(e) => handleTextChange(e.target.value, e.target.selectionStart)}
           onFocus={() => setIsFocused(true)}
           onBlur={() => setIsFocused(false)}
           onPaste={onPaste}
@@ -254,17 +634,7 @@ function ChatComposerCard({
           rows={1}
           disabled={disabled}
           autoFocus={autoFocus}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault()
-              if (primaryAction.disabled) return
-              primaryAction.onClick()
-            }
-            if (e.key === "Escape" && secondaryAction) {
-              e.preventDefault()
-              secondaryAction.onClick()
-            }
-          }}
+          onKeyDown={handleKeyDown}
         />
       </div>
 
@@ -338,6 +708,7 @@ export function ChatPanel({
   onDiffFileOpened?: () => void
 }) {
   const [showTabDropdown, setShowTabDropdown] = useState(false)
+  const [codexCustomPrompts, setCodexCustomPrompts] = useState<CodexCustomPromptSnapshot[]>([])
 
   const scrollContainerRef = useRef<HTMLDivElement | null>(null)
 
@@ -424,6 +795,23 @@ export function ChatPanel({
   }, [activeWorkspaceId, activeThreadId])
 
   const messages = useMemo(() => buildMessages(conversation), [conversation])
+  const messageHistory = useMemo(() => {
+    const entries = conversation?.entries ?? []
+    const items = entries
+      .filter((entry) => entry.type === "user_message")
+      .map((entry) => entry.text)
+      .filter((text) => text.trim().length > 0)
+    return items.slice(-50)
+  }, [conversation?.rev])
+
+  useEffect(() => {
+    void fetchCodexCustomPrompts()
+      .then((prompts) => setCodexCustomPrompts(prompts))
+      .catch((err) => {
+        console.warn("failed to load codex prompts:", err)
+        setCodexCustomPrompts([])
+      })
+  }, [])
 
   const projectInfo = useMemo(() => {
     if (app == null || activeWorkspaceId == null) {
@@ -1255,6 +1643,9 @@ export function ChatPanel({
                       prompt={prompt}
                       isEditing={editingQueuedPromptId === prompt.id}
                       isDragging={draggingQueuedPromptId === prompt.id}
+                      workspaceId={activeWorkspaceId}
+                      commands={codexCustomPrompts}
+                      messageHistory={messageHistory}
                       editingText={queuedDraftText}
                       editingAttachments={queuedDraftAttachments}
                       editingModelId={queuedDraftModelId}
@@ -1338,6 +1729,9 @@ export function ChatPanel({
                         },
                       ])
                     }}
+                    workspaceId={activeWorkspaceId}
+                    commands={codexCustomPrompts}
+                    messageHistory={messageHistory}
                     placeholder="Message... (⌘↵ to send)"
                     disabled={activeWorkspaceId == null || activeThreadId == null}
                     agentSelector={
@@ -1390,6 +1784,9 @@ function QueuedPromptRow({
   prompt,
   isEditing,
   isDragging,
+  workspaceId,
+  commands,
+  messageHistory,
   editingText,
   editingAttachments,
   editingModelId,
@@ -1415,6 +1812,9 @@ function QueuedPromptRow({
   prompt: QueuedPromptSnapshot
   isEditing: boolean
   isDragging: boolean
+  workspaceId: number | null
+  commands: CodexCustomPromptSnapshot[]
+  messageHistory: string[]
   editingText: string
   editingAttachments: ComposerAttachment[]
   editingModelId: string | null
@@ -1452,6 +1852,9 @@ function QueuedPromptRow({
           onFileSelect={onQueuedFileSelect}
           onPaste={onQueuedPaste}
           onAddAttachmentRef={onAddEditingAttachmentRef}
+          workspaceId={workspaceId}
+          commands={commands}
+          messageHistory={messageHistory}
           placeholder="Message... (⌘↵ to send)"
           disabled={false}
           autoFocus

@@ -1,5 +1,6 @@
 use crate::engine::{Engine, EngineHandle, new_default_services};
 use crate::pty::PtyManager;
+use anyhow::Context as _;
 use axum::{
     Json, Router,
     extract::{Multipart, Path, Query, State, ws::WebSocketUpgrade},
@@ -8,9 +9,10 @@ use axum::{
 };
 use luban_api::AppSnapshot;
 use luban_api::{
-    PROTOCOL_VERSION, WorkspaceChangesSnapshot, WorkspaceDiffSnapshot, WsClientMessage,
-    WsServerMessage,
+    CodexCustomPromptSnapshot, MentionItemKind, MentionItemSnapshot, PROTOCOL_VERSION,
+    WorkspaceChangesSnapshot, WorkspaceDiffSnapshot, WsClientMessage, WsServerMessage,
 };
+use luban_domain::paths;
 use luban_domain::{ContextImage, ProjectWorkspaceService};
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -31,6 +33,7 @@ pub async fn router() -> anyhow::Result<Router> {
     let api = Router::new()
         .route("/health", get(health))
         .route("/app", get(get_app))
+        .route("/codex/prompts", get(get_codex_prompts))
         .route("/workspaces/{workspace_id}/threads", get(get_threads))
         .route(
             "/workspaces/{workspace_id}/conversations/{thread_id}",
@@ -47,6 +50,10 @@ pub async fn router() -> anyhow::Result<Router> {
         .route("/workspaces/{workspace_id}/changes", get(get_changes))
         .route("/workspaces/{workspace_id}/diff", get(get_diff))
         .route("/workspaces/{workspace_id}/context", get(get_context))
+        .route(
+            "/workspaces/{workspace_id}/mentions",
+            get(get_workspace_mentions),
+        )
         .route(
             "/workspaces/{workspace_id}/context/{context_id}",
             delete(delete_context_item),
@@ -68,6 +75,20 @@ async fn health() -> &'static str {
     "ok"
 }
 
+fn resolve_codex_root() -> anyhow::Result<PathBuf> {
+    if let Some(root) = std::env::var_os(paths::LUBAN_CODEX_ROOT_ENV) {
+        let root = root.to_string_lossy();
+        let trimmed = root.trim();
+        if trimmed.is_empty() {
+            anyhow::bail!("{} is set but empty", paths::LUBAN_CODEX_ROOT_ENV);
+        }
+        return Ok(PathBuf::from(trimmed));
+    }
+
+    let home = std::env::var_os("HOME").ok_or_else(|| anyhow::anyhow!("HOME is not set"))?;
+    Ok(PathBuf::from(home).join(".codex"))
+}
+
 #[derive(Clone)]
 struct AppStateHolder {
     engine: EngineHandle,
@@ -87,6 +108,100 @@ async fn get_app(State(state): State<AppStateHolder>) -> impl IntoResponse {
     }
 }
 
+fn prompt_description(contents: &str) -> String {
+    for line in contents.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let trimmed = trimmed.trim_start_matches('#').trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        return trimmed.chars().take(160).collect();
+    }
+    String::new()
+}
+
+fn codex_prompt_id(prompts_dir: &std::path::Path, path: &std::path::Path) -> String {
+    let rel = path.strip_prefix(prompts_dir).unwrap_or(path);
+    let rel = rel.to_string_lossy().replace('\\', "/");
+    let rel = rel.strip_prefix('/').unwrap_or(&rel);
+    if let Some(stripped) = rel.strip_suffix(".md") {
+        stripped.to_owned()
+    } else if let Some(stripped) = rel.strip_suffix(".txt") {
+        stripped.to_owned()
+    } else {
+        rel.to_owned()
+    }
+}
+
+fn load_codex_prompts() -> anyhow::Result<Vec<CodexCustomPromptSnapshot>> {
+    let root = resolve_codex_root()?;
+    let prompts_dir = root.join("prompts");
+    if !prompts_dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut out = Vec::new();
+    let mut stack = vec![prompts_dir.clone()];
+    while let Some(dir) = stack.pop() {
+        let entries =
+            std::fs::read_dir(&dir).with_context(|| format!("failed to read {}", dir.display()))?;
+        for entry in entries {
+            let entry =
+                entry.with_context(|| format!("failed to read entry under {}", dir.display()))?;
+            let path = entry.path();
+            let ty = entry
+                .file_type()
+                .with_context(|| format!("failed to stat {}", path.display()))?;
+            if ty.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if !ty.is_file() {
+                continue;
+            }
+            let file_name = entry.file_name().to_string_lossy().to_string();
+            if file_name == ".DS_Store" {
+                continue;
+            }
+
+            let contents = std::fs::read_to_string(&path)
+                .with_context(|| format!("failed to read {}", path.display()))?;
+            let id = codex_prompt_id(&prompts_dir, &path);
+            let label = id.clone();
+            let description = prompt_description(&contents);
+            out.push(CodexCustomPromptSnapshot {
+                id,
+                label,
+                description,
+                contents,
+            });
+        }
+    }
+
+    out.sort_by(|a, b| a.label.cmp(&b.label));
+    Ok(out)
+}
+
+async fn get_codex_prompts() -> impl IntoResponse {
+    let result = tokio::task::spawn_blocking(load_codex_prompts).await;
+    match result {
+        Ok(Ok(prompts)) => Json(prompts).into_response(),
+        Ok(Err(err)) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            err.to_string(),
+        )
+            .into_response(),
+        Err(err) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to join prompt task: {err}"),
+        )
+            .into_response(),
+    }
+}
+
 async fn get_threads(
     State(state): State<AppStateHolder>,
     Path(workspace_id): Path<u64>,
@@ -98,6 +213,146 @@ async fn get_threads(
     {
         Ok(snapshot) => Json(snapshot).into_response(),
         Err(err) => (axum::http::StatusCode::NOT_FOUND, err.to_string()).into_response(),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct MentionQuery {
+    q: String,
+}
+
+fn escape_glob_fragment(fragment: &str) -> String {
+    fragment
+        .chars()
+        .flat_map(|ch| match ch {
+            '*' | '?' | '[' | ']' | '{' | '}' | '!' => vec!['\\', ch],
+            other => vec![other],
+        })
+        .collect()
+}
+
+fn search_workspace_mentions(
+    worktree_path: &std::path::Path,
+    query: &str,
+) -> anyhow::Result<Vec<MentionItemSnapshot>> {
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let glob = format!("*{}*", escape_glob_fragment(trimmed));
+    let output = std::process::Command::new("rg")
+        .args(["--files", "--hidden", "--sort", "path", "--glob", &glob])
+        .current_dir(worktree_path)
+        .output()
+        .context("failed to execute rg")?;
+
+    if !output.status.success() && output.status.code() != Some(1) {
+        anyhow::bail!(
+            "rg failed (status {}): {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let mut file_paths = Vec::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        file_paths.push(line.replace('\\', "/"));
+        if file_paths.len() >= 200 {
+            break;
+        }
+    }
+
+    let query_lower = trimmed.to_ascii_lowercase();
+    let mut folder_paths = std::collections::BTreeSet::new();
+    for file in &file_paths {
+        let path = std::path::Path::new(file);
+        let mut parent = path.parent();
+        while let Some(dir) = parent {
+            let s = dir.to_string_lossy().replace('\\', "/");
+            if s.is_empty() || s == "." {
+                break;
+            }
+            if s.to_ascii_lowercase().contains(&query_lower) {
+                folder_paths.insert(format!("{}/", s.trim_end_matches('/')));
+            }
+            parent = dir.parent();
+        }
+    }
+
+    let mut items = Vec::new();
+    for folder in folder_paths.into_iter() {
+        let name = folder
+            .trim_end_matches('/')
+            .rsplit('/')
+            .next()
+            .unwrap_or(&folder)
+            .to_owned();
+        items.push(MentionItemSnapshot {
+            id: format!("folder:{folder}"),
+            name,
+            path: folder,
+            kind: MentionItemKind::Folder,
+        });
+        if items.len() >= 20 {
+            return Ok(items);
+        }
+    }
+
+    for file in file_paths.into_iter() {
+        let name = file.rsplit('/').next().unwrap_or(&file).to_owned();
+        items.push(MentionItemSnapshot {
+            id: format!("file:{file}"),
+            name,
+            path: file,
+            kind: MentionItemKind::File,
+        });
+        if items.len() >= 20 {
+            break;
+        }
+    }
+
+    Ok(items)
+}
+
+async fn get_workspace_mentions(
+    State(state): State<AppStateHolder>,
+    Path(workspace_id): Path<u64>,
+    Query(query): Query<MentionQuery>,
+) -> impl IntoResponse {
+    let worktree_path = match state
+        .engine
+        .workspace_worktree_path(luban_api::WorkspaceId(workspace_id))
+        .await
+    {
+        Ok(Some(path)) => path,
+        Ok(None) => {
+            return (axum::http::StatusCode::NOT_FOUND, "workspace not found").into_response();
+        }
+        Err(err) => {
+            return (axum::http::StatusCode::NOT_FOUND, err.to_string()).into_response();
+        }
+    };
+
+    let q = query.q;
+    let result =
+        tokio::task::spawn_blocking(move || search_workspace_mentions(&worktree_path, &q)).await;
+    match result {
+        Ok(Ok(items)) => Json(items).into_response(),
+        Ok(Err(err)) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            err.to_string(),
+        )
+            .into_response(),
+        Err(err) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to join mention task: {err}"),
+        )
+            .into_response(),
     }
 }
 

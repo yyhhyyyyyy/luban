@@ -437,6 +437,29 @@ pub struct ContextSnapshot {
     pub items: Vec<ContextItemSnapshot>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MentionItemKind {
+    File,
+    Folder,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MentionItemSnapshot {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+    pub kind: MentionItemKind,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CodexCustomPromptSnapshot {
+    pub id: String,
+    pub label: String,
+    pub description: String,
+    pub contents: String,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AgentItem {
     pub id: String,
