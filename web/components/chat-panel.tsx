@@ -316,15 +316,20 @@ function ChatComposerCard({
       onTextChange(next)
       setHistoryIndex(-1)
 
-      const trimmed = next.trimStart()
-      if (trimmed.startsWith("/") && !trimmed.slice(1).includes(" ")) {
+      if (next.startsWith("/")) {
+        const query = next.slice(1).split(/\s/)[0] ?? ""
         setShowCommandMenu(true)
-        setCommandQuery(trimmed.slice(1))
+        setCommandQuery(query)
         setCommandSelectedIndex(0)
-      } else {
-        setShowCommandMenu(false)
-        setCommandQuery("")
+        setShowMentionMenu(false)
+        setMentionQuery("")
+        setMentionStartPos(null)
+        setMentionSelectedIndex(0)
+        return
       }
+
+      setShowCommandMenu(false)
+      setCommandQuery("")
 
       if (cursorPos == null) {
         setShowMentionMenu(false)
@@ -339,7 +344,7 @@ function ChatComposerCard({
         const isWordStart = /\s/.test(charBefore)
         if (isWordStart) {
           const textAfterAt = beforeCursor.slice(lastAtIndex + 1)
-          if (textAfterAt.length > 0 && !/\s/.test(textAfterAt)) {
+          if (!/\s/.test(textAfterAt)) {
             setShowMentionMenu(true)
             setMentionQuery(textAfterAt)
             setMentionSelectedIndex(0)
@@ -378,6 +383,7 @@ function ChatComposerCard({
           e.preventDefault()
           setShowCommandMenu(false)
           setCommandQuery("")
+          onTextChange("")
           return
         }
       }
