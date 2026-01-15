@@ -58,6 +58,7 @@ test("project can be deleted via sidebar confirmation dialog", async ({ page }) 
   await projectContainer.getByTestId("project-delete-button").click()
 
   await expect(page.getByTestId("project-delete-dialog")).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByText("Your local files will not be affected.", { exact: false })).toBeVisible()
   await page.getByTestId("project-delete-confirm").click()
 
   await expect(page.getByRole("button", { name: project.slug, exact: true })).toHaveCount(0, { timeout: 20_000 })

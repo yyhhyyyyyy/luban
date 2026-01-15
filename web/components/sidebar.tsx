@@ -573,6 +573,9 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
               <span className="font-medium text-foreground">&quot;{projectToDelete?.name ?? ""}&quot;</span>? This action
               cannot be undone.
             </p>
+            <p className="text-[11px] text-muted-foreground/70 mt-2">
+              Your local files will not be affected. Only files managed by Luban will be removed.
+            </p>
           </div>
 
           <div className="px-5 py-4 border-t border-border bg-secondary/30 flex items-center justify-end gap-2">
