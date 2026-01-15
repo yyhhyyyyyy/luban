@@ -203,10 +203,13 @@ function ChatComposerCard({
   const filteredMentions = useMemo(() => {
     if (!showMentionMenu) return []
     const q = mentionQuery.trim().toLowerCase()
-    if (!q) return mentionItems
-    return mentionItems.filter(
+    if (!q) return []
+    const items = mentionItems.filter(
       (item) => item.path.toLowerCase().includes(q) || item.name.toLowerCase().includes(q),
     )
+    const folders = items.filter((item) => item.kind === "folder")
+    const files = items.filter((item) => item.kind === "file")
+    return [...folders, ...files].slice(0, 10)
   }, [mentionItems, mentionQuery, showMentionMenu])
 
   useEffect(() => {
@@ -572,42 +575,37 @@ function ChatComposerCard({
             data-testid="chat-mention-menu"
             className="absolute bottom-full left-0 right-0 mb-2 bg-popover border border-border rounded-lg shadow-xl overflow-hidden z-50 max-h-[320px] overflow-y-auto"
           >
-            {filteredMentions.length === 0 ? (
-              <>
-                <div className="px-2 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border bg-muted/30">
-                  Reference files
-                </div>
-                <div className="px-3 py-4 text-center text-sm text-muted-foreground">No files found</div>
-              </>
+            <div className="px-2 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border bg-muted/30">
+              Reference files
+            </div>
+            {!mentionQuery.trim() ? (
+              <div className="px-3 py-3 text-sm text-muted-foreground">Type to search files...</div>
+            ) : filteredMentions.length === 0 ? (
+              <div className="px-3 py-4 text-center text-sm text-muted-foreground">No files found</div>
             ) : (
-              <>
-                <div className="px-2 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border bg-muted/30">
-                  Reference files
-                </div>
-                <div className="py-1">
-                  {filteredMentions.map((item, idx) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      data-testid="chat-mention-item"
-                      data-index={idx}
-                      onMouseEnter={() => setMentionSelectedIndex(idx)}
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => handleMentionSelect(item)}
-                      className={cn(
-                        "w-full flex items-center gap-2.5 px-3 py-1.5 text-left transition-colors",
-                        idx === mentionSelectedIndex ? "bg-primary/10 text-primary" : "hover:bg-muted/50",
-                      )}
-                    >
-                      {getMentionIcon(item)}
-                      <div className="flex-1 min-w-0">
-                        <span className="text-sm truncate block">{item.name}</span>
-                        <span className="text-[11px] text-muted-foreground truncate block">{item.path}</span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </>
+              <div className="py-1">
+                {filteredMentions.map((item, idx) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    data-testid="chat-mention-item"
+                    data-index={idx}
+                    onMouseEnter={() => setMentionSelectedIndex(idx)}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => handleMentionSelect(item)}
+                    className={cn(
+                      "w-full flex items-center gap-2.5 px-3 py-1.5 text-left transition-colors",
+                      idx === mentionSelectedIndex ? "bg-primary/10 text-primary" : "hover:bg-muted/50",
+                    )}
+                  >
+                    {getMentionIcon(item)}
+                    <div className="flex-1 min-w-0">
+                      <span className="text-sm truncate block">{item.name}</span>
+                      <span className="text-[11px] text-muted-foreground truncate block">{item.path}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
             )}
           </div>
         </>
@@ -1812,7 +1810,7 @@ export function ChatPanel({
                     commands={codexCustomPrompts}
                     messageHistory={messageHistory}
                     onCommand={handleCommand}
-                    placeholder="Message... (@ to mention, / for commands)"
+                    placeholder="Let's chart the cosmos of ideas..."
                     disabled={activeWorkspaceId == null || activeThreadId == null}
                     agentSelector={
                       <CodexAgentSelector

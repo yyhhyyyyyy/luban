@@ -15,9 +15,9 @@ import {
 
 import { cn } from "@/lib/utils"
 import { useLuban } from "@/lib/luban-context"
-import { fetchConversation, fetchThreads } from "@/lib/luban-http"
+import { fetchCodexCustomPrompts, fetchConversation, fetchThreads, uploadAttachment } from "@/lib/luban-http"
 import { buildMessages, type Message } from "@/lib/conversation-ui"
-import type { ConversationEntry, ConversationSnapshot } from "@/lib/luban-api"
+import type { CodexCustomPromptSnapshot, ConversationEntry, ConversationSnapshot } from "@/lib/luban-api"
 import { ConversationView } from "@/components/conversation-view"
 import { AgentStatusIcon, PRBadge } from "@/components/shared/status-indicator"
 import { CodexAgentSelector } from "@/components/shared/agent-selector"
@@ -25,6 +25,7 @@ import { openSettingsPanel } from "@/lib/open-settings"
 import { buildKanbanBoardVm, type KanbanWorktreeVm } from "@/lib/kanban-view-model"
 import { kanbanColumns, type KanbanColumn } from "@/lib/worktree-ui"
 import { pickThreadId } from "@/lib/thread-ui"
+import { MessageEditor, type ComposerAttachment } from "@/components/shared/message-editor"
 
 type Worktree = KanbanWorktreeVm
 
@@ -86,13 +87,33 @@ function WorktreePreviewPanel({
   const { app, sendAgentMessageTo, setChatModel, setThinkingEffort } = useLuban()
 
   const [input, setInput] = useState("")
+  const [attachments, setAttachments] = useState<ComposerAttachment[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [threadId, setThreadId] = useState<number | null>(null)
   const [conversation, setConversation] = useState<ConversationSnapshot | null>(null)
+  const [codexCustomPrompts, setCodexCustomPrompts] = useState<CodexCustomPromptSnapshot[]>([])
   const seqRef = useRef(0)
 
   const messages: Message[] = useMemo(() => buildMessages(conversation), [conversation])
+  const messageHistory = useMemo(() => {
+    const entries = conversation?.entries ?? []
+    const items = entries
+      .filter((entry) => entry.type === "user_message")
+      .map((entry) => entry.text)
+      .filter((text) => text.trim().length > 0)
+    return items.slice(-50)
+  }, [conversation?.rev])
+
+  useEffect(() => {
+    void fetchCodexCustomPrompts()
+      .then((prompts) => setCodexCustomPrompts(prompts))
+      .catch((err) => {
+        console.warn("failed to load codex prompts:", err)
+        setCodexCustomPrompts([])
+      })
+  }, [])
+
   useEffect(() => {
     const workspaceId = worktree.workspaceId
     const seq = (seqRef.current += 1)
@@ -101,6 +122,8 @@ function WorktreePreviewPanel({
     setError(null)
     setConversation(null)
     setThreadId(null)
+    setInput("")
+    setAttachments([])
 
     fetchThreads(workspaceId)
       .then((snap) => {
@@ -132,16 +155,97 @@ function WorktreePreviewPanel({
       })
   }, [worktree.workspaceId])
 
-  const canSend = input.trim().length > 0 && threadId != null
+  const canSend = useMemo(() => {
+    if (threadId == null) return false
+    const hasUploading = attachments.some((a) => a.status === "uploading")
+    if (hasUploading) return false
+    const hasReady = attachments.some((a) => a.status === "ready" && a.attachment != null)
+    return input.trim().length > 0 || hasReady
+  }, [attachments, input, threadId])
+
+  const handleFileSelect = (files: FileList | null) => {
+    if (!files) return
+    if (threadId == null) return
+
+    for (const file of Array.from(files)) {
+      const isImage = file.type.startsWith("image/")
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+      const initial: ComposerAttachment = {
+        id,
+        type: isImage ? "image" : "file",
+        name: file.name,
+        size: file.size,
+        status: "uploading",
+      }
+
+      if (isImage) {
+        const reader = new FileReader()
+        reader.onload = (e) => {
+          const preview = typeof e.target?.result === "string" ? e.target.result : undefined
+          setAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, preview } : a)))
+        }
+        reader.readAsDataURL(file)
+      }
+
+      setAttachments((prev) => [...prev, initial])
+
+      void uploadAttachment({ workspaceId: worktree.workspaceId, file, kind: isImage ? "image" : "file" })
+        .then((attachment) => {
+          const previewUrl =
+            isImage
+              ? `/api/workspaces/${worktree.workspaceId}/attachments/${attachment.id}?ext=${encodeURIComponent(attachment.extension)}`
+              : undefined
+          setAttachments((prev) =>
+            prev.map((a) =>
+              a.id === id ? { ...a, status: "ready", attachment, name: attachment.name, previewUrl } : a,
+            ),
+          )
+        })
+        .catch(() => {
+          setAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, status: "failed" } : a)))
+        })
+    }
+  }
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    if (threadId == null) return
+    const items = e.clipboardData?.items
+    if (!items) return
+
+    const imageItems = Array.from(items).filter((item) => item.type.startsWith("image/"))
+    if (imageItems.length === 0) return
+
+    e.preventDefault()
+    const dt = new DataTransfer()
+    for (const item of imageItems) {
+      const file = item.getAsFile()
+      if (file) dt.items.add(file)
+    }
+    handleFileSelect(dt.files)
+  }
+
+  const handleRemoveAttachment = (id: string) => {
+    setAttachments((prev) => prev.filter((a) => a.id !== id))
+  }
+
+  const handleCommand = (commandId: string) => {
+    const match = codexCustomPrompts.find((p) => p.id === commandId) ?? null
+    if (!match) return
+    setInput(match.contents)
+  }
 
   const handleSend = () => {
     if (!canSend || threadId == null) return
     const text = input.trim()
+    const ready = attachments
+      .filter((a) => a.status === "ready" && a.attachment != null)
+      .map((a) => a.attachment!)
     setInput("")
-    sendAgentMessageTo(worktree.workspaceId, threadId, text)
+    setAttachments([])
+    sendAgentMessageTo(worktree.workspaceId, threadId, text, ready)
     setConversation((prev) => {
       if (!prev) return prev
-      const entry: ConversationEntry = { type: "user_message", text, attachments: [] }
+      const entry: ConversationEntry = { type: "user_message", text, attachments: ready }
       return { ...prev, entries: [...prev.entries, entry] }
     })
   }
@@ -210,8 +314,20 @@ function WorktreePreviewPanel({
       </div>
 
       <div className="border-t border-border p-3">
-        <div className="flex items-center gap-2 bg-muted/30 rounded-lg border border-border focus-within:border-primary/50 transition-colors">
-          <div className="pl-1.5 py-1">
+        <MessageEditor
+          value={input}
+          onChange={setInput}
+          attachments={attachments}
+          onRemoveAttachment={handleRemoveAttachment}
+          onFileSelect={handleFileSelect}
+          onPaste={handlePaste}
+          workspaceId={worktree.workspaceId}
+          commands={codexCustomPrompts}
+          messageHistory={messageHistory}
+          onCommand={handleCommand}
+          placeholder="Let's chart the cosmos of ideas..."
+          disabled={threadId == null}
+          agentSelector={
             <CodexAgentSelector
               dropdownPosition="top"
               disabled={threadId == null}
@@ -231,30 +347,20 @@ function WorktreePreviewPanel({
                 setThinkingEffort(worktree.workspaceId, threadId, effort)
               }}
             />
-          </div>
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Message..."
-            className="flex-1 bg-transparent px-3 py-2 text-xs outline-none placeholder:text-muted-foreground/50"
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault()
-                handleSend()
-              }
-            }}
-            disabled={threadId == null}
-          />
-          <button
-            className={cn("p-2 transition-colors", canSend ? "text-muted-foreground hover:text-primary" : "text-muted-foreground/50")}
-            onClick={handleSend}
-            disabled={!canSend}
-            aria-label="Send message"
-          >
-            <Send className="w-3.5 h-3.5" />
-          </button>
-        </div>
+          }
+          primaryAction={{
+            onClick: handleSend,
+            disabled: !canSend,
+            ariaLabel: "Send message",
+            icon: <Send className="w-3.5 h-3.5" />,
+          }}
+          testIds={{
+            textInput: "kanban-preview-input",
+            attachInput: "kanban-preview-attach-input",
+            attachButton: "kanban-preview-attach",
+            attachmentTile: "kanban-preview-attachment-tile",
+          }}
+        />
       </div>
     </div>
   )
