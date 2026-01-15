@@ -69,6 +69,9 @@ const IMPLEMENT_INSTRUCTIONS: &str = r#"- Goal: implement the requested feature.
 
 const REVIEW_INSTRUCTIONS: &str = r#"- Goal: produce a high-quality code review of the referenced pull request.
 - Constraints: Do NOT implement changes unless the user explicitly asks.
+- If the known context includes a GitHub PR (URL/number) and `gh` is available, prefer checking out the PR locally to review the actual diff:
+  - `gh pr checkout <number>` (or `gh pr checkout <url>`)
+  - then use local diff tooling (`git diff`, `gh pr diff`, tests) to validate behavior and edge cases.
 - Steps: understand intent, evaluate correctness and edge cases, check tests/CI, identify risks, and suggest improvements.
 - Output: a structured review with actionable feedback, prioritized by severity.
 "#;

@@ -1073,6 +1073,10 @@ mod tests {
             "{review}"
         );
         assert!(review.contains("Do NOT implement changes"), "{review}");
+        assert!(
+            review.contains("gh pr checkout"),
+            "review prompt should mention gh pr checkout for GitHub PR review workflows: {review}"
+        );
         assert_global_constraints(&review);
 
         let discuss = compose_agent_prompt(
