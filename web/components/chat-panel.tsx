@@ -11,6 +11,7 @@ import {
   ArrowDown,
   MessageSquare,
   Plus,
+  Clock,
   X,
   GitBranch,
   GitCompareArrows,
@@ -34,7 +35,7 @@ import { useLuban } from "@/lib/luban-context"
 import { buildMessages } from "@/lib/conversation-ui"
 import { ConversationView } from "@/components/conversation-view"
 import { fetchWorkspaceDiff, uploadAttachment } from "@/lib/luban-http"
-import type { AttachmentRef } from "@/lib/luban-api"
+import type { AttachmentRef, QueuedPromptSnapshot, ThinkingEffort } from "@/lib/luban-api"
 import { onAddChatAttachments } from "@/lib/chat-attachment-events"
 import { emitContextChanged } from "@/lib/context-events"
 import {
@@ -106,6 +107,9 @@ export function ChatPanel({
     sendAgentMessage,
     renameWorkspaceBranch,
     aiRenameWorkspaceBranch,
+    removeQueuedPrompt,
+    reorderQueuedPrompt,
+    updateQueuedPrompt,
     setChatModel,
     setThinkingEffort,
   } = useLuban()
@@ -119,6 +123,17 @@ export function ChatPanel({
   const [isDragging, setIsDragging] = useState(false)
   const attachmentScopeRef = useRef<string>("")
   const attachmentScope = `${activeWorkspaceId ?? "none"}:${activeThreadId ?? "none"}`
+
+  const queuedPrompts = conversation?.pending_prompts ?? []
+  const QUEUE_COLLAPSED_LIMIT = 2
+  const [isQueueExpanded, setIsQueueExpanded] = useState(false)
+  const [editingQueuedPromptId, setEditingQueuedPromptId] = useState<number | null>(null)
+  const [draggingQueuedPromptId, setDraggingQueuedPromptId] = useState<number | null>(null)
+  const [queuedDraftText, setQueuedDraftText] = useState("")
+  const [queuedDraftAttachments, setQueuedDraftAttachments] = useState<ComposerAttachment[]>([])
+  const [queuedDraftModelId, setQueuedDraftModelId] = useState<string | null>(null)
+  const [queuedDraftThinkingEffort, setQueuedDraftThinkingEffort] = useState<ThinkingEffort | null>(null)
+  const queuedAttachmentScopeRef = useRef<string>("")
 
   const [activePanel, setActivePanel] = useState<"thread" | "diff">("thread")
   const [diffStyle, setDiffStyle] = useState<"split" | "unified">("split")
@@ -291,6 +306,12 @@ export function ChatPanel({
     if (activeWorkspaceId == null || activeThreadId == null) {
       setDraftText("")
       setAttachments([])
+      setIsQueueExpanded(false)
+      setEditingQueuedPromptId(null)
+      setQueuedDraftText("")
+      setQueuedDraftAttachments([])
+      setQueuedDraftModelId(null)
+      setQueuedDraftThinkingEffort(null)
       return
     }
 
@@ -302,6 +323,12 @@ export function ChatPanel({
     setAttachments([])
     setIsDragging(false)
     attachmentScopeRef.current = attachmentScope
+    setIsQueueExpanded(false)
+    setEditingQueuedPromptId(null)
+    setQueuedDraftText("")
+    setQueuedDraftAttachments([])
+    setQueuedDraftModelId(null)
+    setQueuedDraftThinkingEffort(null)
   }, [activeWorkspaceId, activeThreadId])
 
   useEffect(() => {
@@ -433,6 +460,96 @@ export function ChatPanel({
     scheduleScrollToBottom()
   }
 
+  const attachmentsFromRefs = (refs: AttachmentRef[]): ComposerAttachment[] => {
+    const workspaceId = activeWorkspaceId
+    return refs.map((attachment) => {
+      const isImage = attachment.kind === "image"
+      const previewUrl =
+        isImage && workspaceId != null
+          ? `/api/workspaces/${workspaceId}/attachments/${attachment.id}?ext=${encodeURIComponent(attachment.extension)}`
+          : undefined
+      return {
+        id: `ref-${attachment.id}`,
+        type: isImage ? "image" : "file",
+        name: attachment.name,
+        size: attachment.byte_len,
+        status: "ready",
+        attachment,
+        previewUrl,
+      }
+    })
+  }
+
+  const handleStartQueuedEdit = (promptId: number) => {
+    if (activeWorkspaceId == null || activeThreadId == null) return
+    const prompt = queuedPrompts.find((p) => p.id === promptId) ?? null
+    if (!prompt) return
+
+    setEditingQueuedPromptId(promptId)
+    setQueuedDraftText(prompt.text)
+    setQueuedDraftAttachments(attachmentsFromRefs(prompt.attachments ?? []))
+    setQueuedDraftModelId(prompt.run_config?.model_id ?? null)
+    setQueuedDraftThinkingEffort(prompt.run_config?.thinking_effort ?? null)
+    queuedAttachmentScopeRef.current = `${attachmentScope}:queued:${promptId}:${Date.now()}`
+  }
+
+  const handleCancelQueuedEdit = () => {
+    setEditingQueuedPromptId(null)
+    setQueuedDraftText("")
+    setQueuedDraftAttachments([])
+    setQueuedDraftModelId(null)
+    setQueuedDraftThinkingEffort(null)
+  }
+
+  const handleSaveQueuedEdit = () => {
+    if (activeWorkspaceId == null || activeThreadId == null) return
+    if (editingQueuedPromptId == null) return
+
+    const text = queuedDraftText.trim()
+    const hasUploading = queuedDraftAttachments.some((a) => a.status === "uploading")
+    if (hasUploading) return
+    const ready = queuedDraftAttachments
+      .filter((a) => a.status === "ready" && a.attachment != null)
+      .map((a) => a.attachment!)
+
+    if (text.length === 0 && ready.length === 0) {
+      handleCancelQueuedEdit()
+      return
+    }
+
+    const modelId = queuedDraftModelId ?? conversation?.agent_model_id ?? ""
+    const effort = queuedDraftThinkingEffort ?? conversation?.thinking_effort ?? "minimal"
+    updateQueuedPrompt(activeWorkspaceId, activeThreadId, editingQueuedPromptId, {
+      text,
+      attachments: ready,
+      runConfig: { model_id: modelId, thinking_effort: effort },
+    })
+    handleCancelQueuedEdit()
+  }
+
+  const handleCancelQueuedPrompt = (promptId: number) => {
+    if (activeWorkspaceId == null || activeThreadId == null) return
+    if (editingQueuedPromptId === promptId) {
+      handleCancelQueuedEdit()
+    }
+    removeQueuedPrompt(activeWorkspaceId, activeThreadId, promptId)
+  }
+
+  useEffect(() => {
+    if (editingQueuedPromptId == null) return
+    if (!queuedPrompts.some((p) => p.id === editingQueuedPromptId)) {
+      handleCancelQueuedEdit()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queuedPrompts, editingQueuedPromptId])
+  const handleQueueDrop = (activeId: number, overId: number) => {
+    if (activeWorkspaceId == null || activeThreadId == null) return
+    if (editingQueuedPromptId != null) return
+    if (activeId === overId) return
+    setDraggingQueuedPromptId(null)
+    reorderQueuedPrompt(activeWorkspaceId, activeThreadId, activeId, overId)
+  }
+
   const handleFileSelect = (files: FileList | null) => {
     if (!files) return
     if (activeWorkspaceId == null || activeThreadId == null) return
@@ -476,6 +593,50 @@ export function ChatPanel({
     }
   }
 
+  const handleQueuedFileSelect = (files: FileList | null) => {
+    if (!files) return
+    if (activeWorkspaceId == null || activeThreadId == null) return
+    if (editingQueuedPromptId == null) return
+
+    const scopeAtStart = queuedAttachmentScopeRef.current
+
+    for (const file of Array.from(files)) {
+      const isImage = file.type.startsWith("image/")
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+      const initial: ComposerAttachment = {
+        id,
+        type: isImage ? "image" : "file",
+        name: file.name,
+        size: file.size,
+        status: "uploading",
+      }
+
+      if (isImage) {
+        const reader = new FileReader()
+        reader.onload = (e) => {
+          const preview = typeof e.target?.result === "string" ? e.target.result : undefined
+          setQueuedDraftAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, preview } : a)))
+        }
+        reader.readAsDataURL(file)
+      }
+
+      setQueuedDraftAttachments((prev) => [...prev, initial])
+
+      void uploadAttachment({ workspaceId: activeWorkspaceId, file, kind: isImage ? "image" : "file" })
+        .then((attachment) => {
+          if (queuedAttachmentScopeRef.current !== scopeAtStart) return
+          setQueuedDraftAttachments((prev) =>
+            prev.map((a) => (a.id === id ? { ...a, status: "ready", attachment, name: attachment.name } : a)),
+          )
+          emitContextChanged(activeWorkspaceId)
+        })
+        .catch(() => {
+          if (queuedAttachmentScopeRef.current !== scopeAtStart) return
+          setQueuedDraftAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, status: "failed" } : a)))
+        })
+    }
+  }
+
   const handlePaste = (e: React.ClipboardEvent) => {
     if (activeWorkspaceId == null || activeThreadId == null) return
     const items = e.clipboardData?.items
@@ -493,8 +654,30 @@ export function ChatPanel({
     handleFileSelect(dt.files)
   }
 
+  const handleQueuedPaste = (e: React.ClipboardEvent) => {
+    if (activeWorkspaceId == null || activeThreadId == null) return
+    if (editingQueuedPromptId == null) return
+    const items = e.clipboardData?.items
+    if (!items) return
+
+    const imageItems = Array.from(items).filter((item) => item.type.startsWith("image/"))
+    if (imageItems.length === 0) return
+
+    e.preventDefault()
+    const dt = new DataTransfer()
+    for (const item of imageItems) {
+      const file = item.getAsFile()
+      if (file) dt.items.add(file)
+    }
+    handleQueuedFileSelect(dt.files)
+  }
+
   const removeAttachment = (id: string) => {
     setAttachments((prev) => prev.filter((a) => a.id !== id))
+  }
+
+  const removeQueuedDraftAttachment = (id: string) => {
+    setQueuedDraftAttachments((prev) => prev.filter((a) => a.id !== id))
   }
 
   const canSend = useMemo(() => {
@@ -809,21 +992,103 @@ export function ChatPanel({
               }
             }}
           >
-            <ConversationView
-              messages={messages}
-              workspaceId={activeWorkspaceId ?? undefined}
-              className="max-w-3xl mx-auto py-4 px-4 pb-20"
-              emptyState={
-                <div className="max-w-3xl mx-auto py-4 px-4 text-sm text-muted-foreground">
-                  {activeWorkspaceId == null ? "Select a workspace to start." : "Select a thread to load conversation."}
+            <div className="max-w-3xl mx-auto py-4 px-4 pb-20">
+              <ConversationView
+                messages={messages}
+                workspaceId={activeWorkspaceId ?? undefined}
+                className=""
+                emptyState={
+                  <div className="text-sm text-muted-foreground">
+                    {activeWorkspaceId == null
+                      ? "Select a workspace to start."
+                      : "Select a thread to load conversation."}
+                  </div>
+                }
+              />
+
+              {queuedPrompts.length > 0 && (
+                <div className="mt-6 space-y-2" data-testid="queued-prompts">
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <div className="h-px flex-1 bg-border" />
+                    <span className="flex items-center gap-1.5 px-2">
+                      <Clock className="w-3 h-3" />
+                      {queuedPrompts.length} queued
+                    </span>
+                    <div className="h-px flex-1 bg-border" />
+                  </div>
+
+                  {(() => {
+                    const visiblePrompts = isQueueExpanded
+                      ? queuedPrompts
+                      : queuedPrompts.slice(0, QUEUE_COLLAPSED_LIMIT)
+                    const hiddenCount = queuedPrompts.length - QUEUE_COLLAPSED_LIMIT
+
+                    return (
+                      <>
+                        {visiblePrompts.map((prompt) => (
+                          <QueuedPromptRow
+                            key={prompt.id}
+                            prompt={prompt}
+                            isEditing={editingQueuedPromptId === prompt.id}
+                            isDragging={draggingQueuedPromptId === prompt.id}
+                            editingText={queuedDraftText}
+                            editingAttachments={queuedDraftAttachments}
+                            editingModelId={queuedDraftModelId}
+                            editingThinkingEffort={queuedDraftThinkingEffort}
+                            defaultModelId={app?.agent?.default_model_id ?? null}
+                            defaultThinkingEffort={app?.agent?.default_thinking_effort ?? null}
+                            onStartEdit={() => handleStartQueuedEdit(prompt.id)}
+                            onSaveEdit={handleSaveQueuedEdit}
+                            onCancelEdit={handleCancelQueuedEdit}
+                            onCancelPrompt={() => handleCancelQueuedPrompt(prompt.id)}
+                            onEditingTextChange={setQueuedDraftText}
+                            onEditingModelIdChange={setQueuedDraftModelId}
+                            onEditingThinkingEffortChange={setQueuedDraftThinkingEffort}
+                            onQueuedFileSelect={handleQueuedFileSelect}
+                            onQueuedPaste={handleQueuedPaste}
+                            onRemoveEditingAttachment={removeQueuedDraftAttachment}
+                            onAddEditingAttachmentRef={(attachment) => {
+                              setQueuedDraftAttachments((prev) => [...prev, ...attachmentsFromRefs([attachment])])
+                            }}
+                            onOpenAgentSettings={(agentId, agentFilePath) =>
+                              openSettingsPanel("agent", { agentId, agentFilePath })
+                            }
+                            onQueueDragStart={() => setDraggingQueuedPromptId(prompt.id)}
+                            onQueueDragEnd={() => setDraggingQueuedPromptId(null)}
+                            onQueueDrop={handleQueueDrop}
+                          />
+                        ))}
+
+                        {!isQueueExpanded && hiddenCount > 0 && (
+                          <button
+                            onClick={() => setIsQueueExpanded(true)}
+                            className="w-full flex items-center justify-center gap-1.5 py-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                            data-testid="queued-prompts-expand"
+                          >
+                            <ChevronDown className="w-3 h-3" />+{hiddenCount} more queued
+                          </button>
+                        )}
+                        {isQueueExpanded && queuedPrompts.length > QUEUE_COLLAPSED_LIMIT && (
+                          <button
+                            onClick={() => setIsQueueExpanded(false)}
+                            className="w-full flex items-center justify-center gap-1.5 py-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                            data-testid="queued-prompts-collapse"
+                          >
+                            <ChevronRight className="w-3 h-3 -rotate-90" />
+                            Show less
+                          </button>
+                        )}
+                      </>
+                    )
+                  })()}
                 </div>
-              }
-            />
+              )}
+            </div>
           </div>
 
           <div className="relative z-10 -mt-16 pt-8 bg-gradient-to-t from-background via-background to-transparent pointer-events-none">
             <div className="pointer-events-auto">
-              {!followTail && messages.length > 0 ? (
+              {!followTail && messages.length > 0 && editingQueuedPromptId == null ? (
                 <div className="flex justify-center pb-2">
                   <button
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-card border border-border rounded-full text-xs text-muted-foreground hover:text-foreground hover:border-primary/50 transition-all shadow-sm hover:shadow-md"
@@ -840,6 +1105,7 @@ export function ChatPanel({
                 </div>
               ) : null}
 
+              {editingQueuedPromptId == null && (
               <div className="px-4 pb-4">
                 <div className="max-w-3xl mx-auto">
                   <div
@@ -1040,13 +1306,331 @@ export function ChatPanel({
                     <Send className="w-3.5 h-3.5" />
                   </button>
                 </div>
+                  </div>
+                </div>
               </div>
+              )}
             </div>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+function QueuedPromptRow({
+  prompt,
+  isEditing,
+  isDragging,
+  editingText,
+  editingAttachments,
+  editingModelId,
+  editingThinkingEffort,
+  defaultModelId,
+  defaultThinkingEffort,
+  onStartEdit,
+  onSaveEdit,
+  onCancelEdit,
+  onCancelPrompt,
+  onEditingTextChange,
+  onEditingModelIdChange,
+  onEditingThinkingEffortChange,
+  onQueuedFileSelect,
+  onQueuedPaste,
+  onRemoveEditingAttachment,
+  onAddEditingAttachmentRef,
+  onOpenAgentSettings,
+  onQueueDragStart,
+  onQueueDragEnd,
+  onQueueDrop,
+}: {
+  prompt: QueuedPromptSnapshot
+  isEditing: boolean
+  isDragging: boolean
+  editingText: string
+  editingAttachments: ComposerAttachment[]
+  editingModelId: string | null
+  editingThinkingEffort: ThinkingEffort | null
+  defaultModelId: string | null
+  defaultThinkingEffort: ThinkingEffort | null
+  onStartEdit: () => void
+  onSaveEdit: () => void
+  onCancelEdit: () => void
+  onCancelPrompt: () => void
+  onEditingTextChange: (text: string) => void
+  onEditingModelIdChange: (modelId: string) => void
+  onEditingThinkingEffortChange: (effort: ThinkingEffort) => void
+  onQueuedFileSelect: (files: FileList | null) => void
+  onQueuedPaste: (e: React.ClipboardEvent) => void
+  onRemoveEditingAttachment: (id: string) => void
+  onAddEditingAttachmentRef: (attachment: AttachmentRef) => void
+  onOpenAgentSettings: (agentId: string, agentFilePath?: string) => void
+  onQueueDragStart: () => void
+  onQueueDragEnd: () => void
+  onQueueDrop: (activeId: number, overId: number) => void
+}) {
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = "auto"
+    const maxHeightPx = 160
+    const nextHeight = Math.min(el.scrollHeight, maxHeightPx)
+    el.style.height = `${nextHeight}px`
+    el.style.overflowY = el.scrollHeight > maxHeightPx ? "auto" : "hidden"
+  }, [editingText])
+
+  if (isEditing) {
+    const hasUploading = editingAttachments.some((a) => a.status === "uploading")
+    const hasReady = editingAttachments.some((a) => a.status === "ready" && a.attachment != null)
+    const canSave = !hasUploading && (editingText.trim().length > 0 || hasReady)
+
+    return (
+      <div className="transition-all duration-200 ease-out">
+        <div
+          className={cn(
+            "relative bg-background border rounded-lg shadow-lg transition-all",
+            "border-primary/50 ring-1 ring-primary/20",
+          )}
+          onDragOver={(e) => {
+            e.preventDefault()
+          }}
+          onDrop={(e) => {
+            e.preventDefault()
+            const raw = e.dataTransfer.getData("luban-context-attachment")
+            if (raw) {
+              try {
+                const attachment = JSON.parse(raw) as AttachmentRef
+                if (attachment && typeof attachment.id === "string") {
+                  onAddEditingAttachmentRef(attachment)
+                  return
+                }
+              } catch {
+                // Ignore invalid payloads.
+              }
+            }
+            onQueuedFileSelect(e.dataTransfer.files)
+          }}
+        >
+          {editingAttachments.length > 0 && (
+            <div className="px-3 pt-3 pb-1 flex flex-wrap gap-3">
+              {editingAttachments.map((attachment) => (
+                <div key={attachment.id} data-testid="queued-attachment-tile" className="group relative">
+                  <div className="relative">
+                    <div className="w-20 h-20 rounded-lg overflow-hidden border border-border/50 hover:border-border transition-colors bg-muted/40 flex items-center justify-center">
+                      {attachment.type === "image" && (attachment.preview || attachment.previewUrl) ? (
+                        <img
+                          src={attachment.preview ?? attachment.previewUrl}
+                          alt={attachment.name}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex flex-col items-center gap-1.5">
+                          {attachment.name.toLowerCase().endsWith(".json") ? (
+                            <FileCode className="w-6 h-6 text-amber-500" />
+                          ) : attachment.name.toLowerCase().endsWith(".pdf") ? (
+                            <FileText className="w-6 h-6 text-red-500" />
+                          ) : (
+                            <FileText className="w-6 h-6 text-muted-foreground" />
+                          )}
+                          <span className="text-[9px] text-muted-foreground uppercase font-medium tracking-wide">
+                            {attachment.name.split(".").pop()}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    {attachment.status === "uploading" && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-background/60">
+                        <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+                      </div>
+                    )}
+                    <button
+                      onClick={() => onRemoveEditingAttachment(attachment.id)}
+                      className={cn(
+                        "absolute -top-1.5 -right-1.5 p-1 bg-background border border-border rounded-full shadow-sm transition-opacity hover:bg-destructive hover:border-destructive hover:text-destructive-foreground",
+                        attachment.status === "uploading"
+                          ? "opacity-0 pointer-events-none"
+                          : "opacity-0 group-hover:opacity-100",
+                      )}
+                      aria-label="Remove attachment"
+                      onPointerDown={(e) => e.stopPropagation()}
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                    <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 px-1.5 py-0.5 bg-popover border border-border rounded text-[9px] text-muted-foreground truncate max-w-[90px] opacity-0 group-hover:opacity-100 transition-opacity shadow-sm pointer-events-none">
+                      {attachment.name}
+                    </div>
+                    {attachment.status === "failed" && (
+                      <div className="absolute inset-x-0 bottom-0 px-1 py-0.5 text-[9px] text-destructive bg-background/80 text-center">
+                        Upload failed
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="px-2.5 pt-2">
+            <textarea
+              ref={textareaRef}
+              data-testid="queued-prompt-input"
+              value={editingText}
+              onChange={(e) => onEditingTextChange(e.target.value)}
+              onPaste={onQueuedPaste}
+              placeholder="Edit message..."
+              className="w-full bg-transparent text-sm leading-5 text-foreground placeholder:text-muted-foreground resize-none focus:outline-none min-h-[20px] max-h-[160px] luban-font-chat"
+              rows={1}
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault()
+                  if (!canSave) return
+                  onSaveEdit()
+                }
+                if (e.key === "Escape") {
+                  e.preventDefault()
+                  onCancelEdit()
+                }
+              }}
+            />
+          </div>
+
+          <div className="flex items-center px-2 pb-2 pt-1">
+            <input
+              ref={fileInputRef}
+              data-testid="queued-attach-input"
+              type="file"
+              multiple
+              accept="image/*,.pdf,.txt,.md,.json,.csv,.xml,.yaml,.yml"
+              className="hidden"
+              onChange={(e) => onQueuedFileSelect(e.target.files)}
+            />
+            <button
+              data-testid="queued-attach"
+              onClick={() => fileInputRef.current?.click()}
+              className="inline-flex items-center gap-1 p-1.5 hover:bg-muted rounded text-muted-foreground hover:text-foreground transition-colors"
+              title="Attach files"
+            >
+              <Paperclip className="w-4 h-4" />
+            </button>
+
+            <div className="w-px h-4 bg-border mx-1" />
+
+            <CodexAgentSelector
+              testId="queued-codex-agent-selector"
+              dropdownPosition="top"
+              modelId={editingModelId}
+              thinkingEffort={editingThinkingEffort}
+              defaultModelId={defaultModelId}
+              defaultThinkingEffort={defaultThinkingEffort}
+              onOpenAgentSettings={onOpenAgentSettings}
+              onChangeModelId={onEditingModelIdChange}
+              onChangeThinkingEffort={onEditingThinkingEffortChange}
+            />
+
+            <div className="flex-1" />
+            <button
+              onClick={onCancelEdit}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                if (!canSave) return
+                onSaveEdit()
+              }}
+              disabled={!canSave}
+              className={cn(
+                "ml-2 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs transition-colors disabled:opacity-50",
+                canSave ? "bg-primary text-primary-foreground hover:bg-primary/90" : "bg-muted text-muted-foreground",
+              )}
+              data-testid="queued-save"
+            >
+              <Check className="w-3.5 h-3.5" />
+              Save
+            </button>
           </div>
         </div>
       </div>
-    </>
-      )}
+    )
+  }
+
+  return (
+    <div
+      className={cn("group flex justify-end transition-all duration-200", isDragging && "z-50 opacity-90")}
+      data-testid="queued-prompt-item"
+      data-prompt-id={prompt.id}
+    >
+      <div
+        className={cn(
+          "relative max-w-[85%] rounded-lg px-3 py-2.5 transition-all duration-200",
+          "border border-dashed border-border bg-muted/20 opacity-60 hover:opacity-80",
+          isDragging && "shadow-lg border-primary/30 opacity-100 bg-background",
+        )}
+        onDoubleClick={() => onStartEdit()}
+        data-testid="queued-prompt-bubble"
+        draggable={!isEditing}
+        onDragStart={(e) => {
+          e.dataTransfer.setData("text/plain", String(prompt.id))
+          e.dataTransfer.effectAllowed = "move"
+          onQueueDragStart()
+        }}
+        onDragEnd={() => onQueueDragEnd()}
+        onDragOver={(e) => {
+          e.preventDefault()
+        }}
+        onDrop={(e) => {
+          e.preventDefault()
+          const raw = e.dataTransfer.getData("text/plain")
+          const activeId = Number(raw)
+          if (!Number.isFinite(activeId)) return
+          onQueueDrop(activeId, prompt.id)
+        }}
+      >
+        {!isDragging && (
+          <div className="absolute -top-1.5 -right-1.5 flex items-center gap-1">
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                onStartEdit()
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              className="p-1 bg-background border border-border rounded-full shadow-sm opacity-0 group-hover:opacity-100 transition-opacity hover:bg-muted hover:border-border hover:text-foreground"
+              aria-label="Edit queued message"
+              data-testid="queued-prompt-edit"
+            >
+              <Pencil className="w-3 h-3" />
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                onCancelPrompt()
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              className="p-1 bg-background border border-border rounded-full shadow-sm opacity-0 group-hover:opacity-100 transition-opacity hover:bg-destructive hover:border-destructive hover:text-destructive-foreground"
+              aria-label="Remove queued message"
+              data-testid="queued-prompt-cancel"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+        )}
+
+        {prompt.attachments && prompt.attachments.length > 0 && (
+          <div className="flex items-center gap-1 mb-1 text-[10px] text-muted-foreground">
+            <Paperclip className="w-3 h-3" />
+            {prompt.attachments.length} file{prompt.attachments.length > 1 ? "s" : ""}
+          </div>
+        )}
+
+        <div className="text-[13px] text-foreground/80 line-clamp-2 cursor-grab active:cursor-grabbing">
+          {prompt.text}
+        </div>
+      </div>
     </div>
   )
 }

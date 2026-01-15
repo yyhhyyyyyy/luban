@@ -238,8 +238,24 @@ pub struct ConversationSnapshot {
     pub entries: Vec<ConversationEntry>,
     #[serde(default)]
     pub in_progress_items: Vec<AgentItem>,
+    #[serde(default)]
+    pub pending_prompts: Vec<QueuedPromptSnapshot>,
     pub remote_thread_id: Option<String>,
     pub title: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct QueuedPromptSnapshot {
+    pub id: u64,
+    pub text: String,
+    pub attachments: Vec<AttachmentRef>,
+    pub run_config: AgentRunConfigSnapshot,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AgentRunConfigSnapshot {
+    pub model_id: String,
+    pub thinking_effort: ThinkingEffort,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -540,6 +556,26 @@ pub enum ClientAction {
         thread_id: WorkspaceThreadId,
         text: String,
         attachments: Vec<AttachmentRef>,
+    },
+    RemoveQueuedPrompt {
+        workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
+        prompt_id: u64,
+    },
+    ReorderQueuedPrompt {
+        workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
+        active_id: u64,
+        over_id: u64,
+    },
+    UpdateQueuedPrompt {
+        workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
+        prompt_id: u64,
+        text: String,
+        attachments: Vec<AttachmentRef>,
+        model_id: String,
+        thinking_effort: ThinkingEffort,
     },
     WorkspaceRenameBranch {
         workspace_id: WorkspaceId,

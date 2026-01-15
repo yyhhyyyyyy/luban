@@ -550,7 +550,11 @@ impl AppState {
                 };
 
                 if conversation.run_status == OperationStatus::Running {
+                    let id = conversation.next_queued_prompt_id;
+                    conversation.next_queued_prompt_id =
+                        conversation.next_queued_prompt_id.saturating_add(1);
                     conversation.pending_prompts.push_back(QueuedPrompt {
+                        id,
                         text,
                         attachments,
                         run_config,
@@ -597,7 +601,11 @@ impl AppState {
                     return effects;
                 }
 
+                let id = conversation.next_queued_prompt_id;
+                conversation.next_queued_prompt_id =
+                    conversation.next_queued_prompt_id.saturating_add(1);
                 conversation.pending_prompts.push_back(QueuedPrompt {
+                    id,
                     text,
                     attachments,
                     run_config,
@@ -704,10 +712,86 @@ impl AppState {
             Action::RemoveQueuedPrompt {
                 workspace_id,
                 thread_id,
-                index,
+                prompt_id,
             } => {
                 let conversation = self.ensure_conversation_mut(workspace_id, thread_id);
-                let _ = conversation.pending_prompts.remove(index);
+                if let Some(pos) = conversation
+                    .pending_prompts
+                    .iter()
+                    .position(|p| p.id == prompt_id)
+                {
+                    let _ = conversation.pending_prompts.remove(pos);
+                }
+                Vec::new()
+            }
+            Action::ReorderQueuedPrompt {
+                workspace_id,
+                thread_id,
+                active_id,
+                over_id,
+            } => {
+                let conversation = self.ensure_conversation_mut(workspace_id, thread_id);
+                if active_id == over_id {
+                    return Vec::new();
+                }
+
+                let from = conversation
+                    .pending_prompts
+                    .iter()
+                    .position(|p| p.id == active_id);
+                let to = conversation
+                    .pending_prompts
+                    .iter()
+                    .position(|p| p.id == over_id);
+                let (Some(from), Some(to)) = (from, to) else {
+                    return Vec::new();
+                };
+                if from == to {
+                    return Vec::new();
+                }
+
+                let mut items = conversation
+                    .pending_prompts
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let item = items.remove(from);
+                items.insert(to, item);
+                conversation.pending_prompts = VecDeque::from(items);
+                Vec::new()
+            }
+            Action::UpdateQueuedPrompt {
+                workspace_id,
+                thread_id,
+                prompt_id,
+                text,
+                attachments,
+                model_id,
+                thinking_effort,
+            } => {
+                let conversation = self.ensure_conversation_mut(workspace_id, thread_id);
+                let Some(pos) = conversation
+                    .pending_prompts
+                    .iter()
+                    .position(|p| p.id == prompt_id)
+                else {
+                    return Vec::new();
+                };
+
+                let trimmed = text.trim().to_owned();
+                if trimmed.is_empty() && attachments.is_empty() {
+                    let _ = conversation.pending_prompts.remove(pos);
+                    return Vec::new();
+                }
+
+                let normalized_effort = normalize_thinking_effort(&model_id, thinking_effort);
+                let entry = conversation.pending_prompts.get_mut(pos).unwrap();
+                entry.text = trimmed;
+                entry.attachments = attachments;
+                entry.run_config = AgentRunConfig {
+                    model_id,
+                    thinking_effort: normalized_effort,
+                };
                 Vec::new()
             }
             Action::ClearQueuedPrompts {
@@ -1306,6 +1390,7 @@ impl AppState {
             current_run_config: None,
             in_progress_items: BTreeMap::new(),
             in_progress_order: VecDeque::new(),
+            next_queued_prompt_id: 1,
             pending_prompts: VecDeque::new(),
             queue_paused: false,
         }
@@ -3149,7 +3234,73 @@ mod tests {
         assert_eq!(conversation.entries.len(), 1);
         assert_eq!(conversation.pending_prompts.len(), 1);
         assert_eq!(conversation.pending_prompts[0].text, "Second");
+        assert_eq!(conversation.pending_prompts[0].id, 1);
         assert_eq!(conversation.run_status, OperationStatus::Running);
+    }
+
+    #[test]
+    fn queued_prompts_can_be_reordered_and_edited() {
+        let mut state = AppState::demo();
+        let workspace_id = first_non_main_workspace_id(&state);
+        let thread_id = default_thread_id();
+
+        state.apply(Action::SendAgentMessage {
+            workspace_id,
+            thread_id,
+            text: "First".to_owned(),
+            attachments: Vec::new(),
+        });
+        state.apply(Action::SendAgentMessage {
+            workspace_id,
+            thread_id,
+            text: "Second".to_owned(),
+            attachments: Vec::new(),
+        });
+        state.apply(Action::SendAgentMessage {
+            workspace_id,
+            thread_id,
+            text: "Third".to_owned(),
+            attachments: Vec::new(),
+        });
+
+        let conversation = state.workspace_conversation(workspace_id).unwrap();
+        assert_eq!(conversation.pending_prompts.len(), 2);
+        assert_eq!(conversation.pending_prompts[0].id, 1);
+        assert_eq!(conversation.pending_prompts[1].id, 2);
+
+        state.apply(Action::ReorderQueuedPrompt {
+            workspace_id,
+            thread_id,
+            active_id: 2,
+            over_id: 1,
+        });
+
+        let conversation = state.workspace_conversation(workspace_id).unwrap();
+        assert_eq!(conversation.pending_prompts[0].text, "Third");
+        assert_eq!(conversation.pending_prompts[1].text, "Second");
+
+        state.apply(Action::UpdateQueuedPrompt {
+            workspace_id,
+            thread_id,
+            prompt_id: 1,
+            text: "Second updated".to_owned(),
+            attachments: Vec::new(),
+            model_id: default_agent_model_id().to_owned(),
+            thinking_effort: default_thinking_effort(),
+        });
+
+        let conversation = state.workspace_conversation(workspace_id).unwrap();
+        assert_eq!(conversation.pending_prompts[1].text, "Second updated");
+
+        state.apply(Action::RemoveQueuedPrompt {
+            workspace_id,
+            thread_id,
+            prompt_id: 2,
+        });
+
+        let conversation = state.workspace_conversation(workspace_id).unwrap();
+        assert_eq!(conversation.pending_prompts.len(), 1);
+        assert_eq!(conversation.pending_prompts[0].id, 1);
     }
 
     #[test]

@@ -161,7 +161,22 @@ pub enum Action {
     RemoveQueuedPrompt {
         workspace_id: WorkspaceId,
         thread_id: WorkspaceThreadId,
-        index: usize,
+        prompt_id: u64,
+    },
+    ReorderQueuedPrompt {
+        workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
+        active_id: u64,
+        over_id: u64,
+    },
+    UpdateQueuedPrompt {
+        workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
+        prompt_id: u64,
+        text: String,
+        attachments: Vec<AttachmentRef>,
+        model_id: String,
+        thinking_effort: ThinkingEffort,
     },
     ClearQueuedPrompts {
         workspace_id: WorkspaceId,

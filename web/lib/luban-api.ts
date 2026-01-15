@@ -175,8 +175,21 @@ export type ConversationSnapshot = {
   run_status: OperationStatus
   entries: ConversationEntry[]
   in_progress_items: AgentItem[]
+  pending_prompts: QueuedPromptSnapshot[]
   remote_thread_id: string | null
   title: string
+}
+
+export type AgentRunConfigSnapshot = {
+  model_id: string
+  thinking_effort: ThinkingEffort
+}
+
+export type QueuedPromptSnapshot = {
+  id: number
+  text: string
+  attachments: AttachmentRef[]
+  run_config: AgentRunConfigSnapshot
 }
 
 export type OperationStatus = "idle" | "running"
@@ -302,6 +315,18 @@ export type ClientAction =
       thread_id: WorkspaceThreadId
       text: string
       attachments: AttachmentRef[]
+    }
+  | { type: "remove_queued_prompt"; workspace_id: WorkspaceId; thread_id: WorkspaceThreadId; prompt_id: number }
+  | { type: "reorder_queued_prompt"; workspace_id: WorkspaceId; thread_id: WorkspaceThreadId; active_id: number; over_id: number }
+  | {
+      type: "update_queued_prompt"
+      workspace_id: WorkspaceId
+      thread_id: WorkspaceThreadId
+      prompt_id: number
+      text: string
+      attachments: AttachmentRef[]
+      model_id: string
+      thinking_effort: ThinkingEffort
     }
   | { type: "workspace_rename_branch"; workspace_id: WorkspaceId; branch_name: string }
   | { type: "workspace_ai_rename_branch"; workspace_id: WorkspaceId; thread_id: WorkspaceThreadId }

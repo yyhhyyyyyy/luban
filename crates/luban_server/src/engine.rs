@@ -1059,6 +1059,7 @@ impl Engine {
             run_status: luban_api::OperationStatus::Idle,
             entries: loaded.entries.iter().map(map_conversation_entry).collect(),
             in_progress_items: Vec::new(),
+            pending_prompts: Vec::new(),
             remote_thread_id: loaded.thread_id,
             title: format!("Thread {tid}"),
         })
@@ -2026,6 +2027,25 @@ impl Engine {
                     luban_api::AgentItem { id, kind, payload }
                 })
                 .collect(),
+            pending_prompts: conversation
+                .pending_prompts
+                .iter()
+                .map(|prompt| luban_api::QueuedPromptSnapshot {
+                    id: prompt.id,
+                    text: prompt.text.clone(),
+                    attachments: prompt.attachments.iter().map(map_attachment_ref).collect(),
+                    run_config: luban_api::AgentRunConfigSnapshot {
+                        model_id: prompt.run_config.model_id.clone(),
+                        thinking_effort: match prompt.run_config.thinking_effort {
+                            ThinkingEffort::Minimal => luban_api::ThinkingEffort::Minimal,
+                            ThinkingEffort::Low => luban_api::ThinkingEffort::Low,
+                            ThinkingEffort::Medium => luban_api::ThinkingEffort::Medium,
+                            ThinkingEffort::High => luban_api::ThinkingEffort::High,
+                            ThinkingEffort::XHigh => luban_api::ThinkingEffort::XHigh,
+                        },
+                    },
+                })
+                .collect(),
             remote_thread_id: conversation.thread_id.clone(),
             title: conversation.title.clone(),
         })
@@ -2274,6 +2294,21 @@ fn conversation_key_for_action(action: &Action) -> Option<(WorkspaceId, Workspac
             ..
         } => Some((*workspace_id, *thread_id)),
         Action::ThinkingEffortChanged {
+            workspace_id,
+            thread_id,
+            ..
+        } => Some((*workspace_id, *thread_id)),
+        Action::RemoveQueuedPrompt {
+            workspace_id,
+            thread_id,
+            ..
+        } => Some((*workspace_id, *thread_id)),
+        Action::ReorderQueuedPrompt {
+            workspace_id,
+            thread_id,
+            ..
+        } => Some((*workspace_id, *thread_id)),
+        Action::UpdateQueuedPrompt {
             workspace_id,
             thread_id,
             ..
@@ -2609,6 +2644,49 @@ fn map_client_action(action: luban_api::ClientAction) -> Option<Action> {
             thread_id: WorkspaceThreadId::from_u64(thread_id.0),
             text,
             attachments: attachments.into_iter().map(map_api_attachment).collect(),
+        }),
+        luban_api::ClientAction::RemoveQueuedPrompt {
+            workspace_id,
+            thread_id,
+            prompt_id,
+        } => Some(Action::RemoveQueuedPrompt {
+            workspace_id: WorkspaceId::from_u64(workspace_id.0),
+            thread_id: WorkspaceThreadId::from_u64(thread_id.0),
+            prompt_id,
+        }),
+        luban_api::ClientAction::ReorderQueuedPrompt {
+            workspace_id,
+            thread_id,
+            active_id,
+            over_id,
+        } => Some(Action::ReorderQueuedPrompt {
+            workspace_id: WorkspaceId::from_u64(workspace_id.0),
+            thread_id: WorkspaceThreadId::from_u64(thread_id.0),
+            active_id,
+            over_id,
+        }),
+        luban_api::ClientAction::UpdateQueuedPrompt {
+            workspace_id,
+            thread_id,
+            prompt_id,
+            text,
+            attachments,
+            model_id,
+            thinking_effort,
+        } => Some(Action::UpdateQueuedPrompt {
+            workspace_id: WorkspaceId::from_u64(workspace_id.0),
+            thread_id: WorkspaceThreadId::from_u64(thread_id.0),
+            prompt_id,
+            text,
+            attachments: attachments.into_iter().map(map_api_attachment).collect(),
+            model_id,
+            thinking_effort: match thinking_effort {
+                luban_api::ThinkingEffort::Minimal => ThinkingEffort::Minimal,
+                luban_api::ThinkingEffort::Low => ThinkingEffort::Low,
+                luban_api::ThinkingEffort::Medium => ThinkingEffort::Medium,
+                luban_api::ThinkingEffort::High => ThinkingEffort::High,
+                luban_api::ThinkingEffort::XHigh => ThinkingEffort::XHigh,
+            },
         }),
         luban_api::ClientAction::WorkspaceRenameBranch {
             workspace_id,

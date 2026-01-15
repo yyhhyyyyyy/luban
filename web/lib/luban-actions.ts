@@ -1,6 +1,7 @@
 "use client"
 
 import type {
+  AgentRunConfigSnapshot,
   AppearanceFontsSnapshot,
   AppearanceTheme,
   AttachmentRef,
@@ -58,6 +59,19 @@ export type LubanActions = {
     threadId: number,
     text: string,
     attachments?: AttachmentRef[],
+  ) => void
+  removeQueuedPrompt: (workspaceId: WorkspaceId, threadId: WorkspaceThreadId, promptId: number) => void
+  reorderQueuedPrompt: (
+    workspaceId: WorkspaceId,
+    threadId: WorkspaceThreadId,
+    activeId: number,
+    overId: number,
+  ) => void
+  updateQueuedPrompt: (
+    workspaceId: WorkspaceId,
+    threadId: WorkspaceThreadId,
+    promptId: number,
+    args: { text: string; attachments: AttachmentRef[]; runConfig: AgentRunConfigSnapshot },
   ) => void
   cancelAgentTurn: () => void
 
@@ -401,6 +415,71 @@ export function createLubanActions(args: {
     })
   }
 
+  function removeQueuedPrompt(workspaceId: WorkspaceId, threadId: WorkspaceThreadId, promptId: number) {
+    store.setConversation((prev) => {
+      if (!prev) return prev
+      if (prev.workspace_id !== workspaceId || prev.thread_id !== threadId) return prev
+      return { ...prev, pending_prompts: prev.pending_prompts.filter((p) => p.id !== promptId) }
+    })
+    args.sendAction({ type: "remove_queued_prompt", workspace_id: workspaceId, thread_id: threadId, prompt_id: promptId })
+  }
+
+  function reorderQueuedPrompt(
+    workspaceId: WorkspaceId,
+    threadId: WorkspaceThreadId,
+    activeId: number,
+    overId: number,
+  ) {
+    store.setConversation((prev) => {
+      if (!prev) return prev
+      if (prev.workspace_id !== workspaceId || prev.thread_id !== threadId) return prev
+      const from = prev.pending_prompts.findIndex((p) => p.id === activeId)
+      const to = prev.pending_prompts.findIndex((p) => p.id === overId)
+      if (from < 0 || to < 0 || from === to) return prev
+      const next = [...prev.pending_prompts]
+      const [item] = next.splice(from, 1)
+      if (!item) return prev
+      next.splice(to, 0, item)
+      return { ...prev, pending_prompts: next }
+    })
+    args.sendAction({
+      type: "reorder_queued_prompt",
+      workspace_id: workspaceId,
+      thread_id: threadId,
+      active_id: activeId,
+      over_id: overId,
+    })
+  }
+
+  function updateQueuedPrompt(
+    workspaceId: WorkspaceId,
+    threadId: WorkspaceThreadId,
+    promptId: number,
+    args2: { text: string; attachments: AttachmentRef[]; runConfig: AgentRunConfigSnapshot },
+  ) {
+    const text = args2.text.trim()
+    const attachments = args2.attachments
+    const runConfig = args2.runConfig
+    store.setConversation((prev) => {
+      if (!prev) return prev
+      if (prev.workspace_id !== workspaceId || prev.thread_id !== threadId) return prev
+      const next = prev.pending_prompts.map((p) =>
+        p.id === promptId ? { ...p, text, attachments, run_config: runConfig } : p,
+      )
+      return { ...prev, pending_prompts: next }
+    })
+    args.sendAction({
+      type: "update_queued_prompt",
+      workspace_id: workspaceId,
+      thread_id: threadId,
+      prompt_id: promptId,
+      text,
+      attachments,
+      model_id: runConfig.model_id,
+      thinking_effort: runConfig.thinking_effort,
+    })
+  }
+
   function cancelAgentTurn() {
     const ids = activeWorkspaceThread()
     if (!ids) return
@@ -475,6 +554,9 @@ export function createLubanActions(args: {
     restoreThreadTab,
     sendAgentMessage,
     sendAgentMessageTo,
+    removeQueuedPrompt,
+    reorderQueuedPrompt,
+    updateQueuedPrompt,
     cancelAgentTurn,
     renameWorkspaceBranch,
     aiRenameWorkspaceBranch,

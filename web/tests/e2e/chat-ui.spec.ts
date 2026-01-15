@@ -1,5 +1,28 @@
 import { expect, test } from "@playwright/test"
-import { ensureWorkspace } from "./helpers"
+import { ensureWorkspace, sendWsAction } from "./helpers"
+
+async function activeThreadId(page: import("@playwright/test").Page, workspaceId: number): Promise<number> {
+  const res = await page.request.get(`/api/workspaces/${workspaceId}/threads`)
+  expect(res.ok()).toBeTruthy()
+  const snapshot = (await res.json()) as { tabs: { active_tab: number } }
+  return Number(snapshot.tabs.active_tab)
+}
+
+async function queuedPromptTexts(page: import("@playwright/test").Page, workspaceId: number, threadId: number): Promise<string[]> {
+  const res = await page.request.get(`/api/workspaces/${workspaceId}/conversations/${threadId}`)
+  if (!res.ok()) return []
+  const snapshot = (await res.json()) as { pending_prompts?: { text: string }[] }
+  if (!Array.isArray(snapshot.pending_prompts)) return []
+  return snapshot.pending_prompts.map((p) => String(p.text))
+}
+
+async function queuedPrompts(page: import("@playwright/test").Page, workspaceId: number, threadId: number): Promise<{ id: number; text: string }[]> {
+  const res = await page.request.get(`/api/workspaces/${workspaceId}/conversations/${threadId}`)
+  if (!res.ok()) return []
+  const snapshot = (await res.json()) as { pending_prompts?: { id: number; text: string }[] }
+  if (!Array.isArray(snapshot.pending_prompts)) return []
+  return snapshot.pending_prompts.map((p) => ({ id: Number(p.id), text: String(p.text) }))
+}
 
 test("long tokens wrap without horizontal overflow", async ({ page }) => {
   await ensureWorkspace(page)
@@ -106,4 +129,77 @@ test("file attachments upload and render in user messages", async ({ page }) => 
   await row.hover()
   await row.getByTestId("context-add-to-chat").click({ force: true, timeout: 20_000 })
   await expect(page.getByTestId("chat-attachment-tile").first()).toBeVisible({ timeout: 20_000 })
+})
+
+test("queued messages can be reordered and edited", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  const workspaceIdRaw = (await page.evaluate(() => localStorage.getItem("luban:active_workspace_id"))) ?? ""
+  const workspaceId = Number(workspaceIdRaw)
+  expect(Number.isFinite(workspaceId)).toBeTruthy()
+  expect(workspaceId).toBeGreaterThan(0)
+
+  const threadId = await activeThreadId(page, workspaceId)
+  expect(threadId).toBeGreaterThan(0)
+
+  const runId = Math.random().toString(16).slice(2)
+  let firstQueued = ""
+  let secondQueued = ""
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const seed = `e2e-queued-${runId}-${attempt}`
+    await sendWsAction(page, { type: "send_agent_message", workspace_id: workspaceId, thread_id: threadId, text: `${seed}-run`, attachments: [] })
+    await sendWsAction(page, { type: "send_agent_message", workspace_id: workspaceId, thread_id: threadId, text: `${seed}-a`, attachments: [] })
+    await sendWsAction(page, { type: "send_agent_message", workspace_id: workspaceId, thread_id: threadId, text: `${seed}-b`, attachments: [] })
+
+    try {
+      await expect
+        .poll(async () => (await queuedPromptTexts(page, workspaceId, threadId)).slice(0, 2), { timeout: 10_000 })
+        .toHaveLength(2)
+      const queued = await queuedPromptTexts(page, workspaceId, threadId)
+      ;[firstQueued, secondQueued] = queued.slice(0, 2)
+      break
+    } catch {
+      // Retry until we have at least two queued prompts.
+    }
+  }
+  expect(firstQueued.length).toBeGreaterThan(0)
+  expect(secondQueued.length).toBeGreaterThan(0)
+
+  await expect(page.getByTestId("queued-prompts")).toBeVisible({ timeout: 20_000 })
+
+  const queuedItems = page.getByTestId("queued-prompt-item")
+  await expect(queuedItems).toHaveCount(2, { timeout: 20_000 })
+  await expect(queuedItems.nth(0)).toContainText(firstQueued)
+  await expect(queuedItems.nth(1)).toContainText(secondQueued)
+
+  const prompts = await queuedPrompts(page, workspaceId, threadId)
+  expect(prompts.length).toBeGreaterThanOrEqual(2)
+  const [firstPrompt, secondPrompt] = prompts
+  expect(firstPrompt).toBeTruthy()
+  expect(secondPrompt).toBeTruthy()
+
+  await sendWsAction(page, {
+    type: "reorder_queued_prompt",
+    workspace_id: workspaceId,
+    thread_id: threadId,
+    active_id: secondPrompt.id,
+    over_id: firstPrompt.id,
+  })
+
+  await expect(queuedItems.nth(0)).toContainText(secondQueued, { timeout: 20_000 })
+
+  await queuedItems.nth(0).hover()
+  await queuedItems.nth(0).locator('[data-testid="queued-prompt-edit"]').click({ force: true, timeout: 20_000 })
+  const input = page.getByTestId("queued-prompt-input")
+  await expect(input).toBeVisible({ timeout: 20_000 })
+  const updated = `e2e-queued-${runId}-edited`
+  await input.fill(updated)
+  await page.getByTestId("queued-save").click()
+
+  await expect(queuedItems.nth(0)).toContainText(updated, { timeout: 20_000 })
+
+  const lastItem = queuedItems.nth(1)
+  await lastItem.hover()
+  await lastItem.locator('[data-testid="queued-prompt-cancel"]').click({ force: true, timeout: 20_000 })
+  await expect(queuedItems).toHaveCount(1, { timeout: 20_000 })
 })

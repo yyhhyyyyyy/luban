@@ -10,6 +10,7 @@ import type {
   AppearanceFontsSnapshot,
   AppearanceTheme,
   AttachmentRef,
+  AgentRunConfigSnapshot,
   CodexConfigEntrySnapshot,
   ConversationSnapshot,
   ProjectId,
@@ -77,6 +78,19 @@ type LubanContextValue = {
     threadId: number,
     text: string,
     attachments?: AttachmentRef[],
+  ) => void
+  removeQueuedPrompt: (workspaceId: WorkspaceId, threadId: WorkspaceThreadId, promptId: number) => void
+  reorderQueuedPrompt: (
+    workspaceId: WorkspaceId,
+    threadId: WorkspaceThreadId,
+    activeId: number,
+    overId: number,
+  ) => void
+  updateQueuedPrompt: (
+    workspaceId: WorkspaceId,
+    threadId: WorkspaceThreadId,
+    promptId: number,
+    args: { text: string; attachments: AttachmentRef[]; runConfig: AgentRunConfigSnapshot },
   ) => void
   cancelAgentTurn: () => void
 
@@ -239,6 +253,9 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     restoreThreadTab: actions.restoreThreadTab,
     sendAgentMessage: actions.sendAgentMessage,
     sendAgentMessageTo: actions.sendAgentMessageTo,
+    removeQueuedPrompt: actions.removeQueuedPrompt,
+    reorderQueuedPrompt: actions.reorderQueuedPrompt,
+    updateQueuedPrompt: actions.updateQueuedPrompt,
     cancelAgentTurn: actions.cancelAgentTurn,
     renameWorkspaceBranch: actions.renameWorkspaceBranch,
     aiRenameWorkspaceBranch: actions.aiRenameWorkspaceBranch,

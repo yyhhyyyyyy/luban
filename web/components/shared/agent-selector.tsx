@@ -18,6 +18,7 @@ function OpenAIIcon({ className }: { className?: string }) {
 }
 
 export function CodexAgentSelector({
+  testId = "codex-agent-selector",
   modelId,
   thinkingEffort,
   onChangeModelId,
@@ -29,6 +30,7 @@ export function CodexAgentSelector({
   dropdownPosition = "bottom",
   className,
 }: {
+  testId?: string
   modelId: string | null | undefined
   thinkingEffort: ThinkingEffort | null | undefined
   onChangeModelId: (modelId: string) => void
@@ -70,7 +72,7 @@ export function CodexAgentSelector({
   return (
     <div className={cn("relative", className)}>
       <button
-        data-testid="codex-agent-selector"
+        data-testid={testId}
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => {
           if (disabled) return

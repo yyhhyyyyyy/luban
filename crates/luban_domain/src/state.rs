@@ -303,6 +303,7 @@ pub struct WorkspaceConversation {
     pub current_run_config: Option<AgentRunConfig>,
     pub in_progress_items: BTreeMap<String, CodexThreadItem>,
     pub in_progress_order: VecDeque<String>,
+    pub next_queued_prompt_id: u64,
     pub pending_prompts: VecDeque<QueuedPrompt>,
     pub queue_paused: bool,
 }
@@ -445,6 +446,7 @@ pub struct AgentRunConfig {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct QueuedPrompt {
+    pub id: u64,
     pub text: String,
     pub attachments: Vec<AttachmentRef>,
     pub run_config: AgentRunConfig,
