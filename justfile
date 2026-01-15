@@ -21,10 +21,6 @@ web cmd profile="debug":
     fi; \
     if [ -d web ]; then \
       (cd web && pnpm install); \
-      if [ -f web/node_modules/ghostty-web/ghostty-vt.wasm ]; then \
-        mkdir -p web/public; \
-        cp web/node_modules/ghostty-web/ghostty-vt.wasm web/public/ghostty-vt.wasm; \
-      fi; \
       (cd web && pnpm build); \
       mkdir -p web/out; \
       printf '\n' > web/out/.gitkeep; \

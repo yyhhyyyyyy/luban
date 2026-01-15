@@ -1,8 +1,9 @@
 "use client"
 
 import { useEffect, useRef } from "react"
-import { FitAddon, Terminal } from "ghostty-web"
-import type { ITheme } from "ghostty-web"
+import { Terminal, type ITheme } from "@xterm/xterm"
+import { FitAddon } from "@xterm/addon-fit"
+import { WebglAddon } from "@xterm/addon-webgl"
 import { useTheme } from "next-themes"
 
 import { useLuban } from "@/lib/luban-context"
@@ -109,20 +110,6 @@ function terminalThemeFromCss(): ITheme {
   }
 }
 
-function writeOscTheme(term: Terminal) {
-  const background = toHexColor(cssVar("--card") ?? "#ffffff") ?? "#ffffff"
-  const foreground = toHexColor(cssVar("--card-foreground") ?? "#333333") ?? "#333333"
-  const cursor = toHexColor(cssVar("--foreground") ?? foreground) ?? foreground
-
-  // ghostty-web renders fg/bg from the emulator's resolved RGB values.
-  // Emit OSC sequences to update defaults in the emulator itself.
-  const osc =
-    `\x1b]10;${foreground}\x07` + // default foreground
-    `\x1b]11;${background}\x07` + // default background
-    `\x1b]12;${cursor}\x07` // cursor
-  term.write(osc)
-}
-
 function isValidTerminalSize(cols: number, rows: number): boolean {
   return Number.isFinite(cols) && Number.isFinite(rows) && cols >= 2 && rows >= 2
 }
@@ -134,13 +121,13 @@ export function PtyTerminal() {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
+  const webglAddonRef = useRef<WebglAddon | null>(null)
   const lastThemeDigestRef = useRef<string | null>(null)
 
   useEffect(() => {
     const term = termRef.current
     if (!term) return
-    const renderer = (term as any).renderer as { setFontFamily?: (family: string) => void } | undefined
-    renderer?.setFontFamily?.(terminalFontFamily(fonts.terminalFont))
+    term.options.fontFamily = terminalFontFamily(fonts.terminalFont)
     fitAddonRef.current?.fit()
   }, [fonts.terminalFont])
 
@@ -157,9 +144,8 @@ export function PtyTerminal() {
       if (lastThemeDigestRef.current === digest) return
       lastThemeDigestRef.current = digest
 
-      const renderer = (term as any).renderer as { setTheme?: (theme: ITheme) => void } | undefined
-      renderer?.setTheme?.(theme)
-      writeOscTheme(term)
+      term.options.theme = theme
+      term.refresh(0, Math.max(0, term.rows - 1))
     })
 
     return () => {
@@ -182,22 +168,31 @@ export function PtyTerminal() {
 
     let disposed = false
     const fitAddon = new FitAddon()
+    const webglAddon = new WebglAddon()
     fitAddonRef.current = fitAddon
+    webglAddonRef.current = webglAddon
+
     const term = new Terminal({
       fontFamily: terminalFontFamily(fonts.terminalFont),
       fontSize: 12,
-      wasmPath: "/ghostty-vt.wasm",
       cursorBlink: true,
       theme: terminalThemeFromCss(),
+      scrollback: 5000,
     })
     termRef.current = term
 
     term.loadAddon(fitAddon)
+    try {
+      term.loadAddon(webglAddon)
+    } catch {
+      // Ignore WebGL initialization failures (unsupported GPU context).
+    }
 
     const decoder = new TextDecoder("utf-8")
     let ws: WebSocket | null = null
     let dataDisposable: { dispose: () => void } | null = null
     let resizeDisposable: { dispose: () => void } | null = null
+    let resizeObserver: ResizeObserver | null = null
     let keydownCapture: ((ev: KeyboardEvent) => void) | null = null
     let pasteCapture: ((ev: ClipboardEvent) => void) | null = null
     let focusCapture: (() => void) | null = null
@@ -234,123 +229,132 @@ export function PtyTerminal() {
       window.requestAnimationFrame(tick)
     }
 
-    void term
-      .open(container)
-      .then(() => {
-        if (disposed) return
+    try {
+      term.open(container)
+    } catch (err) {
+      container.textContent = `Terminal init failed: ${String(err)}`
+      return
+    }
 
-        writeOscTheme(term)
+    focusCapture = () => {
+      try {
+        container.focus({ preventScroll: true })
+        term.focus()
+      } catch {
+        // ignore
+      }
+    }
 
-        focusCapture = () => {
-          try {
-            container.focus({ preventScroll: true })
-            term.focus()
-          } catch {
-            // ignore
-          }
-        }
+    keydownCapture = (ev: KeyboardEvent) => {
+      const isShortcut = ev.ctrlKey || ev.metaKey
+      if (!isShortcut) return
 
-        keydownCapture = (ev: KeyboardEvent) => {
-          const isShortcut = ev.ctrlKey || ev.metaKey
-          if (!isShortcut) return
+      if (ev.code === "KeyC") {
+        if (!term.hasSelection()) return
+        const selection = term.getSelection()
+        if (selection.trim().length === 0) return
 
-          if (ev.code === "KeyC") {
-            if (!term.hasSelection()) return
+        ev.preventDefault()
+        ev.stopPropagation()
+        ev.stopImmediatePropagation()
+        void copyToClipboard(selection)
+        return
+      }
 
-            const selection = term.getSelection()
-            if (selection.trim().length === 0) return
+      if (ev.code === "KeyV") {
+        pasteHandled = false
+        const promise = navigator.clipboard?.readText ? navigator.clipboard.readText() : null
+        pendingPastePromise = promise
+        if (!promise) return
 
-            ev.preventDefault()
-            ev.stopPropagation()
-            ev.stopImmediatePropagation()
+        ev.preventDefault()
+        ev.stopPropagation()
+        ev.stopImmediatePropagation()
 
-            void copyToClipboard(selection)
-            return
-          }
+        queueMicrotask(() => {
+          if (disposed) return
+          if (pasteHandled) return
 
-          if (ev.code === "KeyV") {
-            pasteHandled = false
-            const promise = navigator.clipboard?.readText ? navigator.clipboard.readText() : null
-            pendingPastePromise = promise
-
-            if (!promise) return
-
-            queueMicrotask(() => {
+          void promise
+            .then((text) => {
               if (disposed) return
               if (pasteHandled) return
-
-              void promise
-                .then((text) => {
-                  if (disposed) return
-                  if (pasteHandled) return
-                  if (text.length === 0) return
-                  sendInput(text)
-                })
-                .catch(() => {
-                  // Ignore clipboard errors (permissions, etc.).
-                })
-                .finally(() => {
-                  if (pendingPastePromise === promise) pendingPastePromise = null
-                })
+              if (text.length === 0) return
+              sendInput(text)
             })
-            return
-          }
-        }
-
-        pasteCapture = () => {
-          pasteHandled = true
-        }
-
-        container.addEventListener("mousedown", focusCapture, true)
-        container.addEventListener("touchstart", focusCapture, true)
-        container.addEventListener("keydown", keydownCapture, true)
-        container.addEventListener("paste", pasteCapture, true)
-
-        resizeDisposable = term.onResize(({ cols, rows }) => {
-          sendResizeIfReady(cols, rows)
+            .catch(() => {
+              // Ignore clipboard errors (permissions, etc.).
+            })
+            .finally(() => {
+              if (pendingPastePromise === promise) pendingPastePromise = null
+            })
         })
+        return
+      }
+    }
 
-        scheduleFitAndResizeSync()
-        fitAddon.observeResize()
+    pasteCapture = (ev: ClipboardEvent) => {
+      pasteHandled = true
+      const text = ev.clipboardData?.getData("text/plain") ?? ""
+      if (text.length === 0) return
+      ev.preventDefault()
+      ev.stopPropagation()
+      ev.stopImmediatePropagation()
+      sendInput(text)
+    }
 
-        const url = new URL(`/api/pty/${activeWorkspaceId}/${ptyThreadId}`, window.location.href)
-        url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
-        ws = new WebSocket(url.toString())
-        ws.binaryType = "arraybuffer"
+    container.addEventListener("mousedown", focusCapture, true)
+    container.addEventListener("touchstart", focusCapture, true)
+    container.addEventListener("keydown", keydownCapture, true)
+    container.addEventListener("paste", pasteCapture, true)
 
-        ws.onmessage = (ev) => {
-          if (disposed) return
-          if (typeof ev.data === "string") return
-          const bytes = new Uint8Array(ev.data as ArrayBuffer)
-          term.write(decoder.decode(bytes))
-        }
+    resizeDisposable = term.onResize(({ cols, rows }) => {
+      sendResizeIfReady(cols, rows)
+    })
 
-        ws.onopen = () => {
-          if (disposed) return
-          scheduleFitAndResizeSync()
-        }
+    resizeObserver = new ResizeObserver(() => {
+      scheduleFitAndResizeSync()
+    })
+    resizeObserver.observe(container)
 
-        dataDisposable = term.onData((data: string) => {
-          if (ws?.readyState !== WebSocket.OPEN) return
-          ws.send(JSON.stringify({ type: "input", data }))
-        })
-      })
-      .catch((err) => {
-        if (disposed) return
-        container.textContent = `Terminal init failed: ${String(err)}`
-      })
+    scheduleFitAndResizeSync()
+
+    const url = new URL(`/api/pty/${activeWorkspaceId}/${ptyThreadId}`, window.location.href)
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
+    ws = new WebSocket(url.toString())
+    ws.binaryType = "arraybuffer"
+
+    ws.onmessage = (ev) => {
+      if (disposed) return
+      if (typeof ev.data === "string") return
+      const bytes = new Uint8Array(ev.data as ArrayBuffer)
+      term.write(decoder.decode(bytes))
+    }
+
+    ws.onopen = () => {
+      if (disposed) return
+      scheduleFitAndResizeSync()
+    }
+
+    dataDisposable = term.onData((data: string) => {
+      if (ws?.readyState !== WebSocket.OPEN) return
+      ws.send(JSON.stringify({ type: "input", data }))
+    })
 
     return () => {
       disposed = true
       termRef.current = null
       fitAddonRef.current = null
+      webglAddonRef.current = null
       if (focusCapture) container.removeEventListener("mousedown", focusCapture, true)
       if (focusCapture) container.removeEventListener("touchstart", focusCapture, true)
       if (keydownCapture) container.removeEventListener("keydown", keydownCapture, true)
       if (pasteCapture) container.removeEventListener("paste", pasteCapture, true)
+      resizeObserver?.disconnect()
       dataDisposable?.dispose()
       resizeDisposable?.dispose()
       ws?.close()
+      webglAddon.dispose()
       term.dispose()
     }
   }, [activeWorkspaceId])
@@ -360,7 +364,7 @@ export function PtyTerminal() {
       ref={containerRef}
       data-testid="pty-terminal"
       tabIndex={0}
-      className="h-full w-full p-3 font-mono text-xs overflow-auto bg-card text-card-foreground focus:outline-none"
+      className="h-full w-full p-3 font-mono text-xs overflow-hidden bg-card text-card-foreground focus:outline-none"
     />
   )
 }

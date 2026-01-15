@@ -24,7 +24,9 @@ test("terminal background matches card background and survives reload", async ({
   await ensureWorkspace(page)
 
   const terminal = page.getByTestId("pty-terminal")
-  await expect(terminal.locator("canvas")).toHaveCount(1, { timeout: 20_000 })
+  await expect
+    .poll(async () => await terminal.locator("canvas").count(), { timeout: 20_000 })
+    .toBeGreaterThan(0)
 
   const expected = await terminal.evaluate((el) => getComputedStyle(el as Element).backgroundColor)
   const rgb = parseRgb(expected)
@@ -41,7 +43,9 @@ test("terminal background matches card background and survives reload", async ({
 
   await page.reload()
   await expect(page.getByTestId("thread-tab-title").first()).toBeVisible({ timeout: 60_000 })
-  await expect(terminal.locator("canvas")).toHaveCount(1, { timeout: 20_000 })
+  await expect
+    .poll(async () => await terminal.locator("canvas").count(), { timeout: 20_000 })
+    .toBeGreaterThan(0)
 })
 
 test("terminal paste sends input frames", async ({ page }) => {
@@ -63,7 +67,9 @@ test("terminal paste sends input frames", async ({ page }) => {
   await ensureWorkspace(page)
 
   const terminal = page.getByTestId("pty-terminal")
-  await expect(terminal.locator("canvas")).toHaveCount(1, { timeout: 20_000 })
+  await expect
+    .poll(async () => await terminal.locator("canvas").count(), { timeout: 20_000 })
+    .toBeGreaterThan(0)
 
   await terminal.evaluate(
     (el, payload) => {
@@ -85,7 +91,9 @@ test("terminal theme follows app theme changes", async ({ page }) => {
   await ensureWorkspace(page)
 
   const terminal = page.getByTestId("pty-terminal")
-  await expect(terminal.locator("canvas")).toHaveCount(1, { timeout: 20_000 })
+  await expect
+    .poll(async () => await terminal.locator("canvas").count(), { timeout: 20_000 })
+    .toBeGreaterThan(0)
 
   await sendWsAction(page, { type: "appearance_theme_changed", theme: "light" })
   await expect
