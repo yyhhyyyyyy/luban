@@ -372,8 +372,6 @@ export function ChatPanel({
   const attachmentScope = `${activeWorkspaceId ?? "none"}:${activeThreadId ?? "none"}`
 
   const queuedPrompts = conversation?.pending_prompts ?? []
-  const QUEUE_COLLAPSED_LIMIT = 2
-  const [isQueueExpanded, setIsQueueExpanded] = useState(false)
   const [editingQueuedPromptId, setEditingQueuedPromptId] = useState<number | null>(null)
   const [draggingQueuedPromptId, setDraggingQueuedPromptId] = useState<number | null>(null)
   const [queuedDraftText, setQueuedDraftText] = useState("")
@@ -543,7 +541,6 @@ export function ChatPanel({
     if (activeWorkspaceId == null || activeThreadId == null) {
       setDraftText("")
       setAttachments([])
-      setIsQueueExpanded(false)
       setEditingQueuedPromptId(null)
       setQueuedDraftText("")
       setQueuedDraftAttachments([])
@@ -559,7 +556,6 @@ export function ChatPanel({
     setDraftText(saved?.text ?? "")
     setAttachments([])
     attachmentScopeRef.current = attachmentScope
-    setIsQueueExpanded(false)
     setEditingQueuedPromptId(null)
     setQueuedDraftText("")
     setQueuedDraftAttachments([])
@@ -1253,70 +1249,39 @@ export function ChatPanel({
                     <div className="h-px flex-1 bg-border" />
                   </div>
 
-                  {(() => {
-                    const visiblePrompts = isQueueExpanded
-                      ? queuedPrompts
-                      : queuedPrompts.slice(0, QUEUE_COLLAPSED_LIMIT)
-                    const hiddenCount = queuedPrompts.length - QUEUE_COLLAPSED_LIMIT
-
-                    return (
-                      <>
-                        {visiblePrompts.map((prompt) => (
-                          <QueuedPromptRow
-                            key={prompt.id}
-                            prompt={prompt}
-                            isEditing={editingQueuedPromptId === prompt.id}
-                            isDragging={draggingQueuedPromptId === prompt.id}
-                            editingText={queuedDraftText}
-                            editingAttachments={queuedDraftAttachments}
-                            editingModelId={queuedDraftModelId}
-                            editingThinkingEffort={queuedDraftThinkingEffort}
-                            defaultModelId={app?.agent?.default_model_id ?? null}
-                            defaultThinkingEffort={app?.agent?.default_thinking_effort ?? null}
-                            onStartEdit={() => handleStartQueuedEdit(prompt.id)}
-                            onSaveEdit={handleSaveQueuedEdit}
-                            onCancelEdit={handleCancelQueuedEdit}
-                            onCancelPrompt={() => handleCancelQueuedPrompt(prompt.id)}
-                            onEditingTextChange={setQueuedDraftText}
-                            onEditingModelIdChange={setQueuedDraftModelId}
-                            onEditingThinkingEffortChange={setQueuedDraftThinkingEffort}
-                            onQueuedFileSelect={handleQueuedFileSelect}
-                            onQueuedPaste={handleQueuedPaste}
-                            onRemoveEditingAttachment={removeQueuedDraftAttachment}
-                            onAddEditingAttachmentRef={(attachment) => {
-                              setQueuedDraftAttachments((prev) => [...prev, ...attachmentsFromRefs([attachment])])
-                            }}
-                            onOpenAgentSettings={(agentId, agentFilePath) =>
-                              openSettingsPanel("agent", { agentId, agentFilePath })
-                            }
-                            onQueueDragStart={() => setDraggingQueuedPromptId(prompt.id)}
-                            onQueueDragEnd={() => setDraggingQueuedPromptId(null)}
-                            onQueueDrop={handleQueueDrop}
-                          />
-                        ))}
-
-                        {!isQueueExpanded && hiddenCount > 0 && (
-                          <button
-                            onClick={() => setIsQueueExpanded(true)}
-                            className="w-full flex items-center justify-center gap-1.5 py-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                            data-testid="queued-prompts-expand"
-                          >
-                            <ChevronDown className="w-3 h-3" />+{hiddenCount} more queued
-                          </button>
-                        )}
-                        {isQueueExpanded && queuedPrompts.length > QUEUE_COLLAPSED_LIMIT && (
-                          <button
-                            onClick={() => setIsQueueExpanded(false)}
-                            className="w-full flex items-center justify-center gap-1.5 py-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                            data-testid="queued-prompts-collapse"
-                          >
-                            <ChevronRight className="w-3 h-3 -rotate-90" />
-                            Show less
-                          </button>
-                        )}
-                      </>
-                    )
-                  })()}
+                  {queuedPrompts.map((prompt) => (
+                    <QueuedPromptRow
+                      key={prompt.id}
+                      prompt={prompt}
+                      isEditing={editingQueuedPromptId === prompt.id}
+                      isDragging={draggingQueuedPromptId === prompt.id}
+                      editingText={queuedDraftText}
+                      editingAttachments={queuedDraftAttachments}
+                      editingModelId={queuedDraftModelId}
+                      editingThinkingEffort={queuedDraftThinkingEffort}
+                      defaultModelId={app?.agent?.default_model_id ?? null}
+                      defaultThinkingEffort={app?.agent?.default_thinking_effort ?? null}
+                      onStartEdit={() => handleStartQueuedEdit(prompt.id)}
+                      onSaveEdit={handleSaveQueuedEdit}
+                      onCancelEdit={handleCancelQueuedEdit}
+                      onCancelPrompt={() => handleCancelQueuedPrompt(prompt.id)}
+                      onEditingTextChange={setQueuedDraftText}
+                      onEditingModelIdChange={setQueuedDraftModelId}
+                      onEditingThinkingEffortChange={setQueuedDraftThinkingEffort}
+                      onQueuedFileSelect={handleQueuedFileSelect}
+                      onQueuedPaste={handleQueuedPaste}
+                      onRemoveEditingAttachment={removeQueuedDraftAttachment}
+                      onAddEditingAttachmentRef={(attachment) => {
+                        setQueuedDraftAttachments((prev) => [...prev, ...attachmentsFromRefs([attachment])])
+                      }}
+                      onOpenAgentSettings={(agentId, agentFilePath) =>
+                        openSettingsPanel("agent", { agentId, agentFilePath })
+                      }
+                      onQueueDragStart={() => setDraggingQueuedPromptId(prompt.id)}
+                      onQueueDragEnd={() => setDraggingQueuedPromptId(null)}
+                      onQueueDrop={handleQueueDrop}
+                    />
+                  ))}
                 </div>
               )}
             </div>
