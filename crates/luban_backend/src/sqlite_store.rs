@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
-const LATEST_SCHEMA_VERSION: u32 = 10;
+const LATEST_SCHEMA_VERSION: u32 = 11;
 const WORKSPACE_CHAT_SCROLL_PREFIX: &str = "workspace_chat_scroll_y10_";
 const WORKSPACE_CHAT_SCROLL_ANCHOR_PREFIX: &str = "workspace_chat_scroll_anchor_";
 const WORKSPACE_ACTIVE_THREAD_PREFIX: &str = "workspace_active_thread_id_";
@@ -2087,6 +2087,113 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 7);
+    }
+
+    #[test]
+    fn migrations_reopen_does_not_fail() {
+        let path = temp_db_path("migrations_reopen_does_not_fail");
+        {
+            let _db = open_db(&path);
+        }
+
+        let db = open_db(&path);
+        let version: i64 = db
+            .conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version as u32, LATEST_SCHEMA_VERSION);
+    }
+
+    fn create_db_at_schema_version(path: &Path, target_version: u32) {
+        let mut conn = Connection::open(path).unwrap();
+        configure_connection(&mut conn).unwrap();
+
+        let current: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(current as u32, 0);
+
+        conn.execute_batch("BEGIN IMMEDIATE;").unwrap();
+        for (version, sql) in MIGRATIONS {
+            if *version > target_version {
+                break;
+            }
+            conn.execute_batch(sql).unwrap();
+            conn.pragma_update(None, "user_version", *version as i64)
+                .unwrap();
+        }
+        conn.execute_batch("COMMIT;").unwrap();
+
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version as u32, target_version);
+    }
+
+    #[test]
+    fn migrations_upgrade_v10_database_in_place() {
+        let path = temp_db_path("migrations_upgrade_v10_database_in_place");
+        create_db_at_schema_version(&path, 10);
+
+        let mut db = open_db(&path);
+        let version: i64 = db
+            .conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version as u32, LATEST_SCHEMA_VERSION);
+
+        let columns = db
+            .conn
+            .prepare("PRAGMA table_info(workspaces)")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert!(!columns.iter().any(|c| c == "branch_name"));
+        assert!(!columns.iter().any(|c| c == "branch_renamed"));
+
+        let snapshot = PersistedAppState {
+            projects: vec![PersistedProject {
+                id: 1,
+                slug: "p".to_owned(),
+                name: "P".to_owned(),
+                path: PathBuf::from("/tmp/p"),
+                is_git: true,
+                expanded: false,
+                workspaces: vec![PersistedWorkspace {
+                    id: 2,
+                    workspace_name: "w".to_owned(),
+                    branch_name: "w".to_owned(),
+                    worktree_path: PathBuf::from("/tmp/p/worktrees/w"),
+                    status: WorkspaceStatus::Active,
+                    last_activity_at_unix_seconds: None,
+                }],
+            }],
+            sidebar_width: None,
+            terminal_pane_width: None,
+            appearance_theme: None,
+            appearance_ui_font: None,
+            appearance_chat_font: None,
+            appearance_code_font: None,
+            appearance_terminal_font: None,
+            agent_default_model_id: None,
+            agent_default_thinking_effort: None,
+            agent_codex_enabled: Some(true),
+            last_open_workspace_id: None,
+            workspace_active_thread_id: HashMap::new(),
+            workspace_open_tabs: HashMap::new(),
+            workspace_archived_tabs: HashMap::new(),
+            workspace_next_thread_id: HashMap::new(),
+            workspace_chat_scroll_y10: HashMap::new(),
+            workspace_chat_scroll_anchor: HashMap::new(),
+            workspace_unread_completions: HashMap::new(),
+            task_prompt_templates: HashMap::new(),
+        };
+
+        db.save_app_state(&snapshot).unwrap();
+        let loaded = db.load_app_state().unwrap();
+        assert_eq!(loaded, snapshot);
     }
 
     #[test]
