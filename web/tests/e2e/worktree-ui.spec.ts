@@ -382,16 +382,23 @@ test("archiving a worktree shows an executing animation", async ({ page }) => {
             id: number
             short_id: string
             workspace_name: string
+            branch_name: string
             status: string
           }[]
         }[]
       }
       const project = app.projects.find((p) => p.path === projectDir)
       if (!project) return null
+      const main = project.workspaces.find((w) => w.workspace_name === "main" && w.status === "active") ?? null
       const workspace =
         project.workspaces.find((w) => w.workspace_name !== "main" && w.status === "active") ?? null
       if (!workspace) return null
-      return { workspaceId: workspace.id, worktreeName: workspace.workspace_name }
+      return {
+        workspaceId: workspace.id,
+        worktreeName: workspace.workspace_name,
+        branchName: workspace.branch_name,
+        mainBranchName: main?.branch_name ?? null,
+      }
     }, projectPath)
 
   await expect.poll(async () => await resolveWorkspace(), { timeout: 90_000 }).not.toBeNull()
@@ -399,6 +406,9 @@ test("archiving a worktree shows an executing animation", async ({ page }) => {
   const resolved = await resolveWorkspace()
   if (!resolved) throw new Error("workspace not found after creation")
   const worktreeName = resolved.worktreeName
+  const branchName = resolved.branchName
+  const mainBranchName = resolved.mainBranchName
+  if (!mainBranchName) throw new Error("main workspace not found")
 
   const ensureExpanded = async () => {
     const count = await projectContainer
@@ -421,6 +431,9 @@ test("archiving a worktree shows an executing animation", async ({ page }) => {
     .locator("..")
     .locator("..")
 
+  await row.click()
+  await expect(page.getByTestId("active-workspace-branch")).toHaveText(branchName, { timeout: 15_000 })
+
   await row.hover()
   await row.getByTitle("Archive worktree").click()
 
@@ -432,6 +445,7 @@ test("archiving a worktree shows an executing animation", async ({ page }) => {
   void outcome
 
   await expect.poll(async () => await row.count(), { timeout: 90_000 }).toBe(0)
+  await expect(page.getByTestId("active-workspace-branch")).toHaveText(mainBranchName, { timeout: 30_000 })
 })
 
 test("sidebar resize gutter does not break header divider line", async ({ page }) => {

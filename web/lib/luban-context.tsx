@@ -32,6 +32,11 @@ import { createLubanServerEventHandler } from "./luban-store-events"
 import { useExternalLinkInterceptor } from "./external-link-interceptor"
 import { ACTIVE_WORKSPACE_KEY } from "./ui-prefs"
 import { useLubanTransport } from "./luban-transport"
+import { focusChatInput } from "./focus-chat-input"
+
+function normalizePathLike(raw: string): string {
+  return raw.trim().replace(/\/+$/, "")
+}
 
 type LubanContextValue = {
   app: AppSnapshot | null
@@ -96,6 +101,8 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
   const store = useLubanStore()
   const { app, activeWorkspaceId, activeThreadId, threads, workspaceTabs, conversation, activeWorkspace } = store.state
   const eventHandlerRef = useRef<(event: ServerEvent) => void>(() => {})
+  const pendingAutoOpenWorkspaceIdRef = useRef<WorkspaceId | null>(null)
+  const lastActiveProjectIdxRef = useRef<number | null>(null)
 
   useExternalLinkInterceptor()
 
@@ -134,6 +141,71 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     if (!exists) return
     void actions.openWorkspace(stored)
   }, [app, activeWorkspaceId])
+
+  useEffect(() => {
+    if (app == null) return
+    if (activeWorkspaceId == null) return
+
+    const locateActiveWorkspace = (): { projectIdx: number; workspaceId: WorkspaceId } | null => {
+      for (let i = 0; i < app.projects.length; i++) {
+        const project = app.projects[i]!
+        const workspace = project.workspaces.find((w) => w.id === activeWorkspaceId) ?? null
+        if (workspace) return { projectIdx: i, workspaceId: activeWorkspaceId }
+      }
+      return null
+    }
+
+    const located = locateActiveWorkspace()
+    if (activeWorkspace?.status === "active" && located) {
+      lastActiveProjectIdxRef.current = located.projectIdx
+      return
+    }
+
+    const pickMainOrFirstActive = (projectIdx: number): WorkspaceId | null => {
+      const project = app.projects[projectIdx] ?? null
+      if (!project) return null
+      const activeWorkspaces = project.workspaces.filter((w) => w.status === "active")
+      if (activeWorkspaces.length === 0) return null
+      const main =
+        activeWorkspaces.find(
+          (w) =>
+            w.workspace_name === "main" &&
+            normalizePathLike(w.worktree_path) === normalizePathLike(project.path),
+        ) ??
+        activeWorkspaces.find((w) => w.workspace_name === "main") ??
+        activeWorkspaces[0] ??
+        null
+      return (main?.id as WorkspaceId | undefined) ?? null
+    }
+
+    const currentIdx = located?.projectIdx ?? lastActiveProjectIdxRef.current ?? -1
+
+    const fromCurrent =
+      currentIdx >= 0 && currentIdx < app.projects.length ? pickMainOrFirstActive(currentIdx) : null
+
+    let fallback: WorkspaceId | null = fromCurrent
+    if (fallback == null && app.projects.length > 0) {
+      const start = currentIdx >= 0 ? (currentIdx + 1) % app.projects.length : 0
+      for (let scanned = 0; scanned < app.projects.length; scanned++) {
+        const idx = (start + scanned) % app.projects.length
+        const candidate = pickMainOrFirstActive(idx)
+        if (candidate != null) {
+          fallback = candidate
+          break
+        }
+      }
+    }
+
+    if (fallback == null || fallback === activeWorkspaceId || pendingAutoOpenWorkspaceIdRef.current === fallback) {
+      return
+    }
+
+    pendingAutoOpenWorkspaceIdRef.current = fallback
+    void actions.openWorkspace(fallback).finally(() => {
+      pendingAutoOpenWorkspaceIdRef.current = null
+      focusChatInput()
+    })
+  }, [app?.rev, activeWorkspaceId, activeWorkspace?.status])
 
   const value: LubanContextValue = {
     app,
