@@ -12,7 +12,6 @@ import {
   MessageSquare,
   Plus,
   X,
-  ExternalLink,
   GitBranch,
   GitCompareArrows,
   RotateCcw,
@@ -47,6 +46,7 @@ import {
 import type { ChangedFile } from "./right-sidebar"
 import { MultiFileDiff, type FileContents } from "@pierre/diffs/react"
 import { CodexAgentSelector } from "@/components/shared/agent-selector"
+import { OpenButton } from "@/components/shared/open-button"
 import { openSettingsPanel } from "@/lib/open-settings"
 
 interface ChatTab {
@@ -103,7 +103,6 @@ export function ChatPanel({
     closeThreadTab,
     restoreThreadTab,
     sendAgentMessage,
-    openWorkspaceInIde,
     renameWorkspaceBranch,
     aiRenameWorkspaceBranch,
     setChatModel,
@@ -614,17 +613,7 @@ export function ChatPanel({
               </>
             )}
           </div>
-          <button
-            className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded transition-colors"
-            title="Open in editor"
-            disabled={activeWorkspaceId == null}
-            onClick={() => {
-              if (activeWorkspaceId == null) return
-              openWorkspaceInIde(activeWorkspaceId)
-            }}
-          >
-            <ExternalLink className="w-4 h-4" />
-          </button>
+          <OpenButton />
         </div>
       </div>
 

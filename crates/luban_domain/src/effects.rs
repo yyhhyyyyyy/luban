@@ -1,6 +1,6 @@
 use crate::{
-    AgentRunConfig, AttachmentRef, ProjectId, SystemTaskKind, TaskIntentKind, WorkspaceId,
-    WorkspaceThreadId,
+    AgentRunConfig, AttachmentRef, OpenTarget, ProjectId, SystemTaskKind, TaskIntentKind,
+    WorkspaceId, WorkspaceThreadId,
 };
 use std::collections::HashMap;
 
@@ -37,6 +37,10 @@ pub enum Effect {
     },
     OpenWorkspaceInIde {
         workspace_id: WorkspaceId,
+    },
+    OpenWorkspaceWith {
+        workspace_id: WorkspaceId,
+        target: OpenTarget,
     },
     OpenWorkspacePullRequest {
         workspace_id: WorkspaceId,

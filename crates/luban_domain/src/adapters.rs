@@ -160,6 +160,15 @@ pub struct ProjectIdentity {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OpenTarget {
+    Vscode,
+    Cursor,
+    Zed,
+    Ghostty,
+    Finder,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CodexConfigEntryKind {
     File,
     Folder,
@@ -186,6 +195,14 @@ pub trait ProjectWorkspaceService: Send + Sync {
     ) -> Result<CreatedWorkspace, String>;
 
     fn open_workspace_in_ide(&self, worktree_path: PathBuf) -> Result<(), String>;
+
+    fn open_workspace_with(
+        &self,
+        _worktree_path: PathBuf,
+        _target: OpenTarget,
+    ) -> Result<(), String> {
+        Err("unimplemented".to_owned())
+    }
 
     fn archive_workspace(
         &self,

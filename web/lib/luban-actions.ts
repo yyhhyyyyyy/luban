@@ -6,6 +6,7 @@ import type {
   AttachmentRef,
   ClientAction,
   CodexConfigEntrySnapshot,
+  OpenTarget,
   SystemTaskKind,
   TaskIntentKind,
   TaskDraft,
@@ -27,6 +28,7 @@ export type LubanActions = {
   createWorkspace: (projectId: number) => void
   ensureMainWorkspace: (projectId: number) => void
   openWorkspaceInIde: (workspaceId: WorkspaceId) => void
+  openWorkspaceWith: (workspaceId: WorkspaceId, target: OpenTarget) => void
   openWorkspacePullRequest: (workspaceId: WorkspaceId) => void
   openWorkspacePullRequestFailedAction: (workspaceId: WorkspaceId) => void
   archiveWorkspace: (workspaceId: number) => void
@@ -96,6 +98,10 @@ export function createLubanActions(args: {
 
   function openWorkspaceInIde(workspaceId: WorkspaceId) {
     args.sendAction({ type: "open_workspace_in_ide", workspace_id: workspaceId })
+  }
+
+  function openWorkspaceWith(workspaceId: WorkspaceId, target: OpenTarget) {
+    args.sendAction({ type: "open_workspace_with", workspace_id: workspaceId, target })
   }
 
   function openWorkspacePullRequest(workspaceId: WorkspaceId) {
@@ -440,6 +446,7 @@ export function createLubanActions(args: {
     createWorkspace,
     ensureMainWorkspace,
     openWorkspaceInIde,
+    openWorkspaceWith,
     openWorkspacePullRequest,
     openWorkspacePullRequestFailedAction,
     archiveWorkspace,

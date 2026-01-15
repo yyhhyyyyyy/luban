@@ -183,6 +183,8 @@ export type OperationStatus = "idle" | "running"
 
 export type ThinkingEffort = "minimal" | "low" | "medium" | "high" | "xhigh"
 
+export type OpenTarget = "vscode" | "cursor" | "zed" | "ghostty" | "finder"
+
 export type TaskIntentKind =
   | "fix"
   | "implement"
@@ -282,6 +284,7 @@ export type ClientAction =
   | { type: "ensure_main_workspace"; project_id: ProjectId }
   | { type: "open_workspace"; workspace_id: WorkspaceId }
   | { type: "open_workspace_in_ide"; workspace_id: WorkspaceId }
+  | { type: "open_workspace_with"; workspace_id: WorkspaceId; target: OpenTarget }
   | { type: "open_workspace_pull_request"; workspace_id: WorkspaceId }
   | { type: "open_workspace_pull_request_failed_action"; workspace_id: WorkspaceId }
   | { type: "archive_workspace"; workspace_id: WorkspaceId }

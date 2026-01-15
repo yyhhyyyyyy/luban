@@ -4,7 +4,7 @@ use luban_domain::paths;
 use luban_domain::{
     AttachmentKind, AttachmentRef, CodexConfigEntry, CodexConfigEntryKind, CodexThreadEvent,
     CodexThreadItem, ContextImage, ConversationEntry, ConversationSnapshot, CreatedWorkspace,
-    PersistedAppState, ProjectWorkspaceService, PullRequestCiState, PullRequestInfo,
+    OpenTarget, PersistedAppState, ProjectWorkspaceService, PullRequestCiState, PullRequestInfo,
     PullRequestState, RunAgentTurnRequest, SystemTaskKind, TaskIntentKind,
 };
 use rand::{Rng as _, rngs::OsRng};
@@ -478,6 +478,14 @@ impl ProjectWorkspaceService for GitWorkspaceService {
     }
 
     fn open_workspace_in_ide(&self, worktree_path: PathBuf) -> Result<(), String> {
+        self.open_workspace_with(worktree_path, OpenTarget::Zed)
+    }
+
+    fn open_workspace_with(
+        &self,
+        worktree_path: PathBuf,
+        target: OpenTarget,
+    ) -> Result<(), String> {
         let result: anyhow::Result<()> = (|| {
             if !worktree_path.exists() {
                 return Err(anyhow!(
@@ -488,13 +496,38 @@ impl ProjectWorkspaceService for GitWorkspaceService {
 
             #[cfg(target_os = "macos")]
             {
-                let status = Command::new("open")
-                    .args(["-a", "Zed"])
-                    .arg(&worktree_path)
+                let mut cmd = Command::new("open");
+                let cmd_label: &'static str = match target {
+                    OpenTarget::Vscode => "open -a Visual Studio Code",
+                    OpenTarget::Cursor => "open -a Cursor",
+                    OpenTarget::Zed => "open -a Zed",
+                    OpenTarget::Ghostty => "open -a Ghostty",
+                    OpenTarget::Finder => "open -R",
+                };
+
+                match target {
+                    OpenTarget::Vscode => {
+                        cmd.args(["-a", "Visual Studio Code"]).arg(&worktree_path);
+                    }
+                    OpenTarget::Cursor => {
+                        cmd.args(["-a", "Cursor"]).arg(&worktree_path);
+                    }
+                    OpenTarget::Zed => {
+                        cmd.args(["-a", "Zed"]).arg(&worktree_path);
+                    }
+                    OpenTarget::Ghostty => {
+                        cmd.args(["-a", "Ghostty"]);
+                    }
+                    OpenTarget::Finder => {
+                        cmd.arg("-R").arg(&worktree_path);
+                    }
+                }
+
+                let status = cmd
                     .status()
-                    .context("failed to spawn 'open -a Zed'")?;
+                    .with_context(|| format!("failed to spawn '{cmd_label}'"))?;
                 if !status.success() {
-                    return Err(anyhow!("'open -a Zed' exited with status: {status}"));
+                    return Err(anyhow!("'{cmd_label}' exited with status: {status}"));
                 }
                 Ok(())
             }
@@ -502,7 +535,10 @@ impl ProjectWorkspaceService for GitWorkspaceService {
             #[cfg(not(target_os = "macos"))]
             {
                 let _ = worktree_path;
-                Err(anyhow!("open in IDE is only supported on macOS for now"))
+                let _ = target;
+                Err(anyhow!(
+                    "opening external apps is only supported on macOS for now"
+                ))
             }
         })();
 

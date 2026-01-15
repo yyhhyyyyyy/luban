@@ -284,6 +284,23 @@ impl AppState {
                 self.last_error = Some(message);
                 Vec::new()
             }
+            Action::OpenWorkspaceWith {
+                workspace_id,
+                target,
+            } => {
+                if self.workspace(workspace_id).is_none() {
+                    self.last_error = Some("Workspace not found".to_owned());
+                    return Vec::new();
+                }
+                vec![Effect::OpenWorkspaceWith {
+                    workspace_id,
+                    target,
+                }]
+            }
+            Action::OpenWorkspaceWithFailed { message } => {
+                self.last_error = Some(message);
+                Vec::new()
+            }
             Action::OpenWorkspacePullRequest { workspace_id } => {
                 if self.workspace(workspace_id).is_none() {
                     self.last_error = Some("Workspace not found".to_owned());

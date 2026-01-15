@@ -262,6 +262,16 @@ pub enum ThinkingEffort {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum OpenTarget {
+    Vscode,
+    Cursor,
+    Zed,
+    Ghostty,
+    Finder,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum TaskIntentKind {
     Fix,
     Implement,
@@ -495,6 +505,10 @@ pub enum ClientAction {
     },
     OpenWorkspaceInIde {
         workspace_id: WorkspaceId,
+    },
+    OpenWorkspaceWith {
+        workspace_id: WorkspaceId,
+        target: OpenTarget,
     },
     OpenWorkspacePullRequest {
         workspace_id: WorkspaceId,

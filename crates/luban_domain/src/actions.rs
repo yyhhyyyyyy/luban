@@ -1,7 +1,7 @@
 use crate::{
     AppearanceTheme, AttachmentRef, ChatScrollAnchor, CodexThreadEvent, ContextTokenKind,
-    ConversationSnapshot, ConversationThreadMeta, PersistedAppState, ProjectId, SystemTaskKind,
-    TaskIntentKind, ThinkingEffort, WorkspaceId, WorkspaceThreadId,
+    ConversationSnapshot, ConversationThreadMeta, OpenTarget, PersistedAppState, ProjectId,
+    SystemTaskKind, TaskIntentKind, ThinkingEffort, WorkspaceId, WorkspaceThreadId,
 };
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -55,6 +55,13 @@ pub enum Action {
         workspace_id: WorkspaceId,
     },
     OpenWorkspaceInIdeFailed {
+        message: String,
+    },
+    OpenWorkspaceWith {
+        workspace_id: WorkspaceId,
+        target: OpenTarget,
+    },
+    OpenWorkspaceWithFailed {
         message: String,
     },
     OpenWorkspacePullRequest {

@@ -7,10 +7,10 @@ pub use codex::{
 
 mod adapters;
 pub use adapters::{
-    CodexConfigEntry, CodexConfigEntryKind, ContextImage, CreatedWorkspace, ProjectIdentity,
-    ProjectWorkspaceService, PullRequestCiState, PullRequestInfo, PullRequestState,
-    RunAgentTurnRequest, TaskDraft, TaskIntentKind, TaskIssueInfo, TaskProjectSpec,
-    TaskPullRequestInfo, TaskRepoInfo,
+    CodexConfigEntry, CodexConfigEntryKind, ContextImage, CreatedWorkspace, OpenTarget,
+    ProjectIdentity, ProjectWorkspaceService, PullRequestCiState, PullRequestInfo,
+    PullRequestState, RunAgentTurnRequest, TaskDraft, TaskIntentKind, TaskIssueInfo,
+    TaskProjectSpec, TaskPullRequestInfo, TaskRepoInfo,
 };
 mod context_tokens;
 pub use context_tokens::{

@@ -20,6 +20,7 @@ import type {
   TaskExecuteResult,
   TaskIntentKind,
   ThinkingEffort,
+  OpenTarget,
   WorkspaceId,
   WorkspaceThreadId,
   WorkspaceSnapshot,
@@ -48,6 +49,7 @@ type LubanContextValue = {
   createWorkspace: (projectId: number) => void
   ensureMainWorkspace: (projectId: number) => void
   openWorkspaceInIde: (workspaceId: WorkspaceId) => void
+  openWorkspaceWith: (workspaceId: WorkspaceId, target: OpenTarget) => void
   openWorkspacePullRequest: (workspaceId: WorkspaceId) => void
   openWorkspacePullRequestFailedAction: (workspaceId: WorkspaceId) => void
   archiveWorkspace: (workspaceId: number) => void
@@ -148,6 +150,7 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     createWorkspace: actions.createWorkspace,
     ensureMainWorkspace: actions.ensureMainWorkspace,
     openWorkspaceInIde: actions.openWorkspaceInIde,
+    openWorkspaceWith: actions.openWorkspaceWith,
     openWorkspacePullRequest: actions.openWorkspacePullRequest,
     openWorkspacePullRequestFailedAction: actions.openWorkspacePullRequestFailedAction,
     archiveWorkspace: actions.archiveWorkspace,

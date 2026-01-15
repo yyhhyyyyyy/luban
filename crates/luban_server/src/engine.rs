@@ -6,9 +6,10 @@ use luban_api::{
 use luban_backend::{GitWorkspaceService, SqliteStoreOptions};
 use luban_domain::{
     Action, AppState, AttachmentKind, AttachmentRef, CodexThreadItem, ConversationEntry, Effect,
-    OperationStatus, ProjectWorkspaceService, PullRequestCiState as DomainPullRequestCiState,
-    PullRequestInfo, PullRequestState as DomainPullRequestState, ThinkingEffort, WorkspaceId,
-    WorkspaceThreadId, default_agent_model_id, default_thinking_effort,
+    OpenTarget, OperationStatus, ProjectWorkspaceService,
+    PullRequestCiState as DomainPullRequestCiState, PullRequestInfo,
+    PullRequestState as DomainPullRequestState, ThinkingEffort, WorkspaceId, WorkspaceThreadId,
+    default_agent_model_id, default_thinking_effort,
 };
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
@@ -1535,6 +1536,38 @@ impl Engine {
                     }
                 }
             }
+            Effect::OpenWorkspaceWith {
+                workspace_id,
+                target,
+            } => {
+                let Some(workspace) = self.state.workspace(workspace_id) else {
+                    return Ok(VecDeque::new());
+                };
+
+                let services = self.services.clone();
+                let worktree_path = workspace.worktree_path.clone();
+                let result = tokio::task::spawn_blocking(move || {
+                    services.open_workspace_with(worktree_path, target)
+                })
+                .await
+                .ok()
+                .unwrap_or_else(|| Err("failed to join open workspace with task".to_owned()));
+
+                match result {
+                    Ok(()) => Ok(VecDeque::new()),
+                    Err(message) => {
+                        let _ = self.events.send(WsServerMessage::Event {
+                            rev: self.rev,
+                            event: Box::new(luban_api::ServerEvent::Toast {
+                                message: message.clone(),
+                            }),
+                        });
+                        Ok(VecDeque::from([Action::OpenWorkspaceWithFailed {
+                            message,
+                        }]))
+                    }
+                }
+            }
             Effect::ArchiveWorkspace { workspace_id } => {
                 let mut project_path: Option<PathBuf> = None;
                 let mut worktree_path: Option<PathBuf> = None;
@@ -2349,6 +2382,19 @@ fn map_client_action(action: luban_api::ClientAction) -> Option<Action> {
                 workspace_id: WorkspaceId::from_u64(workspace_id.0),
             })
         }
+        luban_api::ClientAction::OpenWorkspaceWith {
+            workspace_id,
+            target,
+        } => Some(Action::OpenWorkspaceWith {
+            workspace_id: WorkspaceId::from_u64(workspace_id.0),
+            target: match target {
+                luban_api::OpenTarget::Vscode => OpenTarget::Vscode,
+                luban_api::OpenTarget::Cursor => OpenTarget::Cursor,
+                luban_api::OpenTarget::Zed => OpenTarget::Zed,
+                luban_api::OpenTarget::Ghostty => OpenTarget::Ghostty,
+                luban_api::OpenTarget::Finder => OpenTarget::Finder,
+            },
+        }),
         luban_api::ClientAction::OpenWorkspacePullRequest { workspace_id } => {
             Some(Action::OpenWorkspacePullRequest {
                 workspace_id: WorkspaceId::from_u64(workspace_id.0),
@@ -3420,6 +3466,7 @@ mod tests {
 
     struct OpenInIdeServices {
         opened: Arc<std::sync::Mutex<Vec<PathBuf>>>,
+        opened_with: Arc<std::sync::Mutex<Vec<(PathBuf, OpenTarget)>>>,
     }
 
     impl ProjectWorkspaceService for OpenInIdeServices {
@@ -3466,6 +3513,18 @@ mod tests {
                 .lock()
                 .expect("mutex poisoned")
                 .push(worktree_path);
+            Ok(())
+        }
+
+        fn open_workspace_with(
+            &self,
+            worktree_path: PathBuf,
+            target: OpenTarget,
+        ) -> Result<(), String> {
+            self.opened_with
+                .lock()
+                .expect("mutex poisoned")
+                .push((worktree_path, target));
             Ok(())
         }
 
@@ -3619,8 +3678,10 @@ mod tests {
     #[tokio::test]
     async fn open_workspace_in_ide_runs_effect() {
         let opened = Arc::new(std::sync::Mutex::new(Vec::<PathBuf>::new()));
+        let opened_with = Arc::new(std::sync::Mutex::new(Vec::<(PathBuf, OpenTarget)>::new()));
         let services: Arc<dyn ProjectWorkspaceService> = Arc::new(OpenInIdeServices {
             opened: opened.clone(),
+            opened_with: opened_with.clone(),
         });
 
         let mut state = AppState::new();
@@ -3657,6 +3718,57 @@ mod tests {
 
         let opened = opened.lock().expect("mutex poisoned");
         assert_eq!(opened.as_slice(), &[worktree_path]);
+    }
+
+    #[tokio::test]
+    async fn open_workspace_with_runs_effect() {
+        let opened = Arc::new(std::sync::Mutex::new(Vec::<PathBuf>::new()));
+        let opened_with = Arc::new(std::sync::Mutex::new(Vec::<(PathBuf, OpenTarget)>::new()));
+        let services: Arc<dyn ProjectWorkspaceService> = Arc::new(OpenInIdeServices {
+            opened: opened.clone(),
+            opened_with: opened_with.clone(),
+        });
+
+        let mut state = AppState::new();
+        let _ = state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/luban-server-open-with-test"),
+            is_git: true,
+        });
+        let project_id = state.projects[0].id;
+        let _ = state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "main".to_owned(),
+            branch_name: "main".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban-server-open-with-test"),
+        });
+        let workspace_id = state.projects[0].workspaces[0].id;
+        let worktree_path = state.projects[0].workspaces[0].worktree_path.clone();
+
+        let (events, _) = broadcast::channel::<WsServerMessage>(16);
+        let (tx, _rx) = mpsc::channel::<EngineCommand>(16);
+        let mut engine = Engine {
+            state,
+            rev: 1,
+            services,
+            events,
+            tx,
+            cancel_flags: HashMap::new(),
+            pull_requests: HashMap::new(),
+            pull_requests_in_flight: HashSet::new(),
+        };
+
+        engine
+            .process_action_queue(Action::OpenWorkspaceWith {
+                workspace_id,
+                target: OpenTarget::Vscode,
+            })
+            .await;
+
+        let opened_with = opened_with.lock().expect("mutex poisoned");
+        assert_eq!(
+            opened_with.as_slice(),
+            &[(worktree_path, OpenTarget::Vscode)]
+        );
     }
 
     struct CaptureRunAgentTurnServices {
