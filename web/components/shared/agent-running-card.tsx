@@ -43,6 +43,14 @@ const eventLabels: Record<ActivityEvent["type"], string> = {
 
 export type AgentRunningStatus = "running" | "cancelling" | "paused" | "resuming"
 
+function formatStepClock(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000))
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  const mm = Math.min(minutes, 99)
+  return `${String(mm).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+}
+
 export function AgentRunningCard({
   activities,
   elapsedTime = "00:00",
@@ -92,6 +100,10 @@ export function AgentRunningCard({
   const editorContainerRef = React.useRef<HTMLDivElement>(null)
   const anchorTopRef = React.useRef<number | null>(null)
   const isCompensatingScrollRef = React.useRef(false)
+  const activityTimingRef = React.useRef<Map<string, { startedAtMs: number; doneAtMs: number | null; status: ActivityEvent["status"] }>>(
+    new Map(),
+  )
+  const [timingTick, setTimingTick] = useState(0)
 
   const showEditor = status === "cancelling" || status === "resuming"
   const isPaused = status === "paused"
@@ -105,6 +117,38 @@ export function AgentRunningCard({
   const historyActivities = activities.slice(0, -1)
   const currentLabel = latestActivity ? eventLabels[latestActivity.type] : "Processing"
   const LatestIcon = latestActivity ? eventIcons[latestActivity.type] : Wrench
+
+  React.useEffect(() => {
+    const now = Date.now()
+    for (const event of activities) {
+      const existing = activityTimingRef.current.get(event.id) ?? null
+      if (!existing) {
+        activityTimingRef.current.set(event.id, { startedAtMs: now, doneAtMs: event.status === "done" ? now : null, status: event.status })
+        continue
+      }
+      if (existing.status !== event.status) {
+        existing.status = event.status
+        if (event.status === "done" && existing.doneAtMs == null) {
+          existing.doneAtMs = now
+        }
+      }
+    }
+  }, [activities])
+
+  const hasRunningSteps = activities.some((e) => e.status === "running")
+  React.useEffect(() => {
+    if (!hasRunningSteps) return
+    const timer = window.setInterval(() => setTimingTick((n) => (n + 1) % 1_000_000), 250)
+    return () => window.clearInterval(timer)
+  }, [hasRunningSteps])
+
+  const activityDurationLabel = (event: ActivityEvent): string | null => {
+    void timingTick
+    const meta = activityTimingRef.current.get(event.id) ?? null
+    if (!meta) return null
+    const end = meta.doneAtMs ?? Date.now()
+    return formatStepClock(end - meta.startedAtMs)
+  }
 
   const findScrollContainer = (): HTMLElement | null => {
     const header = headerRef.current
@@ -243,6 +287,7 @@ export function AgentRunningCard({
             const Icon = eventIcons[event.type] || Wrench
             const isEventExpanded = expandedEvents.has(event.id)
             const hasDetail = Boolean(event.detail)
+            const durationLabel = activityDurationLabel(event)
 
             return (
               <div key={event.id} className="group">
@@ -260,11 +305,9 @@ export function AgentRunningCard({
                     {eventLabels[event.type]}
                   </span>
                   <span className="flex-1 text-left truncate">{event.title}</span>
-                  {event.duration && (
-                    <span className="text-[10px] text-muted-foreground/60 font-mono w-8 text-right flex-shrink-0">
-                      {event.duration}
-                    </span>
-                  )}
+                  <span className="text-[10px] text-muted-foreground/60 font-mono w-10 text-right flex-shrink-0">
+                    {durationLabel ?? "00:00"}
+                  </span>
                   {hasDetail && (
                     <ChevronRight
                       className={cn(
