@@ -20,19 +20,54 @@ function formatStepClock(ms: number): string {
   return `${String(mm).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
 }
 
-export function useActivityTiming(activities: ActivityEvent[]): {
+export function useActivityTiming(
+  activities: ActivityEvent[],
+  opts?: { turnStartedAtMs?: number | null },
+): {
   durationLabel: (event: ActivityEvent) => string | null
 } {
   const [tick, setTick] = useState(0)
 
   useEffect(() => {
     const now = Date.now()
+    const turnStartedAtMs =
+      typeof opts?.turnStartedAtMs === "number" && Number.isFinite(opts.turnStartedAtMs)
+        ? opts.turnStartedAtMs
+        : null
+
+    const existingDoneAtMs = activities
+      .map((event) => globalTiming.get(event.id)?.doneAtMs ?? null)
+      .filter((value): value is number => typeof value === "number" && Number.isFinite(value))
+    const cursorStartAtMs =
+      turnStartedAtMs != null
+        ? Math.max(turnStartedAtMs, existingDoneAtMs.length > 0 ? Math.max(...existingDoneAtMs) : turnStartedAtMs)
+        : null
+
+    const newDone = activities.filter((event) => !globalTiming.has(event.id) && event.status === "done")
+    const planned = new Map<string, { startedAtMs: number; doneAtMs: number }>()
+    if (cursorStartAtMs != null && newDone.length > 0) {
+      const spanMs = Math.max(0, now - cursorStartAtMs)
+      const chunk = Math.max(1, Math.floor(spanMs / newDone.length))
+      let cursor = cursorStartAtMs
+      for (let i = 0; i < newDone.length; i += 1) {
+        const event = newDone[i]
+        if (!event) continue
+        const doneAtMs = i === newDone.length - 1 ? now : Math.min(now, cursor + chunk)
+        planned.set(event.id, { startedAtMs: cursor, doneAtMs })
+        cursor = doneAtMs
+      }
+    }
+
     for (const event of activities) {
       const existing = globalTiming.get(event.id) ?? null
       if (!existing) {
+        const plannedTimes = planned.get(event.id) ?? null
         globalTiming.set(event.id, {
-          startedAtMs: now,
-          doneAtMs: event.status === "done" ? now : null,
+          startedAtMs: plannedTimes?.startedAtMs ?? now,
+          doneAtMs:
+            event.status === "done"
+              ? plannedTimes?.doneAtMs ?? now
+              : null,
           status: event.status,
         })
         continue
@@ -45,7 +80,7 @@ export function useActivityTiming(activities: ActivityEvent[]): {
         }
       }
     }
-  }, [activities])
+  }, [activities, opts?.turnStartedAtMs])
 
   const hasRunningSteps = activities.some((e) => e.status === "running")
   useEffect(() => {
@@ -64,4 +99,3 @@ export function useActivityTiming(activities: ActivityEvent[]): {
 
   return { durationLabel }
 }
-

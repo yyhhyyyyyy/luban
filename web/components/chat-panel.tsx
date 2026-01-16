@@ -136,6 +136,7 @@ export function ChatPanel({
   const agentAttachmentScopeRef = useRef<string>("")
   const [agentRunElapsedMs, setAgentRunElapsedMs] = useState(0)
   const agentRunStartAtMsRef = useRef<number | null>(null)
+  const [agentRunStartedAtMs, setAgentRunStartedAtMs] = useState<number | null>(null)
   const agentRunMarkerRef = useRef<string | null>(null)
 
   const [activePanel, setActivePanel] = useState<"thread" | "diff">("thread")
@@ -188,6 +189,7 @@ export function ChatPanel({
     setAgentEditorAttachments([])
     setAgentRunElapsedMs(0)
     agentRunStartAtMsRef.current = null
+    setAgentRunStartedAtMs(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeWorkspaceId, activeThreadId])
 
@@ -559,17 +561,22 @@ export function ChatPanel({
       agentRunStartAtMsRef.current = null
       agentRunMarkerRef.current = null
       setAgentRunElapsedMs(0)
+      setAgentRunStartedAtMs(null)
       return
     }
 
     if (agentTurnMarker && agentTurnMarker !== agentRunMarkerRef.current) {
       agentRunMarkerRef.current = agentTurnMarker
-      agentRunStartAtMsRef.current = Date.now()
+      const startedAt = Date.now()
+      agentRunStartAtMsRef.current = startedAt
+      setAgentRunStartedAtMs(startedAt)
       setAgentRunElapsedMs(0)
     }
 
     if (agentRunStartAtMsRef.current == null) {
-      agentRunStartAtMsRef.current = Date.now()
+      const startedAt = Date.now()
+      agentRunStartAtMsRef.current = startedAt
+      setAgentRunStartedAtMs(startedAt)
       setAgentRunElapsedMs(0)
     }
 
@@ -1294,6 +1301,7 @@ export function ChatPanel({
                     <AgentRunningCard
                       activities={activities}
                       elapsedTime={agentRunElapsedLabel}
+                      turnStartedAtMs={agentRunStartedAtMs}
                       status={agentStatus}
                       hasQueuedMessages={queuedPrompts.length > 0}
                       editorValue={agentEditorValue}
