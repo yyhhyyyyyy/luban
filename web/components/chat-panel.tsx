@@ -130,6 +130,7 @@ export function ChatPanel({
   const agentAttachmentScopeRef = useRef<string>("")
   const [agentRunElapsedMs, setAgentRunElapsedMs] = useState(0)
   const agentRunStartAtMsRef = useRef<number | null>(null)
+  const agentRunMarkerRef = useRef<string | null>(null)
 
   const [activePanel, setActivePanel] = useState<"thread" | "diff">("thread")
   const [diffStyle, setDiffStyle] = useState<"split" | "unified">("split")
@@ -532,11 +533,30 @@ export function ChatPanel({
   const agentStatus = agentOverrideStatus ?? baseAgentStatus
 
   const agentTurnIsRunning = conversation?.run_status === "running"
+  const agentTurnMarker = useMemo(() => {
+    if (!conversation || conversation.run_status !== "running") return null
+    const entries = conversation.entries ?? []
+    for (let idx = entries.length - 1; idx >= 0; idx -= 1) {
+      const entry = entries[idx]
+      if (entry?.type === "user_message") {
+        return `${activeWorkspaceId ?? "none"}:${activeThreadId ?? "none"}:${idx}`
+      }
+    }
+    return `${activeWorkspaceId ?? "none"}:${activeThreadId ?? "none"}:none`
+  }, [conversation?.rev, conversation?.run_status, activeWorkspaceId, activeThreadId])
 
   useEffect(() => {
     if (!agentTurnIsRunning) {
       agentRunStartAtMsRef.current = null
+      agentRunMarkerRef.current = null
+      setAgentRunElapsedMs(0)
       return
+    }
+
+    if (agentTurnMarker && agentTurnMarker !== agentRunMarkerRef.current) {
+      agentRunMarkerRef.current = agentTurnMarker
+      agentRunStartAtMsRef.current = Date.now()
+      setAgentRunElapsedMs(0)
     }
 
     if (agentRunStartAtMsRef.current == null) {
@@ -551,7 +571,7 @@ export function ChatPanel({
     }, 250)
 
     return () => window.clearInterval(timer)
-  }, [agentTurnIsRunning])
+  }, [agentTurnIsRunning, agentTurnMarker])
 
   const agentRunElapsedLabel = useMemo(() => {
     const totalSeconds = Math.max(0, Math.floor(agentRunElapsedMs / 1000))

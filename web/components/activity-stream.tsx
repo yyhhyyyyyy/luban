@@ -16,12 +16,19 @@ import {
 
 import { cn } from "@/lib/utils"
 import type { ActivityEvent } from "@/lib/conversation-ui"
+import { useActivityTiming } from "@/lib/activity-timing"
 
 function ActivityEventItem({
   event,
   isExpanded,
   onToggle,
-}: { event: ActivityEvent; isExpanded: boolean; onToggle: () => void }) {
+  duration,
+}: {
+  event: ActivityEvent
+  isExpanded: boolean
+  onToggle: () => void
+  duration: string | null
+}) {
   const icon = (() => {
     switch (event.type) {
       case "thinking":
@@ -53,7 +60,7 @@ function ActivityEventItem({
       >
         {event.status === "running" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : icon}
         <span className="flex-1 text-left truncate">{event.title}</span>
-        {event.duration && <span className="text-[10px] text-muted-foreground/70">{event.duration}</span>}
+        {duration && <span className="text-[10px] text-muted-foreground/70 font-mono">{duration}</span>}
         {event.detail && (
           <ChevronRight
             className={cn("w-3 h-3 text-muted-foreground/50 transition-transform", isExpanded && "rotate-90")}
@@ -76,6 +83,7 @@ export function ActivityStream({
 }: { activities: ActivityEvent[]; isStreaming?: boolean; isCancelled?: boolean }) {
   const [isExpanded, setIsExpanded] = useState(false)
   const [expandedEvents, setExpandedEvents] = useState<Set<string>>(new Set())
+  const { durationLabel } = useActivityTiming(activities)
 
   const latestActivity = activities[activities.length - 1]
   const completedCount = activities.filter((a) => a.status === "done" && a.title !== "Turn canceled").length
@@ -132,6 +140,7 @@ export function ActivityStream({
               event={event}
               isExpanded={expandedEvents.has(event.id)}
               onToggle={() => toggleEvent(event.id)}
+              duration={durationLabel(event)}
             />
           ))}
         </div>
