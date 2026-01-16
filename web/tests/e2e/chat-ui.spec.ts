@@ -58,6 +58,31 @@ test("pressing enter submits a user message", async ({ page }) => {
   await expect(page.getByTestId("chat-input")).toHaveValue("")
 })
 
+test("enter commits IME composition without sending", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  const runId = Math.random().toString(16).slice(2)
+  const marker = `e2e-ime-${runId}`
+
+  const input = page.getByTestId("chat-input")
+  await input.fill(marker)
+
+  await input.evaluate((el) => {
+    el.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true, data: "x" }))
+  })
+
+  await input.press("Enter")
+  await expect(page.getByTestId("user-message-bubble").filter({ hasText: marker })).toHaveCount(0)
+
+  await input.evaluate((el) => {
+    el.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: "x" }))
+  })
+  await page.waitForTimeout(80)
+
+  await input.press("Enter")
+  await expect(page.getByTestId("user-message-bubble").filter({ hasText: marker }).first()).toBeVisible({ timeout: 20_000 })
+})
+
 test("scroll-to-bottom button appears only when away from bottom", async ({ page }) => {
   await ensureWorkspace(page)
 

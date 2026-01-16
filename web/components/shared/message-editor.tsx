@@ -90,6 +90,9 @@ export function MessageEditor({
   const [isDragging, setIsDragging] = useState(false)
   const history = messageHistory ?? []
 
+  const isComposingRef = useRef(false)
+  const ignoreEnterUntilRef = useRef<number>(0)
+
   const [showCommandMenu, setShowCommandMenu] = useState(false)
   const [commandQuery, setCommandQuery] = useState("")
   const [commandSelectedIndex, setCommandSelectedIndex] = useState(0)
@@ -419,7 +422,10 @@ export function MessageEditor({
         (e as unknown as { keyCode?: number; which?: number }).which === 13
 
       if (isEnter && !e.shiftKey) {
-        if (e.nativeEvent.isComposing) return
+        const now = typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now()
+        const isImeComposing = isComposingRef.current || e.nativeEvent.isComposing || e.key === "Process"
+        if (isImeComposing) return
+        if (now < ignoreEnterUntilRef.current) return
         e.preventDefault()
         if (primaryAction.disabled) return
         primaryAction.onClick()
@@ -640,6 +646,15 @@ export function MessageEditor({
           data-testid={testIds.textInput}
           value={value}
           onChange={(e) => handleTextChange(e.target.value, e.target.selectionStart)}
+          onCompositionStart={() => {
+            isComposingRef.current = true
+          }}
+          onCompositionEnd={() => {
+            isComposingRef.current = false
+            const now =
+              typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now()
+            ignoreEnterUntilRef.current = now + 50
+          }}
           onFocus={() => setIsFocused(true)}
           onBlur={() => setIsFocused(false)}
           onPaste={onPaste}
