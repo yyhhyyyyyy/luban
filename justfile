@@ -102,3 +102,18 @@ build-server profile="debug":
   fi
 
 ci: fmt lint test
+
+package profile="release":
+  if ! cargo tauri --help >/dev/null 2>&1; then \
+    echo "cargo-tauri CLI not found; install it via: cargo install tauri-cli"; \
+    exit 1; \
+  fi; \
+  just web build "{{profile}}"; \
+  if [ "{{profile}}" = "release" ]; then \
+    (cd crates/luban_tauri && cargo tauri build); \
+  elif [ "{{profile}}" = "debug" ] || [ "{{profile}}" = "dev" ]; then \
+    (cd crates/luban_tauri && cargo tauri build --debug); \
+  else \
+    echo "usage: just package [release]"; \
+    exit 2; \
+  fi
