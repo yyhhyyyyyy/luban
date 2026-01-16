@@ -87,6 +87,51 @@ test("terminal paste sends input frames", async ({ page }) => {
   await sentFrame
 })
 
+test("terminal ctrl+arrow sends word navigation input frames", async ({ page }) => {
+  const leftFrame = new Promise<string>((resolve) => {
+    page.on("websocket", (ws) => {
+      if (!ws.url().includes("/api/pty/")) return
+      ws.on("framesent", (ev) => {
+        const data = typeof ev.payload === "string" ? ev.payload : String(ev.payload)
+        if (data.includes("\"type\":\"input\"") && data.includes("\\u001bb")) {
+          resolve(data)
+        }
+      })
+    })
+  })
+
+  const rightFrame = new Promise<string>((resolve) => {
+    page.on("websocket", (ws) => {
+      if (!ws.url().includes("/api/pty/")) return
+      ws.on("framesent", (ev) => {
+        const data = typeof ev.payload === "string" ? ev.payload : String(ev.payload)
+        if (data.includes("\"type\":\"input\"") && data.includes("\\u001bf")) {
+          resolve(data)
+        }
+      })
+    })
+  })
+
+  await ensureWorkspace(page)
+
+  const terminal = page.getByTestId("pty-terminal")
+  await expect
+    .poll(async () => await terminal.locator("canvas").count(), { timeout: 20_000 })
+    .toBeGreaterThan(0)
+
+  await terminal.click({ force: true })
+  await page.keyboard.down("Control")
+  await page.keyboard.press("ArrowLeft")
+  await page.keyboard.up("Control")
+  await leftFrame
+
+  await terminal.click({ force: true })
+  await page.keyboard.down("Control")
+  await page.keyboard.press("ArrowRight")
+  await page.keyboard.up("Control")
+  await rightFrame
+})
+
 test("terminal theme follows app theme changes", async ({ page }) => {
   await ensureWorkspace(page)
 

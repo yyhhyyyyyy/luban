@@ -251,6 +251,28 @@ export function PtyTerminal() {
       const isShortcut = ev.ctrlKey || ev.metaKey
       if (!isShortcut) return
 
+      const isMac = navigator.platform.toLowerCase().includes("mac")
+
+      if (ev.key === "ArrowLeft" || ev.key === "ArrowRight") {
+        const seq = (() => {
+          if (isMac && ev.metaKey) {
+            return ev.key === "ArrowLeft" ? "\x01" : "\x05"
+          }
+          if (ev.ctrlKey) {
+            return ev.key === "ArrowLeft" ? "\x1bb" : "\x1bf"
+          }
+          return null
+        })()
+
+        if (seq) {
+          ev.preventDefault()
+          ev.stopPropagation()
+          ev.stopImmediatePropagation()
+          sendInput(seq)
+          return
+        }
+      }
+
       if (ev.code === "KeyC") {
         if (!term.hasSelection()) return
         const selection = term.getSelection()
