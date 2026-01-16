@@ -127,6 +127,8 @@ export function ChatPanel({
   const [agentEditorValue, setAgentEditorValue] = useState("")
   const [agentEditorAttachments, setAgentEditorAttachments] = useState<ComposerAttachment[]>([])
   const agentAttachmentScopeRef = useRef<string>("")
+  const [agentRunElapsedMs, setAgentRunElapsedMs] = useState(0)
+  const agentRunStartAtMsRef = useRef<number | null>(null)
 
   const [activePanel, setActivePanel] = useState<"thread" | "diff">("thread")
   const [diffStyle, setDiffStyle] = useState<"split" | "unified">("split")
@@ -176,6 +178,8 @@ export function ChatPanel({
     setAgentOverrideStatus(null)
     setAgentEditorValue("")
     setAgentEditorAttachments([])
+    setAgentRunElapsedMs(0)
+    agentRunStartAtMsRef.current = null
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeWorkspaceId, activeThreadId])
 
@@ -521,6 +525,35 @@ export function ChatPanel({
   }, [conversation, queuePaused, queuedPrompts.length])
 
   const agentStatus = agentOverrideStatus ?? baseAgentStatus
+
+  const agentTurnIsRunning = conversation?.run_status === "running"
+
+  useEffect(() => {
+    if (!agentTurnIsRunning) {
+      agentRunStartAtMsRef.current = null
+      return
+    }
+
+    if (agentRunStartAtMsRef.current == null) {
+      agentRunStartAtMsRef.current = Date.now()
+      setAgentRunElapsedMs(0)
+    }
+
+    const timer = window.setInterval(() => {
+      const start = agentRunStartAtMsRef.current
+      if (start == null) return
+      setAgentRunElapsedMs(Date.now() - start)
+    }, 250)
+
+    return () => window.clearInterval(timer)
+  }, [agentTurnIsRunning])
+
+  const agentRunElapsedLabel = useMemo(() => {
+    const totalSeconds = Math.max(0, Math.floor(agentRunElapsedMs / 1000))
+    const minutes = Math.floor(totalSeconds / 60)
+    const seconds = totalSeconds % 60
+    return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+  }, [agentRunElapsedMs])
 
   useEffect(() => {
     if (baseAgentStatus == null && agentOverrideStatus != null) {
@@ -1167,6 +1200,7 @@ export function ChatPanel({
                   return (
                     <AgentRunningCard
                       activities={activities}
+                      elapsedTime={agentRunElapsedLabel}
                       status={agentStatus}
                       hasQueuedMessages={queuedPrompts.length > 0}
                       editorValue={agentEditorValue}

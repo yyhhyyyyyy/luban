@@ -372,6 +372,42 @@ test("cancel -> escape without queued prompts shows cancelled activity stream", 
   await expect(page.getByTestId("agent-running-resume")).toHaveCount(0)
 })
 
+test("agent running timer increments while running", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  const workspaceIdRaw = (await page.evaluate(() => localStorage.getItem("luban:active_workspace_id"))) ?? ""
+  const workspaceId = Number(workspaceIdRaw)
+  expect(Number.isFinite(workspaceId)).toBeTruthy()
+  expect(workspaceId).toBeGreaterThan(0)
+
+  const threadId = await createThreadViaUi(page, workspaceId)
+  expect(threadId).toBeGreaterThan(0)
+
+  const runId = Math.random().toString(16).slice(2)
+  const seed = `e2e-cancel-timer-${runId}`
+
+  await sendWsAction(page, {
+    type: "send_agent_message",
+    workspace_id: workspaceId,
+    thread_id: threadId,
+    text: `${seed}-run`,
+    attachments: [],
+  })
+
+  await expect(page.getByTestId("agent-running-cancel")).toBeVisible({ timeout: 20_000 })
+
+  const timer = page.getByTestId("agent-running-timer")
+  await expect(timer).toBeVisible({ timeout: 20_000 })
+
+  await expect
+    .poll(async () => (await timer.textContent())?.trim() ?? "", { timeout: 10_000 })
+    .not.toBe("00:00")
+
+  // Stop the running turn so it doesn't leak into other tests.
+  await page.getByTestId("agent-running-cancel").click()
+  await page.getByTestId("agent-running-input").press("Escape")
+})
+
 test("/command autocompletes Codex custom prompts", async ({ page }) => {
   await ensureWorkspace(page)
 

@@ -260,7 +260,7 @@ export function AgentRunningCard({
         <div className="flex items-center gap-2 flex-shrink-0">
           <span className="text-xs text-muted-foreground font-mono flex items-center gap-1">
             <Clock className="w-3 h-3" />
-            {elapsedTime}
+            <span data-testid="agent-running-timer">{elapsedTime}</span>
           </span>
 
           <div className="flex items-center justify-center ml-1 w-7" onClick={(e) => e.stopPropagation()}>

@@ -1553,7 +1553,9 @@ impl Engine {
                         .is_some_and(|bin| bin == "/usr/bin/false");
                 let fake_agent_delay = if use_fake_agent {
                     let prompt = text.as_str();
-                    if prompt.contains("e2e-cancel") || prompt.contains("e2e-queued") {
+                    if prompt.contains("e2e-cancel") {
+                        Duration::from_millis(2500)
+                    } else if prompt.contains("e2e-queued") {
                         Duration::from_millis(1500)
                     } else {
                         Duration::from_millis(50)
