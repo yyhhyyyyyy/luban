@@ -36,11 +36,13 @@ export function ConversationView({
   emptyState,
   className,
   workspaceId,
+  renderAgentRunningCard,
 }: {
   messages: Message[]
   emptyState?: React.ReactNode
   className?: string
   workspaceId?: number
+  renderAgentRunningCard?: (message: Message) => React.ReactNode
 }): React.ReactElement | null {
   if (messages.length === 0) {
     return emptyState ? <>{emptyState}</> : null
@@ -52,9 +54,14 @@ export function ConversationView({
         <div key={message.id} className="group">
           {message.type === "assistant" ? (
             <div className="space-y-1">
-              {message.activities && (
-                <ActivityStream activities={message.activities} isStreaming={message.isStreaming} />
-              )}
+              {message.activities &&
+                (renderAgentRunningCard?.(message) ?? (
+                  <ActivityStream
+                    activities={message.activities}
+                    isStreaming={message.isStreaming}
+                    isCancelled={message.isCancelled}
+                  />
+                ))}
 
               {message.content && message.content.length > 0 && (
                 <div className="luban-font-chat">

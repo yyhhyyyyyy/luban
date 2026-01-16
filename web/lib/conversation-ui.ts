@@ -24,6 +24,7 @@ export interface Message {
   attachments?: AttachmentRef[]
   timestamp?: string
   isStreaming?: boolean
+  isCancelled?: boolean
   activities?: ActivityEvent[]
   metadata?: {
     toolCalls?: number
@@ -170,6 +171,7 @@ export function buildMessages(conversation: ConversationSnapshot | null): Messag
   let assistantToolCalls = 0
   let assistantThinkingSteps = 0
   let assistantDurationMs: number | null = null
+  let assistantCancelled = false
   const seenAgentItemIds = new Set<string>()
 
   function flushAssistant() {
@@ -187,6 +189,7 @@ export function buildMessages(conversation: ConversationSnapshot | null): Messag
       id: `a_${out.length}`,
       type: "assistant",
       content: assistantContent.trim(),
+      isCancelled: assistantCancelled || undefined,
       activities: assistantActivities.length > 0 ? assistantActivities : undefined,
       metadata,
     })
@@ -195,6 +198,7 @@ export function buildMessages(conversation: ConversationSnapshot | null): Messag
     assistantToolCalls = 0
     assistantThinkingSteps = 0
     assistantDurationMs = null
+    assistantCancelled = false
   }
 
   for (const entry of conversation.entries) {
@@ -247,6 +251,7 @@ export function buildMessages(conversation: ConversationSnapshot | null): Messag
     }
 
     if (entry.type === "turn_canceled") {
+      assistantCancelled = true
       assistantActivities.push({
         id: `turn_canceled_${out.length}`,
         type: "tool_call",

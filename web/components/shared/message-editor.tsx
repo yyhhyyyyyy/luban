@@ -63,7 +63,7 @@ export function MessageEditor({
   placeholder?: string
   disabled: boolean
   autoFocus?: boolean
-  agentSelector: React.ReactNode
+  agentSelector?: React.ReactNode
   primaryAction: {
     onClick: () => void
     disabled: boolean
@@ -696,9 +696,12 @@ export function MessageEditor({
           <Paperclip className="w-4 h-4" />
         </button>
 
-        <div className="w-px h-4 bg-border mx-1" />
-
-        {agentSelector}
+        {agentSelector ? (
+          <>
+            <div className="w-px h-4 bg-border mx-1" />
+            {agentSelector}
+          </>
+        ) : null}
 
         <div className="flex-1" />
 

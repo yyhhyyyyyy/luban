@@ -11,6 +11,7 @@ import {
   Pencil,
   Terminal,
   Wrench,
+  X,
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -68,12 +69,16 @@ function ActivityEventItem({
   )
 }
 
-export function ActivityStream({ activities, isStreaming }: { activities: ActivityEvent[]; isStreaming?: boolean }) {
+export function ActivityStream({
+  activities,
+  isStreaming,
+  isCancelled = false,
+}: { activities: ActivityEvent[]; isStreaming?: boolean; isCancelled?: boolean }) {
   const [isExpanded, setIsExpanded] = useState(false)
   const [expandedEvents, setExpandedEvents] = useState<Set<string>>(new Set())
 
   const latestActivity = activities[activities.length - 1]
-  const completedCount = activities.filter((a) => a.status === "done").length
+  const completedCount = activities.filter((a) => a.status === "done" && a.title !== "Turn canceled").length
 
   const toggleEvent = (eventId: string) => {
     const nextExpanded = new Set(expandedEvents)
@@ -99,11 +104,20 @@ export function ActivityStream({ activities, isStreaming }: { activities: Activi
       >
         {isStreaming && latestActivity?.status === "running" ? (
           <Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0" />
+        ) : isCancelled ? (
+          <div className="relative flex items-center justify-center w-3.5 h-3.5 flex-shrink-0">
+            <div className="absolute inset-0 rounded-full bg-status-warning/20" />
+            <X className="w-2.5 h-2.5 text-status-warning" />
+          </div>
         ) : (
           <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0 text-status-success" />
         )}
         <span className="flex-1 text-left truncate">
-          {isStreaming ? latestActivity?.title : `Completed ${completedCount} steps`}
+          {isStreaming
+            ? latestActivity?.title
+            : isCancelled
+              ? `Cancelled after ${completedCount} steps`
+              : `Completed ${completedCount} steps`}
         </span>
         <ChevronDown
           className={cn("w-3.5 h-3.5 text-muted-foreground/50 transition-transform", isExpanded && "rotate-180")}

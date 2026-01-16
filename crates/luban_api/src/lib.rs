@@ -240,6 +240,8 @@ pub struct ConversationSnapshot {
     pub in_progress_items: Vec<AgentItem>,
     #[serde(default)]
     pub pending_prompts: Vec<QueuedPromptSnapshot>,
+    #[serde(default)]
+    pub queue_paused: bool,
     pub remote_thread_id: Option<String>,
     pub title: String,
 }

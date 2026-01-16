@@ -48,6 +48,7 @@ import { MultiFileDiff, type FileContents } from "@pierre/diffs/react"
 import { CodexAgentSelector } from "@/components/shared/agent-selector"
 import { OpenButton } from "@/components/shared/open-button"
 import { MessageEditor, type ComposerAttachment as EditorComposerAttachment } from "@/components/shared/message-editor"
+import { AgentRunningCard, type AgentRunningStatus } from "@/components/shared/agent-running-card"
 import { openSettingsPanel } from "@/lib/open-settings"
 import { computeProjectDisplayNames } from "@/lib/project-display-names"
 
@@ -94,6 +95,7 @@ export function ChatPanel({
     closeThreadTab,
     restoreThreadTab,
     sendAgentMessage,
+    cancelAgentTurn,
     renameWorkspaceBranch,
     aiRenameWorkspaceBranch,
     removeQueuedPrompt,
@@ -112,6 +114,7 @@ export function ChatPanel({
   const attachmentScope = `${activeWorkspaceId ?? "none"}:${activeThreadId ?? "none"}`
 
   const queuedPrompts = conversation?.pending_prompts ?? []
+  const queuePaused = conversation?.queue_paused ?? false
   const [editingQueuedPromptId, setEditingQueuedPromptId] = useState<number | null>(null)
   const [draggingQueuedPromptId, setDraggingQueuedPromptId] = useState<number | null>(null)
   const [queuedDraftText, setQueuedDraftText] = useState("")
@@ -119,6 +122,11 @@ export function ChatPanel({
   const [queuedDraftModelId, setQueuedDraftModelId] = useState<string | null>(null)
   const [queuedDraftThinkingEffort, setQueuedDraftThinkingEffort] = useState<ThinkingEffort | null>(null)
   const queuedAttachmentScopeRef = useRef<string>("")
+
+  const [agentOverrideStatus, setAgentOverrideStatus] = useState<AgentRunningStatus | null>(null)
+  const [agentEditorValue, setAgentEditorValue] = useState("")
+  const [agentEditorAttachments, setAgentEditorAttachments] = useState<ComposerAttachment[]>([])
+  const agentAttachmentScopeRef = useRef<string>("")
 
   const [activePanel, setActivePanel] = useState<"thread" | "diff">("thread")
   const [diffStyle, setDiffStyle] = useState<"split" | "unified">("split")
@@ -163,7 +171,23 @@ export function ChatPanel({
     })
   }, [activeWorkspaceId, activeThreadId])
 
+  useEffect(() => {
+    agentAttachmentScopeRef.current = `${attachmentScope}:agent:${Date.now()}`
+    setAgentOverrideStatus(null)
+    setAgentEditorValue("")
+    setAgentEditorAttachments([])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeWorkspaceId, activeThreadId])
+
   const messages = useMemo(() => buildMessages(conversation), [conversation])
+  const agentCardMessageId = useMemo(() => {
+    for (let idx = messages.length - 1; idx >= 0; idx -= 1) {
+      const msg = messages[idx]
+      if (!msg) continue
+      if (msg.type === "assistant" && msg.activities && msg.activities.length > 0) return msg.id
+    }
+    return null
+  }, [messages])
   const messageHistory = useMemo(() => {
     const entries = conversation?.entries ?? []
     const items = entries
@@ -191,6 +215,15 @@ export function ChatPanel({
       focusChatInput()
     },
     [codexCustomPrompts, persistDraft],
+  )
+
+  const handleAgentCommand = useCallback(
+    (commandId: string) => {
+      const match = codexCustomPrompts.find((p) => p.id === commandId) ?? null
+      if (!match) return
+      setAgentEditorValue(match.contents)
+    },
+    [codexCustomPrompts],
   )
 
   const projectInfo = useMemo(() => {
@@ -480,6 +513,70 @@ export function ChatPanel({
     })
   }
 
+  const baseAgentStatus = useMemo<AgentRunningStatus | null>(() => {
+    if (!conversation) return null
+    if (conversation.run_status === "running") return "running"
+    if (queuePaused && queuedPrompts.length > 0) return "paused"
+    return null
+  }, [conversation, queuePaused, queuedPrompts.length])
+
+  const agentStatus = agentOverrideStatus ?? baseAgentStatus
+
+  useEffect(() => {
+    if (baseAgentStatus == null && agentOverrideStatus != null) {
+      setAgentOverrideStatus(null)
+    }
+  }, [agentOverrideStatus, baseAgentStatus])
+
+  const handleAgentCancel = () => {
+    if (!agentStatus) return
+    setAgentOverrideStatus("cancelling")
+  }
+
+  const handleAgentResume = () => {
+    if (!agentStatus) return
+    setAgentOverrideStatus("resuming")
+  }
+
+  const clearAgentEditor = () => {
+    setAgentEditorValue("")
+    setAgentEditorAttachments([])
+  }
+
+  const handleAgentDismiss = () => {
+    if (agentOverrideStatus === "cancelling") {
+      cancelAgentTurn()
+    }
+    setAgentOverrideStatus(null)
+    clearAgentEditor()
+  }
+
+  const handleAgentSubmit = () => {
+    if (activeWorkspaceId == null || activeThreadId == null) return
+    const text = agentEditorValue.trim()
+    const hasUploading = agentEditorAttachments.some((a) => a.status === "uploading")
+    if (hasUploading) return
+    const ready = agentEditorAttachments
+      .filter((a) => a.status === "ready" && a.attachment != null)
+      .map((a) => a.attachment!)
+    if (text.length === 0 && ready.length === 0) return
+
+    if (agentOverrideStatus === "cancelling") {
+      cancelAgentTurn()
+      sendAgentMessage(text, ready)
+    } else if (agentOverrideStatus === "resuming") {
+      sendAgentMessage(text, ready)
+    }
+
+    setAgentOverrideStatus(null)
+    clearAgentEditor()
+    setFollowTail(true)
+    if (activeWorkspaceId != null && activeThreadId != null) {
+      localStorage.setItem(followTailKey(activeWorkspaceId, activeThreadId), "true")
+      scheduleScrollToBottom()
+    }
+  }
+
   const handleStartQueuedEdit = (promptId: number) => {
     if (activeWorkspaceId == null || activeThreadId == null) return
     const prompt = queuedPrompts.find((p) => p.id === promptId) ?? null
@@ -637,6 +734,49 @@ export function ChatPanel({
     }
   }
 
+  const handleAgentFileSelect = (files: FileList | null) => {
+    if (!files) return
+    if (activeWorkspaceId == null || activeThreadId == null) return
+
+    const scopeAtStart = agentAttachmentScopeRef.current
+
+    for (const file of Array.from(files)) {
+      const isImage = file.type.startsWith("image/")
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+      const initial: ComposerAttachment = {
+        id,
+        type: isImage ? "image" : "file",
+        name: file.name,
+        size: file.size,
+        status: "uploading",
+      }
+
+      if (isImage) {
+        const reader = new FileReader()
+        reader.onload = (e) => {
+          const preview = typeof e.target?.result === "string" ? e.target.result : undefined
+          setAgentEditorAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, preview } : a)))
+        }
+        reader.readAsDataURL(file)
+      }
+
+      setAgentEditorAttachments((prev) => [...prev, initial])
+
+      void uploadAttachment({ workspaceId: activeWorkspaceId, file, kind: isImage ? "image" : "file" })
+        .then((attachment) => {
+          if (agentAttachmentScopeRef.current !== scopeAtStart) return
+          setAgentEditorAttachments((prev) =>
+            prev.map((a) => (a.id === id ? { ...a, status: "ready", attachment, name: attachment.name } : a)),
+          )
+          emitContextChanged(activeWorkspaceId)
+        })
+        .catch(() => {
+          if (agentAttachmentScopeRef.current !== scopeAtStart) return
+          setAgentEditorAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, status: "failed" } : a)))
+        })
+    }
+  }
+
   const handlePaste = (e: React.ClipboardEvent) => {
     if (activeWorkspaceId == null || activeThreadId == null) return
     const items = e.clipboardData?.items
@@ -652,6 +792,23 @@ export function ChatPanel({
       if (file) dt.items.add(file)
     }
     handleFileSelect(dt.files)
+  }
+
+  const handleAgentPaste = (e: React.ClipboardEvent) => {
+    if (activeWorkspaceId == null || activeThreadId == null) return
+    const items = e.clipboardData?.items
+    if (!items) return
+
+    const imageItems = Array.from(items).filter((item) => item.type.startsWith("image/"))
+    if (imageItems.length === 0) return
+
+    e.preventDefault()
+    const dt = new DataTransfer()
+    for (const item of imageItems) {
+      const file = item.getAsFile()
+      if (file) dt.items.add(file)
+    }
+    handleAgentFileSelect(dt.files)
   }
 
   const handleQueuedPaste = (e: React.ClipboardEvent) => {
@@ -674,6 +831,10 @@ export function ChatPanel({
 
   const removeAttachment = (id: string) => {
     setAttachments((prev) => prev.filter((a) => a.id !== id))
+  }
+
+  const removeAgentEditorAttachment = (id: string) => {
+    setAgentEditorAttachments((prev) => prev.filter((a) => a.id !== id))
   }
 
   const removeQueuedDraftAttachment = (id: string) => {
@@ -997,6 +1158,38 @@ export function ChatPanel({
                 messages={messages}
                 workspaceId={activeWorkspaceId ?? undefined}
                 className=""
+                renderAgentRunningCard={(message) => {
+                  if (!agentStatus) return null
+                  if (!agentCardMessageId || message.id !== agentCardMessageId) return null
+                  if (!message.activities || message.activities.length === 0) return null
+                  const filtered = message.activities.filter((event) => event.title !== "Turn canceled")
+                  const activities = filtered.length > 0 ? filtered : message.activities
+                  return (
+                    <AgentRunningCard
+                      activities={activities}
+                      status={agentStatus}
+                      hasQueuedMessages={queuedPrompts.length > 0}
+                      editorValue={agentEditorValue}
+                      editorAttachments={agentEditorAttachments}
+                      onEditorChange={setAgentEditorValue}
+                      onEditorAttachmentsChange={setAgentEditorAttachments}
+                      onRemoveEditorAttachment={removeAgentEditorAttachment}
+                      onEditorFileSelect={handleAgentFileSelect}
+                      onEditorPaste={handleAgentPaste}
+                      onAddEditorAttachmentRef={(attachment) => {
+                        setAgentEditorAttachments((prev) => [...prev, ...attachmentsFromRefs([attachment])])
+                      }}
+                      workspaceId={activeWorkspaceId ?? null}
+                      commands={codexCustomPrompts}
+                      messageHistory={messageHistory}
+                      onCommand={handleAgentCommand}
+                      onCancel={handleAgentCancel}
+                      onResume={handleAgentResume}
+                      onSubmit={handleAgentSubmit}
+                      onDismiss={handleAgentDismiss}
+                    />
+                  )
+                }}
                 emptyState={
                   <div className="text-sm text-muted-foreground">
                     {activeWorkspaceId == null

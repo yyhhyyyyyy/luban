@@ -8,6 +8,15 @@ async function activeThreadId(page: import("@playwright/test").Page, workspaceId
   return Number(snapshot.tabs.active_tab)
 }
 
+async function createThreadViaUi(page: import("@playwright/test").Page, workspaceId: number): Promise<number> {
+  const before = await activeThreadId(page, workspaceId)
+  await page.getByTitle("New tab").click()
+  await expect
+    .poll(async () => await activeThreadId(page, workspaceId), { timeout: 30_000 })
+    .not.toBe(before)
+  return await activeThreadId(page, workspaceId)
+}
+
 async function queuedPromptTexts(page: import("@playwright/test").Page, workspaceId: number, threadId: number): Promise<string[]> {
   const res = await page.request.get(`/api/workspaces/${workspaceId}/conversations/${threadId}`)
   if (!res.ok()) return []
@@ -242,6 +251,125 @@ test("queued messages can be reordered and edited", async ({ page }) => {
   await lastItem.hover()
   await lastItem.locator('[data-testid="queued-prompt-cancel"]').click({ force: true, timeout: 20_000 })
   await expect(queuedItems).toHaveCount(1, { timeout: 20_000 })
+})
+
+test("cancel -> submit turns the previous run into a cancelled activity stream and starts a new turn", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  const workspaceIdRaw = (await page.evaluate(() => localStorage.getItem("luban:active_workspace_id"))) ?? ""
+  const workspaceId = Number(workspaceIdRaw)
+  expect(Number.isFinite(workspaceId)).toBeTruthy()
+  expect(workspaceId).toBeGreaterThan(0)
+
+  const threadId = await createThreadViaUi(page, workspaceId)
+  expect(threadId).toBeGreaterThan(0)
+
+  const runId = Math.random().toString(16).slice(2)
+  const seed = `e2e-cancel-submit-${runId}`
+
+  await sendWsAction(page, {
+    type: "send_agent_message",
+    workspace_id: workspaceId,
+    thread_id: threadId,
+    text: `${seed}-run`,
+    attachments: [],
+  })
+
+  const cancelButton = page.getByTestId("agent-running-cancel")
+  await expect(cancelButton).toBeVisible({ timeout: 20_000 })
+  await cancelButton.click()
+
+  const editor = page.getByTestId("agent-running-input")
+  await expect(editor).toBeVisible({ timeout: 20_000 })
+
+  const interrupt = `${seed}-interrupt`
+  await editor.fill(interrupt)
+  await page.getByTestId("agent-running-submit").click()
+
+  await expect(page.getByTestId("user-message-bubble").filter({ hasText: interrupt }).first()).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText("Cancelled after").first()).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText(/^Completed \d+ steps$/).first()).toBeVisible({ timeout: 20_000 })
+})
+
+test("cancel -> escape pauses when queued prompts exist and shows resume", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  const workspaceIdRaw = (await page.evaluate(() => localStorage.getItem("luban:active_workspace_id"))) ?? ""
+  const workspaceId = Number(workspaceIdRaw)
+  expect(Number.isFinite(workspaceId)).toBeTruthy()
+  expect(workspaceId).toBeGreaterThan(0)
+
+  const threadId = await createThreadViaUi(page, workspaceId)
+  expect(threadId).toBeGreaterThan(0)
+
+  const runId = Math.random().toString(16).slice(2)
+  const seed = `e2e-cancel-queued-${runId}`
+
+  await sendWsAction(page, {
+    type: "send_agent_message",
+    workspace_id: workspaceId,
+    thread_id: threadId,
+    text: `${seed}-run`,
+    attachments: [],
+  })
+  await sendWsAction(page, {
+    type: "send_agent_message",
+    workspace_id: workspaceId,
+    thread_id: threadId,
+    text: `${seed}-queued`,
+    attachments: [],
+  })
+
+  await expect
+    .poll(async () => (await queuedPromptTexts(page, workspaceId, threadId)).length, { timeout: 10_000 })
+    .toBeGreaterThan(0)
+
+  const cancelButton = page.getByTestId("agent-running-cancel")
+  await expect(cancelButton).toBeVisible({ timeout: 20_000 })
+  await cancelButton.click()
+
+  const editor = page.getByTestId("agent-running-input")
+  await expect(editor).toBeVisible({ timeout: 20_000 })
+  await editor.press("Escape")
+
+  const resumeButton = page.getByTestId("agent-running-resume")
+  await expect(resumeButton).toBeVisible({ timeout: 20_000 })
+  await resumeButton.click()
+  await expect(page.getByTestId("agent-running-input")).toBeVisible({ timeout: 20_000 })
+})
+
+test("cancel -> escape without queued prompts shows cancelled activity stream", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  const workspaceIdRaw = (await page.evaluate(() => localStorage.getItem("luban:active_workspace_id"))) ?? ""
+  const workspaceId = Number(workspaceIdRaw)
+  expect(Number.isFinite(workspaceId)).toBeTruthy()
+  expect(workspaceId).toBeGreaterThan(0)
+
+  const threadId = await createThreadViaUi(page, workspaceId)
+  expect(threadId).toBeGreaterThan(0)
+
+  const runId = Math.random().toString(16).slice(2)
+  const seed = `e2e-cancel-no-queue-${runId}`
+
+  await sendWsAction(page, {
+    type: "send_agent_message",
+    workspace_id: workspaceId,
+    thread_id: threadId,
+    text: `${seed}-run`,
+    attachments: [],
+  })
+
+  const cancelButton = page.getByTestId("agent-running-cancel")
+  await expect(cancelButton).toBeVisible({ timeout: 20_000 })
+  await cancelButton.click()
+
+  const editor = page.getByTestId("agent-running-input")
+  await expect(editor).toBeVisible({ timeout: 20_000 })
+  await editor.press("Escape")
+
+  await expect(page.getByText("Cancelled after").first()).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByTestId("agent-running-resume")).toHaveCount(0)
 })
 
 test("/command autocompletes Codex custom prompts", async ({ page }) => {

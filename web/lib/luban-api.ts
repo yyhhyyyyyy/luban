@@ -176,6 +176,7 @@ export type ConversationSnapshot = {
   entries: ConversationEntry[]
   in_progress_items: AgentItem[]
   pending_prompts: QueuedPromptSnapshot[]
+  queue_paused: boolean
   remote_thread_id: string | null
   title: string
 }

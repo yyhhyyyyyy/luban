@@ -1060,6 +1060,7 @@ impl Engine {
             entries: loaded.entries.iter().map(map_conversation_entry).collect(),
             in_progress_items: Vec::new(),
             pending_prompts: Vec::new(),
+            queue_paused: false,
             remote_thread_id: loaded.thread_id,
             title: format!("Thread {tid}"),
         })
@@ -1546,6 +1547,21 @@ impl Engine {
                 attachments,
                 run_config: _,
             } => {
+                let use_fake_agent = std::env::var_os("LUBAN_E2E_ROOT").is_some()
+                    && std::env::var("LUBAN_CODEX_BIN")
+                        .ok()
+                        .is_some_and(|bin| bin == "/usr/bin/false");
+                let fake_agent_delay = if use_fake_agent {
+                    let prompt = text.as_str();
+                    if prompt.contains("e2e-cancel") || prompt.contains("e2e-queued") {
+                        Duration::from_millis(1500)
+                    } else {
+                        Duration::from_millis(50)
+                    }
+                } else {
+                    Duration::from_millis(0)
+                };
+
                 let Some(scope) = workspace_scope(&self.state, workspace_id) else {
                     return Ok(VecDeque::new());
                 };
@@ -1576,6 +1592,41 @@ impl Engine {
                 let cancel = Arc::new(AtomicBool::new(false));
                 self.cancel_flags
                     .insert((workspace_id, thread_id), cancel.clone());
+
+                if use_fake_agent {
+                    let tx = self.tx.clone();
+                    std::thread::spawn(move || {
+                        let deadline = fake_agent_delay;
+                        let start = Instant::now();
+
+                        while start.elapsed() < deadline && !cancel.load(Ordering::SeqCst) {
+                            std::thread::sleep(Duration::from_millis(25));
+                        }
+
+                        if !cancel.load(Ordering::SeqCst) {
+                            let _ = tx.blocking_send(EngineCommand::DispatchAction {
+                                action: Box::new(Action::AgentEventReceived {
+                                    workspace_id,
+                                    thread_id,
+                                    event: luban_domain::CodexThreadEvent::TurnFailed {
+                                        error: luban_domain::CodexThreadError {
+                                            message: "e2e agent stub".to_owned(),
+                                        },
+                                    },
+                                }),
+                            });
+                        }
+
+                        let _ = tx.blocking_send(EngineCommand::DispatchAction {
+                            action: Box::new(Action::AgentTurnFinished {
+                                workspace_id,
+                                thread_id,
+                            }),
+                        });
+                    });
+
+                    return Ok(VecDeque::new());
+                }
 
                 let services = self.services.clone();
                 let tx = self.tx.clone();
@@ -2046,6 +2097,7 @@ impl Engine {
                     },
                 })
                 .collect(),
+            queue_paused: conversation.queue_paused,
             remote_thread_id: conversation.thread_id.clone(),
             title: conversation.title.clone(),
         })
