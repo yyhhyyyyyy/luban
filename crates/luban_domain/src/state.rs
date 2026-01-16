@@ -279,6 +279,10 @@ pub(crate) fn entries_is_suffix(suffix: &[ConversationEntry], full: &[Conversati
 pub struct ConversationSnapshot {
     pub thread_id: Option<String>,
     pub entries: Vec<ConversationEntry>,
+    #[serde(default)]
+    pub pending_prompts: Vec<QueuedPrompt>,
+    #[serde(default)]
+    pub queue_paused: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -438,13 +442,13 @@ pub(crate) fn apply_draft_text_diff(conversation: &mut WorkspaceConversation, ne
     conversation.draft = new_text.to_owned();
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct AgentRunConfig {
     pub model_id: String,
     pub thinking_effort: ThinkingEffort,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct QueuedPrompt {
     pub id: u64,
     pub text: String,

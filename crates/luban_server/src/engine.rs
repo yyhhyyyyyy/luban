@@ -5,8 +5,8 @@ use luban_api::{
 };
 use luban_backend::{GitWorkspaceService, SqliteStoreOptions};
 use luban_domain::{
-    Action, AppState, AttachmentKind, AttachmentRef, CodexThreadItem, ConversationEntry, Effect,
-    OpenTarget, OperationStatus, ProjectWorkspaceService,
+    Action, AppState, AttachmentKind, AttachmentRef, CodexThreadEvent, CodexThreadItem,
+    ConversationEntry, Effect, OpenTarget, OperationStatus, ProjectWorkspaceService,
     PullRequestCiState as DomainPullRequestCiState, PullRequestInfo,
     PullRequestState as DomainPullRequestState, ThinkingEffort, WorkspaceId, WorkspaceThreadId,
     default_agent_model_id, default_thinking_effort,
@@ -1059,8 +1059,26 @@ impl Engine {
             run_status: luban_api::OperationStatus::Idle,
             entries: loaded.entries.iter().map(map_conversation_entry).collect(),
             in_progress_items: Vec::new(),
-            pending_prompts: Vec::new(),
-            queue_paused: false,
+            pending_prompts: loaded
+                .pending_prompts
+                .iter()
+                .map(|prompt| luban_api::QueuedPromptSnapshot {
+                    id: prompt.id,
+                    text: prompt.text.clone(),
+                    attachments: prompt.attachments.iter().map(map_attachment_ref).collect(),
+                    run_config: luban_api::AgentRunConfigSnapshot {
+                        model_id: prompt.run_config.model_id.clone(),
+                        thinking_effort: match prompt.run_config.thinking_effort {
+                            ThinkingEffort::Minimal => luban_api::ThinkingEffort::Minimal,
+                            ThinkingEffort::Low => luban_api::ThinkingEffort::Low,
+                            ThinkingEffort::Medium => luban_api::ThinkingEffort::Medium,
+                            ThinkingEffort::High => luban_api::ThinkingEffort::High,
+                            ThinkingEffort::XHigh => luban_api::ThinkingEffort::XHigh,
+                        },
+                    },
+                })
+                .collect(),
+            queue_paused: loaded.queue_paused,
             remote_thread_id: loaded.thread_id,
             title: format!("Thread {tid}"),
         })
@@ -1074,6 +1092,7 @@ impl Engine {
             self.rev = self.rev.saturating_add(1);
 
             let conversation_key = conversation_key_for_action(&action);
+            let queue_state_key = queue_state_key_for_action(&action);
             let threads_event = threads_event_for_action(&action);
 
             let new_effects = self.state.apply(action);
@@ -1085,6 +1104,9 @@ impl Engine {
             if let Some((wid, threads)) = threads_event {
                 self.publish_threads_event(wid, &threads);
             }
+            if let Some((wid, tid)) = queue_state_key {
+                self.persist_queue_state(wid, tid).await;
+            }
 
             effects.extend(new_effects);
 
@@ -1095,6 +1117,50 @@ impl Engine {
                         tracing::error!(error = %err, "effect failed");
                     }
                 }
+            }
+        }
+    }
+
+    async fn persist_queue_state(&self, workspace_id: WorkspaceId, thread_id: WorkspaceThreadId) {
+        let Some(scope) = workspace_scope(&self.state, workspace_id) else {
+            return;
+        };
+        let Some(conversation) = self
+            .state
+            .workspace_thread_conversation(workspace_id, thread_id)
+        else {
+            return;
+        };
+
+        let queue_paused = conversation.queue_paused;
+        let pending_prompts = conversation
+            .pending_prompts
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let services = self.services.clone();
+        let project_slug = scope.project_slug;
+        let workspace_name = scope.workspace_name;
+        let thread_local_id = thread_id.as_u64();
+        let result = tokio::task::spawn_blocking(move || {
+            services.save_conversation_queue_state(
+                project_slug,
+                workspace_name,
+                thread_local_id,
+                queue_paused,
+                pending_prompts,
+            )
+        })
+        .await;
+
+        match result {
+            Ok(Ok(())) => {}
+            Ok(Err(message)) => {
+                tracing::error!(message = %message, "failed to persist queued prompts");
+            }
+            Err(err) => {
+                tracing::error!(error = %err, "failed to join queued prompt persistence task");
             }
         }
     }
@@ -2423,6 +2489,11 @@ fn conversation_key_for_action(action: &Action) -> Option<(WorkspaceId, Workspac
             thread_id,
             ..
         } => Some((*workspace_id, *thread_id)),
+        Action::QueueAgentMessage {
+            workspace_id,
+            thread_id,
+            ..
+        } => Some((*workspace_id, *thread_id)),
         Action::ConversationLoaded {
             workspace_id,
             thread_id,
@@ -2470,6 +2541,65 @@ fn conversation_key_for_action(action: &Action) -> Option<(WorkspaceId, Workspac
             workspace_id,
             thread_id,
             ..
+        } => Some((*workspace_id, *thread_id)),
+        Action::ClearQueuedPrompts {
+            workspace_id,
+            thread_id,
+        } => Some((*workspace_id, *thread_id)),
+        Action::ResumeQueuedPrompts {
+            workspace_id,
+            thread_id,
+        } => Some((*workspace_id, *thread_id)),
+        _ => None,
+    }
+}
+
+fn queue_state_key_for_action(action: &Action) -> Option<(WorkspaceId, WorkspaceThreadId)> {
+    match action {
+        Action::SendAgentMessage {
+            workspace_id,
+            thread_id,
+            ..
+        } => Some((*workspace_id, *thread_id)),
+        Action::QueueAgentMessage {
+            workspace_id,
+            thread_id,
+            ..
+        } => Some((*workspace_id, *thread_id)),
+        Action::RemoveQueuedPrompt {
+            workspace_id,
+            thread_id,
+            ..
+        } => Some((*workspace_id, *thread_id)),
+        Action::ReorderQueuedPrompt {
+            workspace_id,
+            thread_id,
+            ..
+        } => Some((*workspace_id, *thread_id)),
+        Action::UpdateQueuedPrompt {
+            workspace_id,
+            thread_id,
+            ..
+        } => Some((*workspace_id, *thread_id)),
+        Action::ClearQueuedPrompts {
+            workspace_id,
+            thread_id,
+        } => Some((*workspace_id, *thread_id)),
+        Action::ResumeQueuedPrompts {
+            workspace_id,
+            thread_id,
+        } => Some((*workspace_id, *thread_id)),
+        Action::CancelAgentTurn {
+            workspace_id,
+            thread_id,
+        } => Some((*workspace_id, *thread_id)),
+        Action::AgentEventReceived {
+            workspace_id,
+            thread_id,
+            event:
+                CodexThreadEvent::TurnCompleted { .. }
+                | CodexThreadEvent::TurnFailed { .. }
+                | CodexThreadEvent::Error { .. },
         } => Some((*workspace_id, *thread_id)),
         _ => None,
     }

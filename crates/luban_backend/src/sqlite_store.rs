@@ -1,7 +1,7 @@
 use anyhow::{Context as _, anyhow};
 use luban_domain::{
     AttachmentKind, AttachmentRef, ChatScrollAnchor, ContextItem, ConversationEntry,
-    ConversationSnapshot, ConversationThreadMeta, PersistedAppState, WorkspaceStatus,
+    ConversationSnapshot, ConversationThreadMeta, PersistedAppState, QueuedPrompt, WorkspaceStatus,
     WorkspaceThreadId,
 };
 use rusqlite::{Connection, OptionalExtension as _, params, params_from_iter};
@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
-const LATEST_SCHEMA_VERSION: u32 = 11;
+const LATEST_SCHEMA_VERSION: u32 = 12;
 const WORKSPACE_CHAT_SCROLL_PREFIX: &str = "workspace_chat_scroll_y10_";
 const WORKSPACE_CHAT_SCROLL_ANCHOR_PREFIX: &str = "workspace_chat_scroll_anchor_";
 const WORKSPACE_ACTIVE_THREAD_PREFIX: &str = "workspace_active_thread_id_";
@@ -106,6 +106,13 @@ const MIGRATIONS: &[(u32, &str)] = &[
             "/migrations/0011_drop_workspace_branch_fields.sql"
         )),
     ),
+    (
+        12,
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/migrations/0012_conversation_queue.sql"
+        )),
+    ),
 ];
 
 pub struct SqliteStore {
@@ -184,6 +191,14 @@ enum DbCommand {
         workspace_name: String,
         thread_local_id: u64,
         reply: mpsc::Sender<anyhow::Result<ConversationSnapshot>>,
+    },
+    SaveConversationQueueState {
+        project_slug: String,
+        workspace_name: String,
+        thread_local_id: u64,
+        queue_paused: bool,
+        pending_prompts: Vec<QueuedPrompt>,
+        reply: mpsc::Sender<anyhow::Result<()>>,
     },
     InsertContextItem {
         project_slug: String,
@@ -330,6 +345,25 @@ impl SqliteStore {
                                 &project_slug,
                                 &workspace_name,
                                 thread_local_id,
+                            ));
+                        }
+                        (
+                            Ok(db),
+                            DbCommand::SaveConversationQueueState {
+                                project_slug,
+                                workspace_name,
+                                thread_local_id,
+                                queue_paused,
+                                pending_prompts,
+                                reply,
+                            },
+                        ) => {
+                            let _ = reply.send(db.save_conversation_queue_state(
+                                &project_slug,
+                                &workspace_name,
+                                thread_local_id,
+                                queue_paused,
+                                &pending_prompts,
                             ));
                         }
                         (
@@ -535,6 +569,28 @@ impl SqliteStore {
         reply_rx.recv().context("sqlite worker terminated")?
     }
 
+    pub fn save_conversation_queue_state(
+        &self,
+        project_slug: String,
+        workspace_name: String,
+        thread_local_id: u64,
+        queue_paused: bool,
+        pending_prompts: Vec<QueuedPrompt>,
+    ) -> anyhow::Result<()> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(DbCommand::SaveConversationQueueState {
+                project_slug,
+                workspace_name,
+                thread_local_id,
+                queue_paused,
+                pending_prompts,
+                reply: reply_tx,
+            })
+            .context("sqlite worker is not running")?;
+        reply_rx.recv().context("sqlite worker terminated")?
+    }
+
     pub fn insert_context_item(
         &self,
         project_slug: String,
@@ -618,6 +674,9 @@ fn respond_db_open_error(err: &anyhow::Error, cmd: DbCommand) {
             let _ = reply.send(Err(anyhow!(message)));
         }
         DbCommand::LoadConversation { reply, .. } => {
+            let _ = reply.send(Err(anyhow!(message)));
+        }
+        DbCommand::SaveConversationQueueState { reply, .. } => {
             let _ = reply.send(Err(anyhow!(message)));
         }
         DbCommand::InsertContextItem { reply, .. } => {
@@ -1826,17 +1885,18 @@ impl SqliteDatabase {
         thread_local_id: u64,
     ) -> anyhow::Result<ConversationSnapshot> {
         self.ensure_conversation(project_slug, workspace_name, thread_local_id)?;
-        let thread_id = self
+        let (thread_id, queue_paused) = self
             .conn
             .query_row(
-                "SELECT thread_id FROM conversations
+                "SELECT thread_id, queue_paused FROM conversations
                  WHERE project_slug = ?1 AND workspace_name = ?2 AND thread_local_id = ?3",
                 params![project_slug, workspace_name, thread_local_id as i64],
-                |row| row.get::<_, Option<String>>(0),
+                |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?)),
             )
             .optional()
             .context("failed to load conversation meta")?
-            .flatten();
+            .map(|(thread_id, queue_paused)| (thread_id, queue_paused != 0))
+            .unwrap_or((None, false));
 
         let mut stmt = self.conn.prepare(
             "SELECT payload_json
@@ -1857,7 +1917,96 @@ impl SqliteDatabase {
             entries.push(entry);
         }
 
-        Ok(ConversationSnapshot { thread_id, entries })
+        let mut stmt = self.conn.prepare(
+            "SELECT payload_json
+             FROM conversation_queued_prompts
+             WHERE project_slug = ?1 AND workspace_name = ?2 AND thread_local_id = ?3
+             ORDER BY seq ASC, prompt_id ASC",
+        )?;
+        let rows = stmt.query_map(
+            params![project_slug, workspace_name, thread_local_id as i64],
+            |row| row.get::<_, String>(0),
+        )?;
+
+        let mut pending_prompts = Vec::new();
+        for row in rows {
+            let json = row?;
+            let prompt: QueuedPrompt =
+                serde_json::from_str(&json).context("failed to parse queued prompt")?;
+            pending_prompts.push(prompt);
+        }
+
+        Ok(ConversationSnapshot {
+            thread_id,
+            entries,
+            pending_prompts,
+            queue_paused,
+        })
+    }
+
+    fn save_conversation_queue_state(
+        &mut self,
+        project_slug: &str,
+        workspace_name: &str,
+        thread_local_id: u64,
+        queue_paused: bool,
+        pending_prompts: &[QueuedPrompt],
+    ) -> anyhow::Result<()> {
+        self.ensure_conversation(project_slug, workspace_name, thread_local_id)?;
+
+        let now = now_unix_seconds();
+        let next_queued_prompt_id = pending_prompts
+            .iter()
+            .map(|prompt| prompt.id)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1);
+
+        let tx = self.conn.transaction()?;
+        tx.execute(
+            "DELETE FROM conversation_queued_prompts
+             WHERE project_slug = ?1 AND workspace_name = ?2 AND thread_local_id = ?3",
+            params![project_slug, workspace_name, thread_local_id as i64],
+        )?;
+
+        if !pending_prompts.is_empty() {
+            let mut stmt = tx.prepare(
+                "INSERT INTO conversation_queued_prompts
+                 (project_slug, workspace_name, thread_local_id, prompt_id, seq, payload_json, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            )?;
+            for (idx, prompt) in pending_prompts.iter().enumerate() {
+                let seq = (idx.saturating_add(1)) as i64;
+                let payload_json =
+                    serde_json::to_string(prompt).context("failed to serialize queued prompt")?;
+                stmt.execute(params![
+                    project_slug,
+                    workspace_name,
+                    thread_local_id as i64,
+                    prompt.id as i64,
+                    seq,
+                    payload_json,
+                    now
+                ])?;
+            }
+        }
+
+        tx.execute(
+            "UPDATE conversations
+             SET queue_paused = ?4, next_queued_prompt_id = ?5, updated_at = ?6
+             WHERE project_slug = ?1 AND workspace_name = ?2 AND thread_local_id = ?3",
+            params![
+                project_slug,
+                workspace_name,
+                thread_local_id as i64,
+                if queue_paused { 1 } else { 0 },
+                next_queued_prompt_id as i64,
+                now
+            ],
+        )?;
+        tx.commit()?;
+
+        Ok(())
     }
 
     fn insert_context_item(
@@ -2054,7 +2203,10 @@ fn codex_item_id(item: &luban_domain::CodexThreadItem) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use luban_domain::{ChatScrollAnchor, CodexThreadItem, PersistedProject, PersistedWorkspace};
+    use luban_domain::{
+        AgentRunConfig, ChatScrollAnchor, CodexThreadItem, PersistedProject, PersistedWorkspace,
+        QueuedPrompt, ThinkingEffort,
+    };
     use std::path::Path;
 
     fn temp_db_path(test_name: &str) -> PathBuf {
@@ -2079,14 +2231,14 @@ mod tests {
         let db = open_db(&path);
 
         let count: i64 = db
-            .conn
-            .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('projects','workspaces','conversations','conversation_entries','app_settings','app_settings_text','context_items')",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(count, 7);
+                .conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('projects','workspaces','conversations','conversation_entries','conversation_queued_prompts','app_settings','app_settings_text','context_items')",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+        assert_eq!(count, 8);
     }
 
     #[test]
@@ -2320,6 +2472,46 @@ mod tests {
             .filter(|e| matches!(e, ConversationEntry::CodexItem { .. }))
             .count();
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn conversation_queue_state_round_trip() {
+        let path = temp_db_path("conversation_queue_state_round_trip");
+        let mut db = open_db(&path);
+
+        db.ensure_conversation("p", "w", 1).unwrap();
+
+        let prompts = vec![
+            QueuedPrompt {
+                id: 2,
+                text: "queued-a".to_owned(),
+                attachments: Vec::new(),
+                run_config: AgentRunConfig {
+                    model_id: "gpt-5.1-codex-mini".to_owned(),
+                    thinking_effort: ThinkingEffort::Low,
+                },
+            },
+            QueuedPrompt {
+                id: 7,
+                text: "queued-b".to_owned(),
+                attachments: Vec::new(),
+                run_config: AgentRunConfig {
+                    model_id: "gpt-5.1-codex-mini".to_owned(),
+                    thinking_effort: ThinkingEffort::Minimal,
+                },
+            },
+        ];
+
+        db.save_conversation_queue_state("p", "w", 1, true, &prompts)
+            .unwrap();
+
+        let snapshot = db.load_conversation("p", "w", 1).unwrap();
+        assert!(snapshot.queue_paused);
+        assert_eq!(snapshot.pending_prompts.len(), 2);
+        assert_eq!(snapshot.pending_prompts[0].id, 2);
+        assert_eq!(snapshot.pending_prompts[0].text, "queued-a");
+        assert_eq!(snapshot.pending_prompts[1].id, 7);
+        assert_eq!(snapshot.pending_prompts[1].text, "queued-b");
     }
 
     #[test]

@@ -499,6 +499,23 @@ impl AppState {
                     conversation.thread_id = snapshot.thread_id;
                 }
 
+                let should_apply_queue_snapshot = conversation.entries.is_empty()
+                    && conversation.pending_prompts.is_empty()
+                    && conversation.run_status == OperationStatus::Idle
+                    && conversation.in_progress_items.is_empty()
+                    && conversation.in_progress_order.is_empty();
+                if should_apply_queue_snapshot {
+                    conversation.pending_prompts = VecDeque::from(snapshot.pending_prompts.clone());
+                    conversation.queue_paused = snapshot.queue_paused;
+                    conversation.next_queued_prompt_id = conversation
+                        .pending_prompts
+                        .iter()
+                        .map(|prompt| prompt.id)
+                        .max()
+                        .unwrap_or(0)
+                        .saturating_add(1);
+                }
+
                 if conversation.entries.is_empty() {
                     conversation.entries = snapshot.entries;
                     return Vec::new();
@@ -2040,6 +2057,8 @@ mod tests {
                     attachments: Vec::new(),
                 })
                 .collect(),
+            pending_prompts: Vec::new(),
+            queue_paused: false,
         };
         state.apply(Action::ConversationLoaded {
             workspace_id,
@@ -2856,6 +2875,8 @@ mod tests {
             snapshot: ConversationSnapshot {
                 thread_id: None,
                 entries: Vec::new(),
+                pending_prompts: Vec::new(),
+                queue_paused: false,
             },
         });
         assert_eq!(state.workspace_conversation(w1).unwrap().draft, "draft-1");
@@ -3000,6 +3021,8 @@ mod tests {
             snapshot: ConversationSnapshot {
                 thread_id: Some("thread_0".to_owned()),
                 entries: Vec::new(),
+                pending_prompts: Vec::new(),
+                queue_paused: false,
             },
         });
 
@@ -3041,6 +3064,8 @@ mod tests {
                     text: "Hello".to_owned(),
                     attachments: Vec::new(),
                 }],
+                pending_prompts: Vec::new(),
+                queue_paused: false,
             },
         });
 
@@ -3071,6 +3096,8 @@ mod tests {
                     text: "Hello".to_owned(),
                     attachments: Vec::new(),
                 }],
+                pending_prompts: Vec::new(),
+                queue_paused: false,
             },
         });
 
@@ -3086,6 +3113,8 @@ mod tests {
                     },
                     ConversationEntry::TurnDuration { duration_ms: 1234 },
                 ],
+                pending_prompts: Vec::new(),
+                queue_paused: false,
             },
         });
 
@@ -3097,6 +3126,38 @@ mod tests {
                 ConversationEntry::TurnDuration { duration_ms: 1234 }
             ]
         ));
+    }
+
+    #[test]
+    fn conversation_loaded_restores_queued_prompts_when_local_is_empty() {
+        let mut state = AppState::demo();
+        let workspace_id = first_non_main_workspace_id(&state);
+        let thread_id = default_thread_id();
+
+        state.apply(Action::ConversationLoaded {
+            workspace_id,
+            thread_id,
+            snapshot: ConversationSnapshot {
+                thread_id: None,
+                entries: Vec::new(),
+                pending_prompts: vec![QueuedPrompt {
+                    id: 3,
+                    text: "Queued".to_owned(),
+                    attachments: Vec::new(),
+                    run_config: AgentRunConfig {
+                        model_id: "gpt-5.1-codex-mini".to_owned(),
+                        thinking_effort: ThinkingEffort::Low,
+                    },
+                }],
+                queue_paused: true,
+            },
+        });
+
+        let conversation = state.workspace_conversation(workspace_id).unwrap();
+        assert!(conversation.queue_paused);
+        assert_eq!(conversation.pending_prompts.len(), 1);
+        assert_eq!(conversation.pending_prompts[0].id, 3);
+        assert_eq!(conversation.next_queued_prompt_id, 4);
     }
 
     #[test]

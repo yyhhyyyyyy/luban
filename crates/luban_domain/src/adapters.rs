@@ -1,6 +1,6 @@
 use crate::{
     AttachmentRef, CodexThreadEvent, ContextItem, ConversationSnapshot, ConversationThreadMeta,
-    PersistedAppState, SystemTaskKind,
+    PersistedAppState, QueuedPrompt, SystemTaskKind,
 };
 use std::collections::HashMap;
 use std::{path::PathBuf, sync::Arc, sync::atomic::AtomicBool};
@@ -235,6 +235,17 @@ pub trait ProjectWorkspaceService: Send + Sync {
         workspace_name: String,
         thread_id: u64,
     ) -> Result<ConversationSnapshot, String>;
+
+    fn save_conversation_queue_state(
+        &self,
+        _project_slug: String,
+        _workspace_name: String,
+        _thread_id: u64,
+        _queue_paused: bool,
+        _pending_prompts: Vec<QueuedPrompt>,
+    ) -> Result<(), String> {
+        Ok(())
+    }
 
     fn store_context_image(
         &self,

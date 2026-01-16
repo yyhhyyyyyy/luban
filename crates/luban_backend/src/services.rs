@@ -729,6 +729,25 @@ impl ProjectWorkspaceService for GitWorkspaceService {
             .map_err(|e| format!("{e:#}"))
     }
 
+    fn save_conversation_queue_state(
+        &self,
+        project_slug: String,
+        workspace_name: String,
+        thread_id: u64,
+        queue_paused: bool,
+        pending_prompts: Vec<luban_domain::QueuedPrompt>,
+    ) -> Result<(), String> {
+        self.sqlite
+            .save_conversation_queue_state(
+                project_slug,
+                workspace_name,
+                thread_id,
+                queue_paused,
+                pending_prompts,
+            )
+            .map_err(|e| format!("{e:#}"))
+    }
+
     fn store_context_image(
         &self,
         project_slug: String,
