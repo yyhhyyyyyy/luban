@@ -462,6 +462,42 @@ test("agent running timer increments while running", async ({ page }) => {
   await page.getByTestId("agent-running-input").press("Escape")
 })
 
+test("double-Esc while agent is running opens cancel editor", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  const workspaceIdRaw = (await page.evaluate(() => localStorage.getItem("luban:active_workspace_id"))) ?? ""
+  const workspaceId = Number(workspaceIdRaw)
+  expect(Number.isFinite(workspaceId)).toBeTruthy()
+  expect(workspaceId).toBeGreaterThan(0)
+
+  const threadId = await createThreadViaUi(page, workspaceId)
+  expect(threadId).toBeGreaterThan(0)
+
+  const runId = Math.random().toString(16).slice(2)
+  const seed = `e2e-double-esc-${runId}`
+
+  await sendWsAction(page, {
+    type: "send_agent_message",
+    workspace_id: workspaceId,
+    thread_id: threadId,
+    text: `${seed}-run`,
+    attachments: [],
+  })
+
+  await expect(page.getByTestId("agent-running-cancel")).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByTestId("agent-running-input")).toHaveCount(0)
+
+  await page.keyboard.press("Escape")
+  await expect(page.getByTestId("esc-cancel-hint")).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByTestId("agent-running-input")).toHaveCount(0)
+
+  await page.keyboard.press("Escape")
+  await expect(page.getByTestId("agent-running-input")).toBeVisible({ timeout: 20_000 })
+
+  // Cleanup: cancel this run so it doesn't leak into other tests.
+  await page.getByTestId("agent-running-input").press("Escape")
+})
+
 test("expanded agent running card keeps header anchored as activities grow", async ({ page }) => {
   await ensureWorkspace(page)
 

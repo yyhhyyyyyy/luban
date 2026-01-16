@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Copy,
   ArrowDown,
+  Keyboard,
   MessageSquare,
   Plus,
   Clock,
@@ -123,6 +124,10 @@ export function ChatPanel({
   const [queuedDraftModelId, setQueuedDraftModelId] = useState<string | null>(null)
   const [queuedDraftThinkingEffort, setQueuedDraftThinkingEffort] = useState<ThinkingEffort | null>(null)
   const queuedAttachmentScopeRef = useRef<string>("")
+
+  const [escHintVisible, setEscHintVisible] = useState(false)
+  const escTimeoutRef = useRef<number | null>(null)
+  const ESC_TIMEOUT_MS = 2000
 
   const [agentOverrideStatus, setAgentOverrideStatus] = useState<AgentRunningStatus | null>(null)
   const [agentEditorValue, setAgentEditorValue] = useState("")
@@ -586,15 +591,74 @@ export function ChatPanel({
     }
   }, [agentOverrideStatus, baseAgentStatus])
 
-  const handleAgentCancel = () => {
+  const clearEscHint = useCallback(() => {
+    setEscHintVisible(false)
+    if (escTimeoutRef.current != null) {
+      window.clearTimeout(escTimeoutRef.current)
+      escTimeoutRef.current = null
+    }
+  }, [])
+
+  const handleAgentCancel = useCallback(() => {
     if (!agentStatus) return
     setAgentOverrideStatus("cancelling")
-  }
+  }, [agentStatus])
 
-  const handleAgentResume = () => {
+  const handleAgentResume = useCallback(() => {
     if (!agentStatus) return
     setAgentOverrideStatus("resuming")
-  }
+  }, [agentStatus])
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return
+      if (agentStatus !== "running") return
+      if (editingQueuedPromptId != null) return
+      if (isRenamingBranch) return
+
+      const target = e.target as HTMLElement | null
+      const isInInput = Boolean(
+        target &&
+          (target.tagName === "INPUT" ||
+            target.tagName === "TEXTAREA" ||
+            target.isContentEditable),
+      )
+
+      if (escHintVisible) {
+        e.preventDefault()
+        clearEscHint()
+        handleAgentCancel()
+        return
+      }
+
+      if (!isInInput) {
+        e.preventDefault()
+      }
+      setEscHintVisible(true)
+      if (escTimeoutRef.current != null) {
+        window.clearTimeout(escTimeoutRef.current)
+      }
+      escTimeoutRef.current = window.setTimeout(() => {
+        setEscHintVisible(false)
+        escTimeoutRef.current = null
+      }, ESC_TIMEOUT_MS)
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown)
+      if (escTimeoutRef.current != null) {
+        window.clearTimeout(escTimeoutRef.current)
+        escTimeoutRef.current = null
+      }
+    }
+  }, [agentStatus, editingQueuedPromptId, isRenamingBranch, escHintVisible, clearEscHint, handleAgentCancel])
+
+  useEffect(() => {
+    if (agentStatus !== "running") {
+      clearEscHint()
+    }
+  }, [agentStatus, clearEscHint])
 
   const clearAgentEditor = () => {
     setAgentEditorValue("")
@@ -1312,6 +1376,32 @@ export function ChatPanel({
 
           <div className="relative z-10 -mt-16 pt-8 bg-gradient-to-t from-background via-background to-transparent pointer-events-none">
             <div className="pointer-events-auto">
+              {escHintVisible && (
+                <div className="flex justify-center pb-2">
+                  <div
+                    data-testid="esc-cancel-hint"
+                    className="flex items-center gap-2 px-3 py-2 bg-status-warning/10 border border-status-warning/30 rounded-lg text-xs text-status-warning shadow-lg animate-in fade-in slide-in-from-bottom-2 duration-200"
+                  >
+                    <Keyboard className="w-3.5 h-3.5" />
+                    <span>
+                      Press{" "}
+                      <kbd className="px-1.5 py-0.5 bg-status-warning/20 rounded text-[10px] font-mono font-medium">
+                        Esc
+                      </kbd>{" "}
+                      again to cancel
+                    </span>
+                    <div className="w-12 h-1 bg-status-warning/20 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-status-warning rounded-full"
+                        style={{
+                          animation: `shrink ${ESC_TIMEOUT_MS}ms linear forwards`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {!followTail && messages.length > 0 && editingQueuedPromptId == null ? (
                 <div className="flex justify-center pb-2">
                   <button
