@@ -97,4 +97,17 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn tauri_capability_allows_any_localhost_port() {
+        let contents = include_str!("../capabilities/main.json");
+        assert!(
+            contents.contains("http://127.0.0.1:*/*"),
+            "capability must allow 127.0.0.1 on any port"
+        );
+        assert!(
+            contents.contains("http://localhost:*/*"),
+            "capability must allow localhost on any port"
+        );
+    }
 }

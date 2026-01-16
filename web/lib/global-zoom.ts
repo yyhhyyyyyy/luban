@@ -5,7 +5,14 @@ import { getCurrentWebview } from "@tauri-apps/api/webview"
 
 import { GLOBAL_ZOOM_KEY } from "./ui-prefs"
 
-export const DEFAULT_GLOBAL_ZOOM = 1
+function defaultGlobalZoom(): number {
+  // The same CSS pixels can appear a bit smaller inside the macOS WebView.
+  // Use a slightly larger default zoom for a more native feel.
+  if (typeof navigator !== "undefined" && navigator.platform.includes("Mac")) return 1.1
+  return 1
+}
+
+export const DEFAULT_GLOBAL_ZOOM = defaultGlobalZoom()
 export const GLOBAL_ZOOM_STEP = 0.1
 export const GLOBAL_ZOOM_MIN = 0.7
 export const GLOBAL_ZOOM_MAX = 1.6
