@@ -15,6 +15,7 @@ export interface ActivityEvent {
   detail?: string
   status: "running" | "done"
   duration?: string
+  badge?: string
 }
 
 export interface Message {
@@ -78,14 +79,44 @@ export function activityFromAgentItemLike(args: {
   const kind = args.kind
   const forcedStatus = args.forcedStatus
 
+  const firstSentence = (text: string): string => {
+    const trimmed = text.trim()
+    if (!trimmed) return ""
+
+    const firstLine = trimmed.split(/\r?\n/)[0] ?? trimmed
+    const match = firstLine.match(/^(.+?[.!?])(\s|$)/)
+    const sentence = (match?.[1] ?? firstLine).trim()
+    return sentence.length > 0 ? sentence : firstLine.trim()
+  }
+
+  const normalizeShellCommand = (
+    rawCommand: string,
+  ): { displayCommand: string; badge?: "zsh" | "bash" } => {
+    const trimmed = rawCommand.trim()
+    const match = trimmed.match(/^(?:\/bin\/)?(zsh|bash)\s+-lc\s+(.+)$/)
+    if (!match) return { displayCommand: trimmed }
+
+    const shell = (match[1] ?? "").toLowerCase() as "zsh" | "bash"
+    let inner = (match[2] ?? "").trim()
+    if (
+      (inner.startsWith('"') && inner.endsWith('"')) ||
+      (inner.startsWith("'") && inner.endsWith("'"))
+    ) {
+      inner = inner.slice(1, -1).trim()
+    }
+    return { displayCommand: inner.length > 0 ? inner : trimmed, badge: shell }
+  }
+
   if (kind === "command_execution") {
     const status = forcedStatus ?? (payload?.status === "in_progress" ? "running" : "done")
+    const normalized = normalizeShellCommand(payload?.command ?? "Command")
     return {
       id: args.id,
       type: "bash",
-      title: payload?.command ?? "Command",
+      title: normalized.displayCommand,
       detail: payload?.aggregated_output ?? "",
       status,
+      badge: normalized.badge,
     }
   }
 
@@ -130,11 +161,13 @@ export function activityFromAgentItemLike(args: {
   }
 
   if (kind === "reasoning") {
+    const full = payload?.text ?? ""
+    const summary = firstSentence(full)
     return {
       id: args.id,
       type: "thinking",
-      title: "Reasoning",
-      detail: payload?.text ?? "",
+      title: summary.length > 0 ? summary : "Think",
+      detail: full,
       status: forcedStatus ?? "done",
     }
   }

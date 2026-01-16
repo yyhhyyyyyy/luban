@@ -116,9 +116,7 @@ export function AgentRunningCard({
   const latestActivity = activities[activities.length - 1]
   const historyActivities = activities.slice(0, -1)
   const labelForActivity = (event: ActivityEvent): string => {
-    if (event.type === "thinking" && (!event.detail || event.detail.trim().length === 0)) {
-      return "Reasoning"
-    }
+    if (event.type === "bash" && event.badge) return event.badge
     return eventLabels[event.type] ?? "Tool"
   }
   const currentLabel = latestActivity ? labelForActivity(latestActivity) : "Processing"
