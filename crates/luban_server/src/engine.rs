@@ -1553,7 +1553,9 @@ impl Engine {
                         .is_some_and(|bin| bin == "/usr/bin/false");
                 let fake_agent_delay = if use_fake_agent {
                     let prompt = text.as_str();
-                    if prompt.contains("e2e-cancel") {
+                    if prompt.contains("e2e-running-card") {
+                        Duration::from_millis(3500)
+                    } else if prompt.contains("e2e-cancel") {
                         Duration::from_millis(2500)
                     } else if prompt.contains("e2e-queued") {
                         Duration::from_millis(1500)
@@ -1600,8 +1602,110 @@ impl Engine {
                     std::thread::spawn(move || {
                         let deadline = fake_agent_delay;
                         let start = Instant::now();
+                        let prompt = request.prompt.clone();
+
+                        let mut sent_1_start = false;
+                        let mut sent_1_done = false;
+                        let mut sent_2_start = false;
+                        let mut sent_2_done = false;
+                        let mut sent_3_start = false;
 
                         while start.elapsed() < deadline && !cancel.load(Ordering::SeqCst) {
+                            let elapsed = start.elapsed();
+
+                            if prompt.contains("e2e-running-card") {
+                                if !sent_1_start && elapsed >= Duration::from_millis(50) {
+                                    sent_1_start = true;
+                                    let _ = tx.blocking_send(EngineCommand::DispatchAction {
+                                        action: Box::new(Action::AgentEventReceived {
+                                            workspace_id,
+                                            thread_id,
+                                            event: luban_domain::CodexThreadEvent::ItemStarted {
+                                                item: luban_domain::CodexThreadItem::CommandExecution {
+                                                    id: "e2e_cmd_1".to_owned(),
+                                                    command: "echo 1".to_owned(),
+                                                    aggregated_output: "".to_owned(),
+                                                    exit_code: None,
+                                                    status: luban_domain::CodexCommandExecutionStatus::InProgress,
+                                                },
+                                            },
+                                        }),
+                                    });
+                                }
+                                if !sent_1_done && elapsed >= Duration::from_millis(250) {
+                                    sent_1_done = true;
+                                    let _ = tx.blocking_send(EngineCommand::DispatchAction {
+                                        action: Box::new(Action::AgentEventReceived {
+                                            workspace_id,
+                                            thread_id,
+                                            event: luban_domain::CodexThreadEvent::ItemCompleted {
+                                                item: luban_domain::CodexThreadItem::CommandExecution {
+                                                    id: "e2e_cmd_1".to_owned(),
+                                                    command: "echo 1".to_owned(),
+                                                    aggregated_output: "ok".to_owned(),
+                                                    exit_code: Some(0),
+                                                    status: luban_domain::CodexCommandExecutionStatus::Completed,
+                                                },
+                                            },
+                                        }),
+                                    });
+                                }
+                                if !sent_2_start && elapsed >= Duration::from_millis(350) {
+                                    sent_2_start = true;
+                                    let _ = tx.blocking_send(EngineCommand::DispatchAction {
+                                        action: Box::new(Action::AgentEventReceived {
+                                            workspace_id,
+                                            thread_id,
+                                            event: luban_domain::CodexThreadEvent::ItemStarted {
+                                                item: luban_domain::CodexThreadItem::CommandExecution {
+                                                    id: "e2e_cmd_2".to_owned(),
+                                                    command: "echo 2".to_owned(),
+                                                    aggregated_output: "".to_owned(),
+                                                    exit_code: None,
+                                                    status: luban_domain::CodexCommandExecutionStatus::InProgress,
+                                                },
+                                            },
+                                        }),
+                                    });
+                                }
+                                if !sent_2_done && elapsed >= Duration::from_millis(1750) {
+                                    sent_2_done = true;
+                                    let _ = tx.blocking_send(EngineCommand::DispatchAction {
+                                        action: Box::new(Action::AgentEventReceived {
+                                            workspace_id,
+                                            thread_id,
+                                            event: luban_domain::CodexThreadEvent::ItemCompleted {
+                                                item: luban_domain::CodexThreadItem::CommandExecution {
+                                                    id: "e2e_cmd_2".to_owned(),
+                                                    command: "echo 2".to_owned(),
+                                                    aggregated_output: "ok".to_owned(),
+                                                    exit_code: Some(0),
+                                                    status: luban_domain::CodexCommandExecutionStatus::Completed,
+                                                },
+                                            },
+                                        }),
+                                    });
+                                }
+                                if !sent_3_start && elapsed >= Duration::from_millis(1800) {
+                                    sent_3_start = true;
+                                    let _ = tx.blocking_send(EngineCommand::DispatchAction {
+                                        action: Box::new(Action::AgentEventReceived {
+                                            workspace_id,
+                                            thread_id,
+                                            event: luban_domain::CodexThreadEvent::ItemStarted {
+                                                item: luban_domain::CodexThreadItem::CommandExecution {
+                                                    id: "e2e_cmd_3".to_owned(),
+                                                    command: "echo 3".to_owned(),
+                                                    aggregated_output: "".to_owned(),
+                                                    exit_code: None,
+                                                    status: luban_domain::CodexCommandExecutionStatus::InProgress,
+                                                },
+                                            },
+                                        }),
+                                    });
+                                }
+                            }
+
                             std::thread::sleep(Duration::from_millis(25));
                         }
 

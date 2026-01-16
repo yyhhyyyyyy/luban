@@ -408,6 +408,63 @@ test("agent running timer increments while running", async ({ page }) => {
   await page.getByTestId("agent-running-input").press("Escape")
 })
 
+test("expanded agent running card keeps header anchored as activities grow", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  const workspaceIdRaw = (await page.evaluate(() => localStorage.getItem("luban:active_workspace_id"))) ?? ""
+  const workspaceId = Number(workspaceIdRaw)
+  expect(Number.isFinite(workspaceId)).toBeTruthy()
+  expect(workspaceId).toBeGreaterThan(0)
+
+  const threadId = await createThreadViaUi(page, workspaceId)
+  expect(threadId).toBeGreaterThan(0)
+
+  const runId = Math.random().toString(16).slice(2)
+  const seed = `e2e-running-card-${runId}`
+
+  // Ensure the chat view can actually scroll; otherwise the header can't be kept anchored when the
+  // expanded activity list grows.
+  const filler = Array.from({ length: 120 }, (_, i) => `filler ${i + 1} ${runId}`).join("\n")
+  await page.getByTestId("chat-input").fill(filler)
+  await page.getByTestId("chat-send").click()
+  await expect(page.getByTestId("user-message-bubble").filter({ hasText: `filler 120 ${runId}` }).first()).toBeVisible({
+    timeout: 20_000,
+  })
+
+  await sendWsAction(page, {
+    type: "send_agent_message",
+    workspace_id: workspaceId,
+    thread_id: threadId,
+    text: `${seed}-run`,
+    attachments: [],
+  })
+
+  await expect(page.getByTestId("agent-running-cancel")).toBeVisible({ timeout: 20_000 })
+
+  const header = page.getByTestId("agent-running-header")
+  await expect(header).toBeVisible({ timeout: 20_000 })
+
+  // Ensure we have at least one completed activity before expanding, otherwise the expanded view
+  // doesn't render the history section above the header.
+  await expect(header).toContainText("echo 2", { timeout: 20_000 })
+
+  await header.click()
+  const history = page.getByTestId("agent-running-history")
+  await expect(history.getByText("echo 1")).toBeVisible({ timeout: 20_000 })
+
+  const y0 = (await header.boundingBox())?.y ?? 0
+  expect(y0).toBeGreaterThan(0)
+
+  // Wait for another activity to become "history" and verify the header stays anchored.
+  await expect(history.getByText("echo 2")).toBeVisible({ timeout: 20_000 })
+  const y1 = (await header.boundingBox())?.y ?? 0
+  expect(Math.abs(y1 - y0)).toBeLessThanOrEqual(2)
+
+  // Cleanup: cancel this run so it doesn't leak into other tests.
+  await page.getByTestId("agent-running-cancel").click()
+  await page.getByTestId("agent-running-input").press("Escape")
+})
+
 test("/command autocompletes Codex custom prompts", async ({ page }) => {
   await ensureWorkspace(page)
 

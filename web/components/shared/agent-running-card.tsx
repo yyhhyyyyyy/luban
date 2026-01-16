@@ -90,6 +90,8 @@ export function AgentRunningCard({
   const [expandedEvents, setExpandedEvents] = useState<Set<string>>(new Set())
   const headerRef = React.useRef<HTMLDivElement>(null)
   const editorContainerRef = React.useRef<HTMLDivElement>(null)
+  const anchorTopRef = React.useRef<number | null>(null)
+  const isCompensatingScrollRef = React.useRef(false)
 
   const showEditor = status === "cancelling" || status === "resuming"
   const isPaused = status === "paused"
@@ -104,11 +106,48 @@ export function AgentRunningCard({
   const currentLabel = latestActivity ? eventLabels[latestActivity.type] : "Processing"
   const LatestIcon = latestActivity ? eventIcons[latestActivity.type] : Wrench
 
+  const findScrollContainer = (): HTMLElement | null => {
+    const header = headerRef.current
+    if (!header) return null
+
+    const byTestId = header.closest('[data-testid="chat-scroll-container"]') as HTMLElement | null
+    if (byTestId) return byTestId
+
+    return header.closest(".overflow-y-auto") as HTMLElement | null
+  }
+
+  const anchorHeaderTop = () => {
+    const header = headerRef.current
+    if (!header) return
+    anchorTopRef.current = header.getBoundingClientRect().top
+  }
+
+  const compensateScrollToKeepHeaderAnchored = () => {
+    const header = headerRef.current
+    if (!header) return
+    const anchor = anchorTopRef.current
+    if (anchor == null) return
+
+    const scrollContainer = findScrollContainer()
+    if (!scrollContainer) return
+
+    const currentTop = header.getBoundingClientRect().top
+    const delta = currentTop - anchor
+    if (Math.abs(delta) < 0.5) return
+
+    isCompensatingScrollRef.current = true
+    scrollContainer.scrollTop += delta
+    requestAnimationFrame(() => {
+      isCompensatingScrollRef.current = false
+    })
+  }
+
   const toggleExpand = () => {
     if (headerRef.current) {
       const headerRect = headerRef.current.getBoundingClientRect()
       const headerTop = headerRect.top
 
+      anchorTopRef.current = headerTop
       setIsExpanded(!isExpanded)
 
       requestAnimationFrame(() => {
@@ -116,9 +155,13 @@ export function AgentRunningCard({
         const newHeaderRect = headerRef.current.getBoundingClientRect()
         const delta = newHeaderRect.top - headerTop
         if (delta === 0) return
-        const scrollContainer = headerRef.current.closest(".overflow-y-auto") as HTMLElement | null
+        const scrollContainer = findScrollContainer()
         if (!scrollContainer) return
+        isCompensatingScrollRef.current = true
         scrollContainer.scrollTop += delta
+        requestAnimationFrame(() => {
+          isCompensatingScrollRef.current = false
+        })
       })
       return
     }
@@ -154,6 +197,32 @@ export function AgentRunningCard({
     }
   }, [onDismiss, showEditor])
 
+  React.useEffect(() => {
+    if (!isExpanded) {
+      anchorTopRef.current = null
+      return
+    }
+
+    anchorHeaderTop()
+    const scrollContainer = findScrollContainer()
+    if (!scrollContainer) return
+
+    const onScroll = () => {
+      if (isCompensatingScrollRef.current) return
+      anchorHeaderTop()
+    }
+
+    scrollContainer.addEventListener("scroll", onScroll, { passive: true })
+    return () => scrollContainer.removeEventListener("scroll", onScroll)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isExpanded])
+
+  React.useLayoutEffect(() => {
+    if (!isExpanded) return
+    compensateScrollToKeepHeaderAnchored()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isExpanded, historyActivities.length, expandedEvents.size])
+
   if (!activities.length) return null
 
   const canSubmit = (() => {
@@ -166,7 +235,10 @@ export function AgentRunningCard({
   return (
     <div className="my-3">
       {isExpanded && historyActivities.length > 0 && (
-        <div className="px-3 py-2 space-y-0.5 border border-b-0 border-border rounded-t-lg bg-card">
+        <div
+          data-testid="agent-running-history"
+          className="px-3 py-2 space-y-0.5 border border-b-0 border-border rounded-t-lg bg-card"
+        >
           {historyActivities.map((event) => {
             const Icon = eventIcons[event.type] || Wrench
             const isEventExpanded = expandedEvents.has(event.id)
@@ -218,6 +290,7 @@ export function AgentRunningCard({
 
       <div
         ref={headerRef}
+        data-testid="agent-running-header"
         className={cn(
           "flex items-center justify-between px-3 py-2 bg-muted/50 cursor-pointer hover:bg-muted/70 transition-colors border border-border",
           isExpanded && historyActivities.length > 0 ? "rounded-t-none border-t-0" : "rounded-lg",

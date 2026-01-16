@@ -26,6 +26,8 @@ The **Agent Running Card** is attached to the most recent assistant message that
 
 All other assistant messages render the regular **Activity Stream**.
 
+When the running card is expanded, the scroll container should auto-compensate so the card header stays anchored while the activity list above it grows.
+
 ## Cancel Flow
 
 1. While the agent is running, the running card header shows a **Cancel** button.
@@ -59,4 +61,3 @@ Playwright tests cover:
 - Cancel → Escape without queued prompts:
   - the running card disappears
   - the cancelled activity stream is shown
-
