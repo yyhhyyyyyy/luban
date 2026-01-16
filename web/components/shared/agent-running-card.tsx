@@ -115,7 +115,13 @@ export function AgentRunningCard({
 
   const latestActivity = activities[activities.length - 1]
   const historyActivities = activities.slice(0, -1)
-  const currentLabel = latestActivity ? eventLabels[latestActivity.type] : "Processing"
+  const labelForActivity = (event: ActivityEvent): string => {
+    if (event.type === "thinking" && (!event.detail || event.detail.trim().length === 0)) {
+      return "Reasoning"
+    }
+    return eventLabels[event.type] ?? "Tool"
+  }
+  const currentLabel = latestActivity ? labelForActivity(latestActivity) : "Processing"
   const LatestIcon = latestActivity ? eventIcons[latestActivity.type] : Wrench
 
   React.useEffect(() => {
@@ -302,7 +308,7 @@ export function AgentRunningCard({
                   <Check className="w-3.5 h-3.5 text-status-success flex-shrink-0" />
                   <span className="flex items-center gap-1 w-16 px-1.5 py-0.5 rounded text-[10px] font-medium flex-shrink-0 bg-muted text-muted-foreground">
                     <Icon className="w-3 h-3" />
-                    {eventLabels[event.type]}
+                    {labelForActivity(event)}
                   </span>
                   <span className="flex-1 text-left truncate">{event.title}</span>
                   <span className="text-[10px] text-muted-foreground/60 font-mono w-10 text-right flex-shrink-0">
