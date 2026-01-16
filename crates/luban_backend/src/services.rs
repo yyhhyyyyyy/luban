@@ -1627,7 +1627,7 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                 depth: usize,
             ) -> anyhow::Result<Vec<CodexConfigEntry>> {
                 if depth > 16 {
-                    return Err(anyhow!("codex config tree exceeds maximum depth"));
+                    return Ok(Vec::new());
                 }
 
                 let mut entries = std::fs::read_dir(dir)
@@ -1640,7 +1640,7 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                 let mut out = Vec::new();
                 for entry in entries {
                     if *remaining == 0 {
-                        return Err(anyhow!("codex config tree exceeds maximum size"));
+                        break;
                     }
                     *remaining -= 1;
 
@@ -1652,6 +1652,28 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                     let name = entry.file_name().to_string_lossy().to_string();
                     if name.is_empty() {
                         continue;
+                    }
+
+                    // Only expose Codex config + user-defined prompts in the UI.
+                    //
+                    // Some Codex installations may accumulate large caches or runtime files under
+                    // ~/.codex; scanning everything makes Settings unusable and can spam errors.
+                    //
+                    // Keep the tree intentionally small and stable:
+                    // - root: *.toml
+                    // - prompts/: *.md|*.txt (recursively)
+                    let is_root = rel.as_os_str().is_empty();
+                    if is_root {
+                        let is_prompts_dir = file_type.is_dir() && name == "prompts";
+                        let is_toml_file = file_type.is_file() && name.ends_with(".toml");
+                        if !is_prompts_dir && !is_toml_file {
+                            continue;
+                        }
+                    } else if file_type.is_file() {
+                        let name_lower = name.to_ascii_lowercase();
+                        if !(name_lower.ends_with(".md") || name_lower.ends_with(".txt")) {
+                            continue;
+                        }
                     }
 
                     let rel_child = rel.join(&name);
@@ -1941,6 +1963,95 @@ mod tests {
         unsafe {
             std::env::remove_var(paths::LUBAN_ROOT_ENV);
         }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn codex_config_tree_ignores_large_unrelated_dirs() {
+        let _guard = lock_env();
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be valid")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "luban-codex-config-tree-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&root).expect("temp dir should be created");
+
+        let cache_dir = root.join("cache");
+        std::fs::create_dir_all(&cache_dir).expect("cache dir should be created");
+        for i in 0..3000 {
+            std::fs::write(cache_dir.join(format!("blob-{i}.bin")), b"x")
+                .expect("write cache file");
+        }
+
+        std::fs::write(root.join("config.toml"), "model = \"gpt-5.1-codex-mini\"")
+            .expect("write config.toml");
+        let prompts_dir = root.join("prompts");
+        std::fs::create_dir_all(&prompts_dir).expect("prompts dir should be created");
+        std::fs::write(prompts_dir.join("hello.md"), "# Hello\n").expect("write prompt");
+
+        let prev = std::env::var_os(paths::LUBAN_CODEX_ROOT_ENV);
+        unsafe {
+            std::env::set_var(paths::LUBAN_CODEX_ROOT_ENV, &root);
+        }
+
+        let base_dir =
+            std::env::temp_dir().join(format!("luban-services-{}-{}", std::process::id(), unique));
+        std::fs::create_dir_all(&base_dir).expect("luban root should exist");
+        let sqlite =
+            SqliteStore::new(paths::sqlite_path(&base_dir)).expect("sqlite init should work");
+        let service = GitWorkspaceService {
+            worktrees_root: paths::worktrees_root(&base_dir),
+            conversations_root: paths::conversations_root(&base_dir),
+            task_prompts_root: paths::task_prompts_root(&base_dir),
+            sqlite,
+        };
+
+        let tree = ProjectWorkspaceService::codex_config_tree(&service)
+            .expect("codex_config_tree should succeed");
+
+        if let Some(value) = prev {
+            unsafe {
+                std::env::set_var(paths::LUBAN_CODEX_ROOT_ENV, value);
+            }
+        } else {
+            unsafe {
+                std::env::remove_var(paths::LUBAN_CODEX_ROOT_ENV);
+            }
+        }
+
+        let mut paths = Vec::new();
+        fn collect(out: &mut Vec<String>, entries: &[CodexConfigEntry]) {
+            for entry in entries {
+                out.push(entry.path.clone());
+                collect(out, &entry.children);
+            }
+        }
+        collect(&mut paths, &tree);
+
+        assert!(
+            paths.iter().any(|p| p == "config.toml"),
+            "tree should include config.toml"
+        );
+        assert!(
+            paths.iter().any(|p| p == "prompts"),
+            "tree should include prompts dir"
+        );
+        assert!(
+            paths.iter().any(|p| p == "prompts/hello.md"),
+            "tree should include prompt file"
+        );
+        assert!(
+            paths.iter().all(|p| !p.starts_with("cache/")),
+            "tree should ignore unrelated cache directory"
+        );
+
+        drop(service);
+        let _ = std::fs::remove_dir_all(&base_dir);
         let _ = std::fs::remove_dir_all(&root);
     }
 
