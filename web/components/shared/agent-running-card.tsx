@@ -300,7 +300,7 @@ export function AgentRunningCard({
                 <button
                   onClick={(e) => hasDetail && toggleEvent(event.id, e)}
                   className={cn(
-                    "w-full flex items-center gap-2 text-xs py-1 px-1 -mx-1 rounded transition-colors text-muted-foreground",
+                    "relative w-full flex items-center gap-2 text-xs py-1 px-1 -mx-1 rounded transition-colors text-muted-foreground overflow-hidden",
                     hasDetail && "hover:bg-muted/50 cursor-pointer",
                     !hasDetail && "cursor-default",
                   )}
@@ -311,17 +311,20 @@ export function AgentRunningCard({
                     {labelForActivity(event)}
                   </span>
                   <span className="flex-1 text-left truncate">{event.title}</span>
-                  <span className="text-[10px] text-muted-foreground/60 font-mono w-10 text-right flex-shrink-0">
-                    {durationLabel ?? "00:00"}
-                  </span>
-                  {hasDetail && (
-                    <ChevronRight
-                      className={cn(
-                        "w-3 h-3 text-muted-foreground/40 transition-transform flex-shrink-0",
-                        isEventExpanded && "rotate-90",
-                      )}
-                    />
-                  )}
+                  <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1 pl-3">
+                    <div className="pointer-events-none absolute inset-y-0 -left-6 w-6 bg-gradient-to-l from-card via-card to-transparent group-hover:from-muted/50 group-hover:via-muted/50" />
+                    <span className="relative z-10 text-[10px] text-muted-foreground/60 font-mono w-10 text-right flex-shrink-0 bg-card group-hover:bg-muted/50">
+                      {durationLabel ?? "00:00"}
+                    </span>
+                    {hasDetail && (
+                      <ChevronRight
+                        className={cn(
+                          "relative z-10 w-3 h-3 text-muted-foreground/40 transition-transform flex-shrink-0",
+                          isEventExpanded && "rotate-90",
+                        )}
+                      />
+                    )}
+                  </div>
                 </button>
 
                 {isEventExpanded && event.detail && (
