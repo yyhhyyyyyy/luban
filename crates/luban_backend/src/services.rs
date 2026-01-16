@@ -13,7 +13,9 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
     sync::Arc,
+    sync::OnceLock,
     sync::atomic::{AtomicBool, Ordering},
+    thread,
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -25,6 +27,8 @@ mod conversations;
 mod git;
 mod task;
 use codex_cli::CodexTurnParams;
+
+const CODEX_EXECUTABLE_PATH_KEY: &str = "codex_executable_path";
 
 fn contains_attempt_fraction(text: &str) -> bool {
     let mut chars = text.chars().peekable();
@@ -219,6 +223,7 @@ pub struct GitWorkspaceService {
     conversations_root: PathBuf,
     task_prompts_root: PathBuf,
     sqlite: SqliteStore,
+    codex_executable_cache: Arc<OnceLock<PathBuf>>,
 }
 
 impl GitWorkspaceService {
@@ -250,6 +255,7 @@ impl GitWorkspaceService {
             conversations_root,
             task_prompts_root,
             sqlite,
+            codex_executable_cache: Arc::new(OnceLock::new()),
         }))
     }
 
@@ -277,9 +283,58 @@ impl GitWorkspaceService {
     }
 
     fn codex_executable(&self) -> PathBuf {
-        std::env::var_os(paths::LUBAN_CODEX_BIN_ENV)
+        if let Some(explicit) = std::env::var_os(paths::LUBAN_CODEX_BIN_ENV).map(PathBuf::from) {
+            return explicit;
+        }
+
+        if let Some(found) = self.codex_executable_cache.get() {
+            return found.clone();
+        }
+
+        if let Some(found) = self.discover_codex_executable() {
+            let _ = self.codex_executable_cache.set(found.clone());
+            return found;
+        }
+
+        PathBuf::from("codex")
+    }
+
+    fn discover_codex_executable(&self) -> Option<PathBuf> {
+        let from_db = self
+            .sqlite
+            .get_app_setting_text(CODEX_EXECUTABLE_PATH_KEY)
+            .ok()
+            .flatten()
             .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("codex"))
+            .and_then(|p| canonicalize_executable(&p));
+
+        if let Some(found) = from_db {
+            return Some(found);
+        }
+
+        let _ = self
+            .sqlite
+            .set_app_setting_text(CODEX_EXECUTABLE_PATH_KEY, None);
+
+        for candidate in default_codex_candidates() {
+            if let Some(found) = canonicalize_executable(&candidate) {
+                let _ = self.sqlite.set_app_setting_text(
+                    CODEX_EXECUTABLE_PATH_KEY,
+                    Some(found.to_string_lossy().into_owned()),
+                );
+                return Some(found);
+            }
+        }
+
+        if let Some(found) = discover_codex_from_login_shell() {
+            let _ = self.sqlite.set_app_setting_text(
+                CODEX_EXECUTABLE_PATH_KEY,
+                Some(found.to_string_lossy().into_owned()),
+            );
+            return Some(found);
+        }
+
+        None
     }
 
     fn run_codex_turn_streamed_via_cli(
@@ -291,6 +346,129 @@ impl GitWorkspaceService {
         let codex = self.codex_executable();
         codex_cli::run_codex_turn_streamed_via_cli(&codex, params, cancel, on_event)
     }
+}
+
+fn default_codex_candidates() -> Vec<PathBuf> {
+    if cfg!(test) {
+        // Avoid depending on developer machine installation paths during unit tests.
+        return Vec::new();
+    }
+
+    let mut out = Vec::new();
+
+    // Homebrew (Apple Silicon / Intel)
+    out.push(PathBuf::from("/opt/homebrew/bin/codex"));
+    out.push(PathBuf::from("/usr/local/bin/codex"));
+
+    // Rust/Cargo installs (less common, but cheap to check).
+    if let Some(home) = std::env::var_os("HOME") {
+        out.push(PathBuf::from(home).join(".cargo/bin/codex"));
+    }
+
+    // Last resort: rely on PATH (useful for terminal-launched dev).
+    out.push(PathBuf::from("codex"));
+
+    out
+}
+
+fn canonicalize_executable(path: &Path) -> Option<PathBuf> {
+    let resolved = std::fs::canonicalize(path)
+        .ok()
+        .unwrap_or_else(|| path.to_path_buf());
+    if !resolved.is_file() {
+        return None;
+    }
+    if !is_executable_file(&resolved) {
+        return None;
+    }
+    Some(resolved)
+}
+
+fn is_executable_file(path: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let Ok(meta) = std::fs::metadata(path) else {
+            return false;
+        };
+        let mode = meta.permissions().mode();
+        (mode & 0o111) != 0
+    }
+    #[cfg(not(unix))]
+    {
+        path.is_file()
+    }
+}
+
+fn discover_codex_from_login_shell() -> Option<PathBuf> {
+    let shell = std::env::var_os("SHELL")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/bin/zsh"));
+    if !shell.is_file() {
+        return None;
+    }
+
+    let mut child = Command::new(&shell)
+        .arg("-lc")
+        .arg("command -v codex")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .ok()?;
+
+    let stdout = child.stdout.take()?;
+    let stderr = child.stderr.take()?;
+
+    fn read_limited(mut reader: impl std::io::Read, limit: usize) -> Vec<u8> {
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 1024];
+        while buf.len() < limit {
+            let to_read = std::cmp::min(chunk.len(), limit - buf.len());
+            match reader.read(&mut chunk[..to_read]) {
+                Ok(0) => break,
+                Ok(n) => buf.extend_from_slice(&chunk[..n]),
+                Err(_) => break,
+            }
+        }
+        buf
+    }
+
+    let out_handle = thread::spawn(move || read_limited(stdout, 32 * 1024));
+    let err_handle = thread::spawn(move || read_limited(stderr, 32 * 1024));
+
+    let deadline = Instant::now() + std::time::Duration::from_millis(1500);
+    loop {
+        if let Ok(Some(_status)) = child.try_wait() {
+            break;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = out_handle.join();
+            let _ = err_handle.join();
+            return None;
+        }
+        thread::sleep(std::time::Duration::from_millis(25));
+    }
+
+    let stdout_bytes = out_handle.join().unwrap_or_default();
+    let stderr_bytes = err_handle.join().unwrap_or_default();
+    let combined = String::from_utf8_lossy(&stdout_bytes).to_string()
+        + "\n"
+        + &String::from_utf8_lossy(&stderr_bytes);
+
+    for token in combined.split_whitespace() {
+        if !token.starts_with('/') {
+            continue;
+        }
+        let candidate = PathBuf::from(token);
+        if let Some(found) = canonicalize_executable(&candidate) {
+            return Some(found);
+        }
+    }
+
+    None
 }
 
 impl ProjectWorkspaceService for GitWorkspaceService {
@@ -2064,6 +2242,7 @@ mod tests {
             conversations_root: paths::conversations_root(&base_dir),
             task_prompts_root: paths::task_prompts_root(&base_dir),
             sqlite,
+            codex_executable_cache: Arc::new(OnceLock::new()),
         };
 
         let tree = ProjectWorkspaceService::codex_config_tree(&service)
@@ -2186,6 +2365,7 @@ mod tests {
             conversations_root: paths::conversations_root(&base_dir),
             task_prompts_root: paths::task_prompts_root(&base_dir),
             sqlite,
+            codex_executable_cache: Arc::new(OnceLock::new()),
         };
 
         let err = service
@@ -2265,6 +2445,7 @@ mod tests {
             conversations_root: paths::conversations_root(&base_dir),
             task_prompts_root: paths::task_prompts_root(&base_dir),
             sqlite,
+            codex_executable_cache: Arc::new(OnceLock::new()),
         };
 
         let err = service
@@ -2304,6 +2485,143 @@ mod tests {
                 .iter()
                 .any(|e| matches!(e, ConversationEntry::TurnError { .. })),
             "expected TurnError entry to be persisted"
+        );
+
+        drop(service);
+        let _ = std::fs::remove_dir_all(&base_dir);
+    }
+
+    #[test]
+    fn codex_executable_is_cached_after_shell_discovery() {
+        let _guard = lock_env();
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be valid")
+            .as_nanos();
+        let base_dir = std::env::temp_dir().join(format!(
+            "luban-codex-discovery-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&base_dir).expect("temp dir should be created");
+
+        let fake_codex = base_dir.join("fake-codex");
+        std::fs::write(&fake_codex, "#!/bin/sh\nexit 0\n").expect("fake codex should be written");
+        let fake_shell = base_dir.join("fake-shell");
+        std::fs::write(
+            &fake_shell,
+            format!("#!/bin/sh\necho \"{}\"\n", fake_codex.display()),
+        )
+        .expect("fake shell should be written");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for path in [&fake_codex, &fake_shell] {
+                let mut perms = std::fs::metadata(path)
+                    .expect("script should exist")
+                    .permissions();
+                perms.set_mode(0o755);
+                std::fs::set_permissions(path, perms).expect("script should be executable");
+            }
+        }
+
+        unsafe {
+            std::env::remove_var(paths::LUBAN_CODEX_BIN_ENV);
+            std::env::set_var("SHELL", fake_shell.as_os_str());
+        }
+
+        let sqlite =
+            SqliteStore::new(paths::sqlite_path(&base_dir)).expect("sqlite init should work");
+        let service = GitWorkspaceService {
+            worktrees_root: paths::worktrees_root(&base_dir),
+            conversations_root: paths::conversations_root(&base_dir),
+            task_prompts_root: paths::task_prompts_root(&base_dir),
+            sqlite,
+            codex_executable_cache: Arc::new(OnceLock::new()),
+        };
+
+        let resolved = service.codex_executable();
+        assert!(
+            resolved.to_string_lossy().contains("fake-codex"),
+            "unexpected resolved codex path: {}",
+            resolved.display()
+        );
+
+        let cached = service
+            .sqlite
+            .get_app_setting_text(CODEX_EXECUTABLE_PATH_KEY)
+            .expect("cached value should be readable");
+        assert!(
+            cached.as_deref().is_some_and(|v| v.contains("fake-codex")),
+            "expected cached codex path to contain fake-codex, got {cached:?}"
+        );
+
+        unsafe {
+            std::env::remove_var("SHELL");
+        }
+        let resolved_again = service.codex_executable();
+        assert_eq!(resolved_again, resolved);
+
+        drop(service);
+        let _ = std::fs::remove_dir_all(&base_dir);
+    }
+
+    #[test]
+    fn codex_executable_prefers_cached_setting() {
+        let _guard = lock_env();
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be valid")
+            .as_nanos();
+        let base_dir = std::env::temp_dir().join(format!(
+            "luban-codex-discovery-cached-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&base_dir).expect("temp dir should be created");
+
+        let fake_codex = base_dir.join("fake-codex");
+        std::fs::write(&fake_codex, "#!/bin/sh\nexit 0\n").expect("fake codex should be written");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&fake_codex)
+                .expect("fake codex should exist")
+                .permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&fake_codex, perms).expect("fake codex should be executable");
+        }
+
+        unsafe {
+            std::env::remove_var(paths::LUBAN_CODEX_BIN_ENV);
+            std::env::remove_var("SHELL");
+        }
+
+        let sqlite =
+            SqliteStore::new(paths::sqlite_path(&base_dir)).expect("sqlite init should work");
+        sqlite
+            .set_app_setting_text(
+                CODEX_EXECUTABLE_PATH_KEY,
+                Some(fake_codex.to_string_lossy().into_owned()),
+            )
+            .expect("should set cached codex path");
+
+        let service = GitWorkspaceService {
+            worktrees_root: paths::worktrees_root(&base_dir),
+            conversations_root: paths::conversations_root(&base_dir),
+            task_prompts_root: paths::task_prompts_root(&base_dir),
+            sqlite,
+            codex_executable_cache: Arc::new(OnceLock::new()),
+        };
+
+        let resolved = service.codex_executable();
+        assert!(
+            resolved.to_string_lossy().contains("fake-codex"),
+            "unexpected resolved codex path: {}",
+            resolved.display()
         );
 
         drop(service);
@@ -2457,6 +2775,7 @@ mod tests {
             conversations_root: paths::conversations_root(&base_dir),
             task_prompts_root: paths::task_prompts_root(&base_dir),
             sqlite,
+            codex_executable_cache: Arc::new(OnceLock::new()),
         };
 
         ProjectWorkspaceService::archive_workspace(
@@ -2544,6 +2863,7 @@ mod tests {
             conversations_root: paths::conversations_root(&base_dir),
             task_prompts_root: paths::task_prompts_root(&base_dir),
             sqlite,
+            codex_executable_cache: Arc::new(OnceLock::new()),
         };
 
         let snapshot = PersistedAppState {
@@ -2685,6 +3005,7 @@ mod tests {
             conversations_root: paths::conversations_root(&base_dir),
             task_prompts_root: paths::task_prompts_root(&base_dir),
             sqlite,
+            codex_executable_cache: Arc::new(OnceLock::new()),
         };
 
         let created = ProjectWorkspaceService::create_workspace(
@@ -2750,6 +3071,7 @@ mod tests {
             conversations_root: paths::conversations_root(&base_dir),
             task_prompts_root: paths::task_prompts_root(&base_dir),
             sqlite,
+            codex_executable_cache: Arc::new(OnceLock::new()),
         };
 
         let source = base_dir.join("abc.png");
@@ -2797,6 +3119,7 @@ mod tests {
             conversations_root: paths::conversations_root(&base_dir),
             task_prompts_root: paths::task_prompts_root(&base_dir),
             sqlite,
+            codex_executable_cache: Arc::new(OnceLock::new()),
         };
 
         let stored = ProjectWorkspaceService::store_context_image(
@@ -2846,6 +3169,7 @@ mod tests {
             conversations_root: paths::conversations_root(&base_dir),
             task_prompts_root: paths::task_prompts_root(&base_dir),
             sqlite,
+            codex_executable_cache: Arc::new(OnceLock::new()),
         };
 
         let img = image::RgbImage::from_fn(1200, 800, |x, y| {

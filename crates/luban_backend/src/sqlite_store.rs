@@ -148,6 +148,15 @@ enum DbCommand {
         snapshot: Box<PersistedAppState>,
         reply: mpsc::Sender<anyhow::Result<()>>,
     },
+    GetAppSettingText {
+        key: String,
+        reply: mpsc::Sender<anyhow::Result<Option<String>>>,
+    },
+    SetAppSettingText {
+        key: String,
+        value: Option<String>,
+        reply: mpsc::Sender<anyhow::Result<()>>,
+    },
     EnsureConversation {
         project_slug: String,
         workspace_name: String,
@@ -239,6 +248,12 @@ impl SqliteStore {
                         }
                         (Ok(db), DbCommand::SaveAppState { snapshot, reply }) => {
                             let _ = reply.send(db.save_app_state(&snapshot));
+                        }
+                        (Ok(db), DbCommand::GetAppSettingText { key, reply }) => {
+                            let _ = reply.send(db.get_app_setting_text(&key));
+                        }
+                        (Ok(db), DbCommand::SetAppSettingText { key, value, reply }) => {
+                            let _ = reply.send(db.set_app_setting_text(&key, value.as_deref()));
                         }
                         (
                             Ok(db),
@@ -433,6 +448,33 @@ impl SqliteStore {
         self.tx
             .send(DbCommand::SaveAppState {
                 snapshot: Box::new(snapshot),
+                reply: reply_tx,
+            })
+            .context("sqlite worker is not running")?;
+        reply_rx.recv().context("sqlite worker terminated")?
+    }
+
+    pub fn get_app_setting_text(&self, key: impl Into<String>) -> anyhow::Result<Option<String>> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(DbCommand::GetAppSettingText {
+                key: key.into(),
+                reply: reply_tx,
+            })
+            .context("sqlite worker is not running")?;
+        reply_rx.recv().context("sqlite worker terminated")?
+    }
+
+    pub fn set_app_setting_text(
+        &self,
+        key: impl Into<String>,
+        value: Option<String>,
+    ) -> anyhow::Result<()> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(DbCommand::SetAppSettingText {
+                key: key.into(),
+                value,
                 reply: reply_tx,
             })
             .context("sqlite worker is not running")?;
@@ -653,6 +695,12 @@ fn respond_db_open_error(err: &anyhow::Error, cmd: DbCommand) {
             let _ = reply.send(Err(anyhow!(message)));
         }
         DbCommand::SaveAppState { reply, .. } => {
+            let _ = reply.send(Err(anyhow!(message)));
+        }
+        DbCommand::GetAppSettingText { reply, .. } => {
+            let _ = reply.send(Err(anyhow!(message)));
+        }
+        DbCommand::SetAppSettingText { reply, .. } => {
             let _ = reply.send(Err(anyhow!(message)));
         }
         DbCommand::EnsureConversation { reply, .. } => {
@@ -1182,6 +1230,36 @@ impl SqliteDatabase {
             workspace_unread_completions,
             task_prompt_templates,
         })
+    }
+
+    fn get_app_setting_text(&mut self, key: &str) -> anyhow::Result<Option<String>> {
+        self.conn
+            .query_row(
+                "SELECT value FROM app_settings_text WHERE key = ?1",
+                params![key],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .with_context(|| format!("failed to load app setting text {key}"))
+    }
+
+    fn set_app_setting_text(&mut self, key: &str, value: Option<&str>) -> anyhow::Result<()> {
+        let now = now_unix_seconds();
+        let tx = self.conn.transaction()?;
+        if let Some(value) = value {
+            tx.execute(
+                "INSERT INTO app_settings_text (key, value, created_at, updated_at)
+                 VALUES (?1, ?2, COALESCE((SELECT created_at FROM app_settings_text WHERE key = ?1), ?3), ?3)
+                 ON CONFLICT(key) DO UPDATE SET
+                   value = excluded.value,
+                   updated_at = excluded.updated_at",
+                params![key, value, now],
+            )?;
+        } else {
+            tx.execute("DELETE FROM app_settings_text WHERE key = ?1", params![key])?;
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     fn save_app_state(&mut self, snapshot: &PersistedAppState) -> anyhow::Result<()> {

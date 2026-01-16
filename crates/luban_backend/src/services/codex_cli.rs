@@ -126,7 +126,7 @@ pub(super) fn run_codex_turn_streamed_via_cli(
         .map_err(|err| {
             if err.kind() == std::io::ErrorKind::NotFound {
                 anyhow!(
-                    "missing codex executable ({}): install Codex CLI and ensure it is available on PATH",
+                    "missing codex executable ({}): install Codex CLI and ensure it is available on PATH (note: macOS apps launched from Finder/Dock may not inherit your shell PATH; set LUBAN_CODEX_BIN to an absolute path if needed)",
                     codex.display()
                 )
             } else {
