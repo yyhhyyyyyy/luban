@@ -95,6 +95,7 @@ export function ChatPanel({
     closeThreadTab,
     restoreThreadTab,
     sendAgentMessage,
+    queueAgentMessage,
     cancelAgentTurn,
     renameWorkspaceBranch,
     aiRenameWorkspaceBranch,
@@ -488,7 +489,11 @@ export function ChatPanel({
     const hasUploading = attachments.some((a) => a.status === "uploading")
     if (hasUploading) return
     if (text.length === 0 && ready.length === 0) return
-    sendAgentMessage(text, ready)
+    if (queuePaused && queuedPrompts.length > 0) {
+      queueAgentMessage(text, ready)
+    } else {
+      sendAgentMessage(text, ready)
+    }
     setDraftText("")
     persistDraft("")
     setAttachments([])

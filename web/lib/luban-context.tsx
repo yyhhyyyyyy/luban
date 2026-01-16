@@ -73,6 +73,7 @@ type LubanContextValue = {
   restoreThreadTab: (threadId: number) => Promise<void>
 
   sendAgentMessage: (text: string, attachments?: AttachmentRef[]) => void
+  queueAgentMessage: (text: string, attachments?: AttachmentRef[]) => void
   sendAgentMessageTo: (
     workspaceId: WorkspaceId,
     threadId: number,
@@ -252,6 +253,7 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     closeThreadTab: actions.closeThreadTab,
     restoreThreadTab: actions.restoreThreadTab,
     sendAgentMessage: actions.sendAgentMessage,
+    queueAgentMessage: actions.queueAgentMessage,
     sendAgentMessageTo: actions.sendAgentMessageTo,
     removeQueuedPrompt: actions.removeQueuedPrompt,
     reorderQueuedPrompt: actions.reorderQueuedPrompt,

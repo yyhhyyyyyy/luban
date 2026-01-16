@@ -120,6 +120,12 @@ pub enum Action {
         text: String,
         attachments: Vec<AttachmentRef>,
     },
+    QueueAgentMessage {
+        workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
+        text: String,
+        attachments: Vec<AttachmentRef>,
+    },
     ChatModelChanged {
         workspace_id: WorkspaceId,
         thread_id: WorkspaceThreadId,

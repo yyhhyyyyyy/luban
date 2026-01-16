@@ -54,6 +54,7 @@ export type LubanActions = {
   restoreThreadTab: (threadId: number) => Promise<void>
 
   sendAgentMessage: (text: string, attachments?: AttachmentRef[]) => void
+  queueAgentMessage: (text: string, attachments?: AttachmentRef[]) => void
   sendAgentMessageTo: (
     workspaceId: WorkspaceId,
     threadId: number,
@@ -400,6 +401,18 @@ export function createLubanActions(args: {
     })
   }
 
+  function queueAgentMessage(text: string, attachments: AttachmentRef[] = []) {
+    const ids = activeWorkspaceThread()
+    if (!ids) return
+    args.sendAction({
+      type: "queue_agent_message",
+      workspace_id: ids.workspaceId,
+      thread_id: ids.threadId,
+      text,
+      attachments,
+    })
+  }
+
   function sendAgentMessageTo(
     workspaceId: WorkspaceId,
     threadId: number,
@@ -553,6 +566,7 @@ export function createLubanActions(args: {
     closeThreadTab,
     restoreThreadTab,
     sendAgentMessage,
+    queueAgentMessage,
     sendAgentMessageTo,
     removeQueuedPrompt,
     reorderQueuedPrompt,

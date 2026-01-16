@@ -317,6 +317,13 @@ export type ClientAction =
       text: string
       attachments: AttachmentRef[]
     }
+  | {
+      type: "queue_agent_message"
+      workspace_id: WorkspaceId
+      thread_id: WorkspaceThreadId
+      text: string
+      attachments: AttachmentRef[]
+    }
   | { type: "remove_queued_prompt"; workspace_id: WorkspaceId; thread_id: WorkspaceThreadId; prompt_id: number }
   | { type: "reorder_queued_prompt"; workspace_id: WorkspaceId; thread_id: WorkspaceThreadId; active_id: number; over_id: number }
   | {

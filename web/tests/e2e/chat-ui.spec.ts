@@ -372,6 +372,60 @@ test("cancel -> escape without queued prompts shows cancelled activity stream", 
   await expect(page.getByTestId("agent-running-resume")).toHaveCount(0)
 })
 
+test("sending from chat input while paused queues instead of starting a new run", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  const workspaceIdRaw = (await page.evaluate(() => localStorage.getItem("luban:active_workspace_id"))) ?? ""
+  const workspaceId = Number(workspaceIdRaw)
+  expect(Number.isFinite(workspaceId)).toBeTruthy()
+  expect(workspaceId).toBeGreaterThan(0)
+
+  const threadId = await createThreadViaUi(page, workspaceId)
+  expect(threadId).toBeGreaterThan(0)
+
+  const runId = Math.random().toString(16).slice(2)
+  const seed = `e2e-cancel-queue-input-${runId}`
+
+  await sendWsAction(page, {
+    type: "send_agent_message",
+    workspace_id: workspaceId,
+    thread_id: threadId,
+    text: `${seed}-run`,
+    attachments: [],
+  })
+  await sendWsAction(page, {
+    type: "send_agent_message",
+    workspace_id: workspaceId,
+    thread_id: threadId,
+    text: `${seed}-queued`,
+    attachments: [],
+  })
+
+  await expect
+    .poll(async () => (await queuedPromptTexts(page, workspaceId, threadId)).length, { timeout: 10_000 })
+    .toBeGreaterThan(0)
+
+  await page.getByTestId("agent-running-cancel").click()
+  await page.getByTestId("agent-running-input").press("Escape")
+
+  const resume = page.getByTestId("agent-running-resume")
+  await expect(resume).toBeVisible({ timeout: 20_000 })
+
+  const queuedBefore = await queuedPromptTexts(page, workspaceId, threadId)
+  expect(queuedBefore.length).toBeGreaterThan(0)
+
+  const marker = `${seed}-chat`
+  await page.getByTestId("chat-input").fill(marker)
+  await page.getByTestId("chat-send").click()
+
+  await expect
+    .poll(async () => (await queuedPromptTexts(page, workspaceId, threadId)), { timeout: 10_000 })
+    .toContain(marker)
+
+  await expect(page.getByTestId("user-message-bubble").filter({ hasText: marker })).toHaveCount(0)
+  await expect(resume).toBeVisible({ timeout: 20_000 })
+})
+
 test("agent running timer increments while running", async ({ page }) => {
   await ensureWorkspace(page)
 

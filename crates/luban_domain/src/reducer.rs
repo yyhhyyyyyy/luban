@@ -614,6 +614,42 @@ impl AppState {
                     .into_iter()
                     .collect()
             }
+            Action::QueueAgentMessage {
+                workspace_id,
+                thread_id,
+                text,
+                attachments,
+            } => {
+                let tabs = self.ensure_workspace_tabs_mut(workspace_id);
+                tabs.activate(thread_id);
+
+                let conversation = self.ensure_conversation_mut(workspace_id, thread_id);
+                conversation.draft.clear();
+                conversation.draft_attachments.clear();
+
+                if conversation.entries.is_empty() && conversation.title.starts_with("Thread ") {
+                    let title = derive_thread_title(&text);
+                    if !title.is_empty() {
+                        conversation.title = title;
+                    }
+                }
+
+                let run_config = AgentRunConfig {
+                    model_id: conversation.agent_model_id.clone(),
+                    thinking_effort: conversation.thinking_effort,
+                };
+
+                let id = conversation.next_queued_prompt_id;
+                conversation.next_queued_prompt_id =
+                    conversation.next_queued_prompt_id.saturating_add(1);
+                conversation.pending_prompts.push_back(QueuedPrompt {
+                    id,
+                    text,
+                    attachments,
+                    run_config,
+                });
+                Vec::new()
+            }
             Action::ChatModelChanged {
                 workspace_id,
                 thread_id,

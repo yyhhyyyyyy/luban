@@ -2803,6 +2803,17 @@ fn map_client_action(action: luban_api::ClientAction) -> Option<Action> {
             text,
             attachments: attachments.into_iter().map(map_api_attachment).collect(),
         }),
+        luban_api::ClientAction::QueueAgentMessage {
+            workspace_id,
+            thread_id,
+            text,
+            attachments,
+        } => Some(Action::QueueAgentMessage {
+            workspace_id: WorkspaceId::from_u64(workspace_id.0),
+            thread_id: WorkspaceThreadId::from_u64(thread_id.0),
+            text,
+            attachments: attachments.into_iter().map(map_api_attachment).collect(),
+        }),
         luban_api::ClientAction::RemoveQueuedPrompt {
             workspace_id,
             thread_id,
