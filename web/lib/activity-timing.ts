@@ -11,6 +11,8 @@ type TimingMeta = {
 }
 
 const globalTiming = new Map<string, TimingMeta>()
+const MAX_TIMING_ENTRIES = 50_000
+const PRUNE_BATCH_SIZE = 5_000
 
 function formatStepClock(ms: number): string {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000))
@@ -35,12 +37,17 @@ export function useActivityTiming(
         ? opts.turnStartedAtMs
         : null
 
-    const existingDoneAtMs = activities
-      .map((event) => globalTiming.get(event.id)?.doneAtMs ?? null)
-      .filter((value): value is number => typeof value === "number" && Number.isFinite(value))
+    let maxExistingDoneAtMs: number | null = null
+    for (const event of activities) {
+      const doneAtMs = globalTiming.get(event.id)?.doneAtMs ?? null
+      if (typeof doneAtMs !== "number" || !Number.isFinite(doneAtMs)) continue
+      if (maxExistingDoneAtMs == null || doneAtMs > maxExistingDoneAtMs) {
+        maxExistingDoneAtMs = doneAtMs
+      }
+    }
     const cursorStartAtMs =
       turnStartedAtMs != null
-        ? Math.max(turnStartedAtMs, existingDoneAtMs.length > 0 ? Math.max(...existingDoneAtMs) : turnStartedAtMs)
+        ? Math.max(turnStartedAtMs, maxExistingDoneAtMs ?? turnStartedAtMs)
         : null
 
     const newDone = activities.filter((event) => !globalTiming.has(event.id) && event.status === "done")
@@ -78,6 +85,15 @@ export function useActivityTiming(
         if (event.status === "done" && existing.doneAtMs == null) {
           existing.doneAtMs = now
         }
+      }
+    }
+
+    if (globalTiming.size > MAX_TIMING_ENTRIES) {
+      let pruned = 0
+      for (const key of globalTiming.keys()) {
+        globalTiming.delete(key)
+        pruned += 1
+        if (pruned >= PRUNE_BATCH_SIZE || globalTiming.size <= MAX_TIMING_ENTRIES) break
       }
     }
   }, [activities, opts?.turnStartedAtMs])

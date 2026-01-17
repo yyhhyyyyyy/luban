@@ -1732,6 +1732,56 @@ impl Engine {
                         let start = Instant::now();
                         let prompt = request.prompt.clone();
 
+                        let emit_many_steps = prompt.contains("e2e-many-steps");
+
+                        if emit_many_steps {
+                            // Generate a large amount of completed items to stress the UI render/timing
+                            // paths. This is used only in e2e mode (`LUBAN_E2E_ROOT` + fake codex bin).
+                            // Keep the IDs simple and stable.
+                            for i in 0..12_000u32 {
+                                if cancel.load(Ordering::SeqCst) {
+                                    break;
+                                }
+                                let _ = tx.blocking_send(EngineCommand::DispatchAction {
+                                    action: Box::new(Action::AgentEventReceived {
+                                        workspace_id,
+                                        thread_id,
+                                        event: luban_domain::CodexThreadEvent::ItemCompleted {
+                                            item: luban_domain::CodexThreadItem::CommandExecution {
+                                                id: format!("e2e_many_{i}"),
+                                                command: format!("echo {i}"),
+                                                aggregated_output: "ok".to_owned(),
+                                                exit_code: Some(0),
+                                                status: luban_domain::CodexCommandExecutionStatus::Completed,
+                                            },
+                                        },
+                                    }),
+                                });
+                            }
+
+                            if !cancel.load(Ordering::SeqCst) {
+                                let _ = tx.blocking_send(EngineCommand::DispatchAction {
+                                    action: Box::new(Action::AgentEventReceived {
+                                        workspace_id,
+                                        thread_id,
+                                        event: luban_domain::CodexThreadEvent::TurnFailed {
+                                            error: luban_domain::CodexThreadError {
+                                                message: "e2e agent stub".to_owned(),
+                                            },
+                                        },
+                                    }),
+                                });
+                            }
+
+                            let _ = tx.blocking_send(EngineCommand::DispatchAction {
+                                action: Box::new(Action::AgentTurnFinished {
+                                    workspace_id,
+                                    thread_id,
+                                }),
+                            });
+                            return;
+                        }
+
                         let mut sent_1_start = false;
                         let mut sent_1_done = false;
                         let mut sent_2_start = false;
