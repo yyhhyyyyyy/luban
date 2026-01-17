@@ -64,12 +64,16 @@ impl EngineHandle {
         &self,
         workspace_id: luban_api::WorkspaceId,
         thread_id: luban_api::WorkspaceThreadId,
+        before: Option<u64>,
+        limit: Option<u64>,
     ) -> anyhow::Result<ConversationSnapshot> {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send(EngineCommand::GetConversationSnapshot {
                 workspace_id,
                 thread_id,
+                before,
+                limit,
                 reply: tx,
             })
             .await
@@ -129,6 +133,8 @@ pub enum EngineCommand {
     GetConversationSnapshot {
         workspace_id: luban_api::WorkspaceId,
         thread_id: luban_api::WorkspaceThreadId,
+        before: Option<u64>,
+        limit: Option<u64>,
         reply: oneshot::Sender<anyhow::Result<ConversationSnapshot>>,
     },
     GetWorkspaceWorktreePath {
@@ -268,10 +274,12 @@ impl Engine {
             EngineCommand::GetConversationSnapshot {
                 workspace_id,
                 thread_id,
+                before,
+                limit,
                 reply,
             } => {
                 let snapshot = self
-                    .get_conversation_snapshot(workspace_id, thread_id)
+                    .get_conversation_snapshot(workspace_id, thread_id, before, limit)
                     .await;
                 let _ = reply.send(snapshot);
             }
@@ -1086,10 +1094,20 @@ impl Engine {
         &self,
         workspace_id: luban_api::WorkspaceId,
         thread_id: luban_api::WorkspaceThreadId,
+        before: Option<u64>,
+        limit: Option<u64>,
     ) -> anyhow::Result<ConversationSnapshot> {
-        if let Ok(snapshot) = self.conversation_snapshot(workspace_id, thread_id) {
+        if let Ok(snapshot) = self.conversation_snapshot(workspace_id, thread_id, before, limit) {
             return Ok(snapshot);
         }
+
+        const DEFAULT_ENTRIES_LIMIT: usize = 2000;
+        const MAX_ENTRIES_LIMIT: usize = 5000;
+
+        let limit = limit
+            .and_then(|v| usize::try_from(v).ok())
+            .unwrap_or(DEFAULT_ENTRIES_LIMIT)
+            .clamp(1, MAX_ENTRIES_LIMIT);
 
         let wid = WorkspaceId::from_u64(workspace_id.0);
         let Some(scope) = workspace_scope(&self.state, wid) else {
@@ -1106,6 +1124,15 @@ impl Engine {
         .unwrap_or_else(|| Err("failed to join load conversation task".to_owned()))
         .map_err(|e| anyhow::anyhow!(e))?;
 
+        let total_entries = loaded.entries.len();
+        let before = before
+            .and_then(|v| usize::try_from(v).ok())
+            .unwrap_or(total_entries)
+            .min(total_entries);
+        let end = before;
+        let start = end.saturating_sub(limit);
+        let entries_truncated = start > 0 || end < total_entries;
+
         Ok(ConversationSnapshot {
             rev: self.rev,
             workspace_id,
@@ -1119,7 +1146,16 @@ impl Engine {
                 ThinkingEffort::XHigh => luban_api::ThinkingEffort::XHigh,
             },
             run_status: luban_api::OperationStatus::Idle,
-            entries: loaded.entries.iter().map(map_conversation_entry).collect(),
+            entries: loaded
+                .entries
+                .get(start..end)
+                .unwrap_or_default()
+                .iter()
+                .map(map_conversation_entry)
+                .collect(),
+            entries_total: total_entries as u64,
+            entries_start: start as u64,
+            entries_truncated,
             in_progress_items: Vec::new(),
             pending_prompts: loaded
                 .pending_prompts
@@ -2202,7 +2238,7 @@ impl Engine {
     ) {
         let api_wid = luban_api::WorkspaceId(workspace_id.as_u64());
         let api_tid = luban_api::WorkspaceThreadId(thread_id.as_u64());
-        if let Ok(snapshot) = self.conversation_snapshot(api_wid, api_tid) {
+        if let Ok(snapshot) = self.conversation_snapshot(api_wid, api_tid, None, None) {
             let _ = self.events.send(WsServerMessage::Event {
                 rev: self.rev,
                 event: Box::new(luban_api::ServerEvent::ConversationChanged { snapshot }),
@@ -2357,12 +2393,31 @@ impl Engine {
         &self,
         workspace_id: luban_api::WorkspaceId,
         thread_id: luban_api::WorkspaceThreadId,
+        before: Option<u64>,
+        limit: Option<u64>,
     ) -> anyhow::Result<ConversationSnapshot> {
+        const DEFAULT_ENTRIES_LIMIT: usize = 2000;
+        const MAX_ENTRIES_LIMIT: usize = 5000;
+
+        let limit = limit
+            .and_then(|v| usize::try_from(v).ok())
+            .unwrap_or(DEFAULT_ENTRIES_LIMIT)
+            .clamp(1, MAX_ENTRIES_LIMIT);
+
         let wid = WorkspaceId::from_u64(workspace_id.0);
         let tid = WorkspaceThreadId::from_u64(thread_id.0);
         let Some(conversation) = self.state.workspace_thread_conversation(wid, tid) else {
             return Err(anyhow::anyhow!("conversation not found"));
         };
+
+        let total_entries = conversation.entries.len();
+        let before = before
+            .and_then(|v| usize::try_from(v).ok())
+            .unwrap_or(total_entries)
+            .min(total_entries);
+        let end = before;
+        let start = end.saturating_sub(limit);
+        let entries_truncated = start > 0 || end < total_entries;
 
         Ok(ConversationSnapshot {
             rev: self.rev,
@@ -2382,9 +2437,14 @@ impl Engine {
             },
             entries: conversation
                 .entries
+                .get(start..end)
+                .unwrap_or_default()
                 .iter()
                 .map(map_conversation_entry)
                 .collect(),
+            entries_total: total_entries as u64,
+            entries_start: start as u64,
+            entries_truncated,
             in_progress_items: conversation
                 .in_progress_order
                 .iter()
@@ -3284,7 +3344,7 @@ pub fn new_default_services() -> anyhow::Result<Arc<dyn ProjectWorkspaceService>
 mod tests {
     use super::*;
     use luban_domain::{
-        CodexThreadEvent, ContextImage, ContextItem,
+        CodexCommandExecutionStatus, CodexThreadEvent, ContextImage, ContextItem,
         ConversationSnapshot as DomainConversationSnapshot, ConversationThreadMeta,
         PersistedAppState,
     };
@@ -3765,6 +3825,81 @@ mod tests {
                 merge_ready: false,
             })
         );
+    }
+
+    #[test]
+    fn conversation_snapshots_are_truncated_to_tail() {
+        let mut state = AppState::new();
+        let _ = state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/luban-server-test"),
+            is_git: true,
+        });
+
+        let project_id = state.projects[0].id;
+        let _ = state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "main".to_owned(),
+            branch_name: "main".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban-server-test"),
+        });
+
+        let workspace_id = state.projects[0].workspaces[0].id;
+        let thread_id = WorkspaceThreadId::from_u64(1);
+
+        state.apply(Action::SendAgentMessage {
+            workspace_id,
+            thread_id,
+            text: "seed".to_owned(),
+            attachments: Vec::new(),
+        });
+
+        let key = (workspace_id, thread_id);
+        let convo = state
+            .conversations
+            .get_mut(&key)
+            .expect("conversation must exist");
+        for i in 0..7000u32 {
+            convo.entries.push(ConversationEntry::CodexItem {
+                item: Box::new(CodexThreadItem::CommandExecution {
+                    id: format!("cmd_{i}"),
+                    command: format!("echo {i}"),
+                    aggregated_output: String::new(),
+                    exit_code: Some(0),
+                    status: CodexCommandExecutionStatus::Completed,
+                }),
+            });
+        }
+        let total = convo.entries.len();
+
+        let (events, _) = broadcast::channel::<WsServerMessage>(1);
+        let (tx, _rx) = mpsc::channel::<EngineCommand>(1);
+        let engine = Engine {
+            state,
+            rev: 1,
+            services: Arc::new(TestServices),
+            events,
+            tx,
+            cancel_flags: HashMap::new(),
+            pull_requests: HashMap::new(),
+            pull_requests_in_flight: HashSet::new(),
+        };
+
+        let api_wid = luban_api::WorkspaceId(workspace_id.as_u64());
+        let api_tid = luban_api::WorkspaceThreadId(thread_id.as_u64());
+
+        let snapshot = engine
+            .conversation_snapshot(api_wid, api_tid, None, None)
+            .expect("snapshot must build");
+        assert!(
+            snapshot.entries_truncated,
+            "large conversations must be truncated"
+        );
+        assert_eq!(snapshot.entries_total, total as u64);
+        assert_eq!(
+            snapshot.entries_start + snapshot.entries.len() as u64,
+            snapshot.entries_total
+        );
+        assert!(snapshot.entries.len() <= 2000);
     }
 
     #[test]

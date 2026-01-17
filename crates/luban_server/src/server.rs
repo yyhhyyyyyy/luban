@@ -264,18 +264,27 @@ async fn get_workspace_mentions(
 async fn get_conversation(
     State(state): State<AppStateHolder>,
     Path((workspace_id, thread_id)): Path<(u64, u64)>,
+    Query(query): Query<ConversationQuery>,
 ) -> impl IntoResponse {
     match state
         .engine
         .conversation_snapshot(
             luban_api::WorkspaceId(workspace_id),
             luban_api::WorkspaceThreadId(thread_id),
+            query.before,
+            query.limit,
         )
         .await
     {
         Ok(snapshot) => Json(snapshot).into_response(),
         Err(err) => (axum::http::StatusCode::NOT_FOUND, err.to_string()).into_response(),
     }
+}
+
+#[derive(serde::Deserialize)]
+struct ConversationQuery {
+    before: Option<u64>,
+    limit: Option<u64>,
 }
 
 async fn ws_events(ws: WebSocketUpgrade, State(state): State<AppStateHolder>) -> impl IntoResponse {

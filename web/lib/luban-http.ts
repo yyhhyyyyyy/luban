@@ -27,7 +27,8 @@ export async function fetchConversation(
   workspaceId: number,
   threadId: number,
 ): Promise<ConversationSnapshot> {
-  const res = await fetch(`/api/workspaces/${workspaceId}/conversations/${threadId}`)
+  const params = new URLSearchParams({ limit: "2000" })
+  const res = await fetch(`/api/workspaces/${workspaceId}/conversations/${threadId}?${params.toString()}`)
   if (!res.ok)
     throw new Error(
       `GET /api/workspaces/${workspaceId}/conversations/${threadId} failed: ${res.status}`,

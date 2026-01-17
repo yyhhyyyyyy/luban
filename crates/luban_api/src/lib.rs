@@ -237,6 +237,12 @@ pub struct ConversationSnapshot {
     pub run_status: OperationStatus,
     pub entries: Vec<ConversationEntry>,
     #[serde(default)]
+    pub entries_total: u64,
+    #[serde(default)]
+    pub entries_start: u64,
+    #[serde(default)]
+    pub entries_truncated: bool,
+    #[serde(default)]
     pub in_progress_items: Vec<AgentItem>,
     #[serde(default)]
     pub pending_prompts: Vec<QueuedPromptSnapshot>,

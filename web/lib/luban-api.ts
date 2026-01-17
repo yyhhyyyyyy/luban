@@ -174,6 +174,9 @@ export type ConversationSnapshot = {
   thinking_effort: ThinkingEffort
   run_status: OperationStatus
   entries: ConversationEntry[]
+  entries_total?: number
+  entries_start?: number
+  entries_truncated?: boolean
   in_progress_items: AgentItem[]
   pending_prompts: QueuedPromptSnapshot[]
   queue_paused: boolean
