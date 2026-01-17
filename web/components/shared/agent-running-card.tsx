@@ -37,7 +37,7 @@ const eventLabels: Record<ActivityEvent["type"], string> = {
   thinking: "Think",
   tool_call: "Tool",
   file_edit: "Edit",
-  bash: "Bash",
+  bash: "Shell",
   search: "Search",
   complete: "Done",
 }
@@ -108,11 +108,12 @@ export function AgentRunningCard({
   const latestActivity = activities[activities.length - 1]
   const historyActivities = activities.slice(0, -1)
   const labelForActivity = (event: ActivityEvent): string => {
-    if (event.type === "bash" && event.badge) return event.badge
     return eventLabels[event.type] ?? "Tool"
   }
   const currentLabel = latestActivity ? labelForActivity(latestActivity) : "Processing"
   const LatestIcon = latestActivity ? eventIcons[latestActivity.type] : Wrench
+  const latestBadge =
+    latestActivity && latestActivity.type === "bash" ? (latestActivity.badge ?? null) : null
 
   const findScrollContainer = (): HTMLElement | null => {
     const header = headerRef.current
@@ -252,6 +253,7 @@ export function AgentRunningCard({
             const isEventExpanded = expandedEvents.has(event.id)
             const hasDetail = Boolean(event.detail)
             const durationLabel = activityDurationLabel(event)
+            const badge = event.type === "bash" ? (event.badge ?? null) : null
 
             return (
               <div key={event.id} className="group">
@@ -264,10 +266,17 @@ export function AgentRunningCard({
                   )}
                 >
                   <Check className="w-3.5 h-3.5 text-status-success flex-shrink-0" />
-                  <span className="flex items-center gap-1 w-16 px-1.5 py-0.5 rounded text-[10px] font-medium flex-shrink-0 bg-muted text-muted-foreground">
-                    <Icon className="w-3 h-3" />
-                    {labelForActivity(event)}
-                  </span>
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    <span className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground">
+                      <Icon className="w-3 h-3" />
+                      {labelForActivity(event)}
+                    </span>
+                    {badge && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted/70 text-muted-foreground font-mono tabular-nums">
+                        {badge}
+                      </span>
+                    )}
+                  </div>
                   <span className="flex-1 text-left truncate">{event.title}</span>
                   <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1 pl-3">
                     <div className="pointer-events-none absolute inset-y-0 -left-10 w-10 bg-gradient-to-l from-card via-card to-transparent opacity-100 transition-opacity duration-200" />
@@ -330,6 +339,11 @@ export function AgentRunningCard({
             <LatestIcon className="w-3 h-3" />
             {showPausedIndicator ? (isPaused ? "Paused" : isResuming ? "Resume" : "Cancel") : currentLabel}
           </span>
+          {!showPausedIndicator && latestBadge && (
+            <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary/5 text-primary font-mono tabular-nums flex-shrink-0">
+              {latestBadge}
+            </span>
+          )}
 
           <span
             className={cn(
