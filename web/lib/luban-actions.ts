@@ -22,6 +22,7 @@ import { fetchConversation, fetchThreads } from "./luban-http"
 import type { LubanStore } from "./luban-store"
 import { ACTIVE_WORKSPACE_KEY } from "./ui-prefs"
 import { waitForNewThread } from "./luban-thread-flow"
+import { prependConversationSnapshot } from "./conversation-pagination"
 
 export type LubanActions = {
   pickProjectPath: () => Promise<string | null>
@@ -50,6 +51,7 @@ export type LubanActions = {
 
   openWorkspace: (workspaceId: WorkspaceId) => Promise<void>
   selectThread: (threadId: number) => Promise<void>
+  loadConversationBefore: (workspaceId: WorkspaceId, threadId: WorkspaceThreadId, before: number) => Promise<void>
   createThread: () => void
   closeThreadTab: (threadId: number) => Promise<void>
   restoreThreadTab: (threadId: number) => Promise<void>
@@ -357,6 +359,21 @@ export function createLubanActions(args: {
     await selectThreadInWorkspace(wid, threadId)
   }
 
+  async function loadConversationBefore(workspaceId: WorkspaceId, threadId: WorkspaceThreadId, before: number) {
+    try {
+      const convo = await fetchConversation(workspaceId, threadId, { before })
+      const wid = store.refs.activeWorkspaceIdRef.current
+      const tid = store.refs.activeThreadIdRef.current
+      if (wid !== workspaceId || tid !== threadId) return
+      store.setConversation((prev) => {
+        if (!prev) return convo
+        return prependConversationSnapshot(prev, convo)
+      })
+    } catch (err) {
+      console.warn("fetchConversation failed", err)
+    }
+  }
+
   function createThread() {
     const wid = store.refs.activeWorkspaceIdRef.current
     if (wid == null) return
@@ -573,6 +590,7 @@ export function createLubanActions(args: {
     executeTask,
     openWorkspace,
     selectThread,
+    loadConversationBefore,
     selectThreadInWorkspace,
     createThread,
     closeThreadTab,

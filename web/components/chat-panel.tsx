@@ -29,6 +29,7 @@ import { cn } from "@/lib/utils"
 import { useLuban } from "@/lib/luban-context"
 import { buildMessages } from "@/lib/conversation-ui"
 import { ConversationView } from "@/components/conversation-view"
+import { VirtualizedConversationView } from "@/components/virtualized-conversation-view"
 import { fetchCodexCustomPrompts, fetchWorkspaceDiff, uploadAttachment } from "@/lib/luban-http"
 import type {
   AttachmentRef,
@@ -83,6 +84,16 @@ export function ChatPanel({
   const [codexCustomPrompts, setCodexCustomPrompts] = useState<CodexCustomPromptSnapshot[]>([])
 
   const scrollContainerRef = useRef<HTMLDivElement | null>(null)
+  const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null)
+  const setScrollContainer = useCallback((el: HTMLDivElement | null) => {
+    scrollContainerRef.current = el
+    setScrollContainerEl(el)
+  }, [])
+  const prependLoadRef = useRef<{
+    prevEntriesStart: number
+    prevScrollTop: number
+    prevScrollHeight: number
+  } | null>(null)
 
   const {
     app,
@@ -104,6 +115,7 @@ export function ChatPanel({
     removeQueuedPrompt,
     reorderQueuedPrompt,
     updateQueuedPrompt,
+    loadConversationBefore,
     setChatModel,
     setThinkingEffort,
   } = useLuban()
@@ -111,6 +123,8 @@ export function ChatPanel({
   const [draftText, setDraftText] = useState("")
   const [followTail, setFollowTail] = useState(true)
   const programmaticScrollRef = useRef(false)
+  const [isLoadingOlder, setIsLoadingOlder] = useState(false)
+  const loadingOlderRef = useRef(false)
 
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([])
   const attachmentScopeRef = useRef<string>("")
@@ -213,6 +227,53 @@ export function ChatPanel({
       .filter((text) => text.trim().length > 0)
     return items.slice(-50)
   }, [conversation?.entries])
+
+  const requestOlderConversationPage = useCallback(async () => {
+    if (activeWorkspaceId == null || activeThreadId == null) return
+    const snap = conversation
+    if (!snap) return
+    const start = snap.entries_start ?? 0
+    if (start <= 0) return
+    if (loadingOlderRef.current) return
+
+    const el = scrollContainerRef.current
+    if (!el) return
+
+    loadingOlderRef.current = true
+    setIsLoadingOlder(true)
+    prependLoadRef.current = {
+      prevEntriesStart: start,
+      prevScrollTop: el.scrollTop,
+      prevScrollHeight: el.scrollHeight,
+    }
+
+    await loadConversationBefore(activeWorkspaceId, activeThreadId, start)
+    loadingOlderRef.current = false
+    setIsLoadingOlder(false)
+  }, [activeThreadId, activeWorkspaceId, conversation, loadConversationBefore])
+
+  useEffect(() => {
+    const pending = prependLoadRef.current
+    if (!pending) return
+    const el = scrollContainerRef.current
+    if (!el) return
+    if (!conversation) return
+    const start = conversation.entries_start ?? 0
+    if (start >= pending.prevEntriesStart) return
+
+    prependLoadRef.current = null
+    const nextScrollHeight = el.scrollHeight
+    const delta = nextScrollHeight - pending.prevScrollHeight
+    if (delta <= 0) return
+
+    programmaticScrollRef.current = true
+    requestAnimationFrame(() => {
+      el.scrollTop = pending.prevScrollTop + delta
+      requestAnimationFrame(() => {
+        programmaticScrollRef.current = false
+      })
+    })
+  }, [conversation?.entries_start])
 
   useEffect(() => {
     void fetchCodexCustomPrompts()
@@ -970,6 +1031,64 @@ export function ChatPanel({
     setAgentEditorAttachments((prev) => prev.filter((a) => a.id !== id))
   }
 
+  const renderAgentRunningCardForMessage = useCallback(
+    (message: (typeof messages)[number]) => {
+      if (!agentStatus) return null
+      if (!agentCardMessageId || message.id !== agentCardMessageId) return null
+      if (!message.activities || message.activities.length === 0) return null
+      const filtered = message.activities.filter((event) => event.title !== "Turn canceled")
+      const activities = filtered.length > 0 ? filtered : message.activities
+      return (
+        <AgentRunningCard
+          activities={activities}
+          elapsedTime={agentRunElapsedLabel}
+          turnStartedAtMs={agentRunStartedAtMs}
+          status={agentStatus}
+          hasQueuedMessages={queuedPrompts.length > 0}
+          editorValue={agentEditorValue}
+          editorAttachments={agentEditorAttachments}
+          onEditorChange={setAgentEditorValue}
+          onEditorAttachmentsChange={setAgentEditorAttachments}
+          onRemoveEditorAttachment={removeAgentEditorAttachment}
+          onEditorFileSelect={handleAgentFileSelect}
+          onEditorPaste={handleAgentPaste}
+          onAddEditorAttachmentRef={(attachment) => {
+            setAgentEditorAttachments((prev) => [...prev, ...attachmentsFromRefs([attachment])])
+          }}
+          workspaceId={activeWorkspaceId ?? null}
+          commands={codexCustomPrompts}
+          messageHistory={messageHistory}
+          onCommand={handleAgentCommand}
+          onCancel={handleAgentCancel}
+          onResume={handleAgentResume}
+          onSubmit={handleAgentSubmit}
+          onDismiss={handleAgentDismiss}
+        />
+      )
+    },
+    [
+      activeWorkspaceId,
+      agentCardMessageId,
+      agentEditorAttachments,
+      agentEditorValue,
+      agentRunElapsedLabel,
+      agentRunStartedAtMs,
+      agentStatus,
+      attachmentsFromRefs,
+      codexCustomPrompts,
+      handleAgentCancel,
+      handleAgentCommand,
+      handleAgentDismiss,
+      handleAgentFileSelect,
+      handleAgentPaste,
+      handleAgentResume,
+      handleAgentSubmit,
+      messageHistory,
+      queuedPrompts.length,
+      removeAgentEditorAttachment,
+    ],
+  )
+
   const removeQueuedDraftAttachment = (id: string) => {
     setQueuedDraftAttachments((prev) => prev.filter((a) => a.id !== id))
   }
@@ -1271,10 +1390,19 @@ export function ChatPanel({
           <div
             data-testid="chat-scroll-container"
             className="flex-1 overflow-y-auto relative"
-            ref={scrollContainerRef}
+            ref={setScrollContainer}
             onScroll={(e) => {
               if (activeWorkspaceId == null || activeThreadId == null) return
               const el = e.target as HTMLDivElement
+
+              if (
+                !loadingOlderRef.current &&
+                (conversation?.entries_start ?? 0) > 0 &&
+                el.scrollTop < 60
+              ) {
+                void requestOlderConversationPage()
+              }
+
               const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight
               const isNearBottom = distanceToBottom < 50
               if (!programmaticScrollRef.current) {
@@ -1287,52 +1415,41 @@ export function ChatPanel({
             }}
           >
             <div className="max-w-3xl mx-auto py-4 px-4 pb-20">
-              <ConversationView
-                messages={messages}
-                workspaceId={activeWorkspaceId ?? undefined}
-                className=""
-                renderAgentRunningCard={(message) => {
-                  if (!agentStatus) return null
-                  if (!agentCardMessageId || message.id !== agentCardMessageId) return null
-                  if (!message.activities || message.activities.length === 0) return null
-                  const filtered = message.activities.filter((event) => event.title !== "Turn canceled")
-                  const activities = filtered.length > 0 ? filtered : message.activities
-                  return (
-                    <AgentRunningCard
-                      activities={activities}
-                      elapsedTime={agentRunElapsedLabel}
-                      turnStartedAtMs={agentRunStartedAtMs}
-                      status={agentStatus}
-                      hasQueuedMessages={queuedPrompts.length > 0}
-                      editorValue={agentEditorValue}
-                      editorAttachments={agentEditorAttachments}
-                      onEditorChange={setAgentEditorValue}
-                      onEditorAttachmentsChange={setAgentEditorAttachments}
-                      onRemoveEditorAttachment={removeAgentEditorAttachment}
-                      onEditorFileSelect={handleAgentFileSelect}
-                      onEditorPaste={handleAgentPaste}
-                      onAddEditorAttachmentRef={(attachment) => {
-                        setAgentEditorAttachments((prev) => [...prev, ...attachmentsFromRefs([attachment])])
-                      }}
-                      workspaceId={activeWorkspaceId ?? null}
-                      commands={codexCustomPrompts}
-                      messageHistory={messageHistory}
-                      onCommand={handleAgentCommand}
-                      onCancel={handleAgentCancel}
-                      onResume={handleAgentResume}
-                      onSubmit={handleAgentSubmit}
-                      onDismiss={handleAgentDismiss}
-                    />
-                  )
-                }}
-                emptyState={
-                  <div className="text-sm text-muted-foreground">
-                    {activeWorkspaceId == null
-                      ? "Select a workspace to start."
+              {isLoadingOlder && (
+                <div className="flex items-center justify-center py-2 text-xs text-muted-foreground">
+                  Loading…
+                </div>
+              )}
+              {messages.length > 200 ? (
+                <VirtualizedConversationView
+                  messages={messages}
+                  workspaceId={activeWorkspaceId ?? undefined}
+                  listKey={`${activeWorkspaceId ?? "none"}:${activeThreadId ?? "none"}`}
+                  scrollElement={scrollContainerEl}
+                  renderAgentRunningCard={renderAgentRunningCardForMessage}
+                  emptyState={
+                    <div className="text-sm text-muted-foreground">
+                      {activeWorkspaceId == null
+                        ? "Select a workspace to start."
+                        : "Select a thread to load conversation."}
+                    </div>
+                  }
+                />
+              ) : (
+                <ConversationView
+                  messages={messages}
+                  workspaceId={activeWorkspaceId ?? undefined}
+                  className=""
+                  renderAgentRunningCard={renderAgentRunningCardForMessage}
+                  emptyState={
+                    <div className="text-sm text-muted-foreground">
+                      {activeWorkspaceId == null
+                        ? "Select a workspace to start."
                       : "Select a thread to load conversation."}
                   </div>
                 }
               />
+              )}
 
               {queuedPrompts.length > 0 && (
                 <div className="mt-6 space-y-2" data-testid="queued-prompts">

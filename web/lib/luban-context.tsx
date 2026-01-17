@@ -68,6 +68,7 @@ type LubanContextValue = {
 
   openWorkspace: (workspaceId: WorkspaceId) => Promise<void>
   selectThread: (threadId: number) => Promise<void>
+  loadConversationBefore: (workspaceId: WorkspaceId, threadId: WorkspaceThreadId, before: number) => Promise<void>
   createThread: () => void
   closeThreadTab: (threadId: number) => Promise<void>
   restoreThreadTab: (threadId: number) => Promise<void>
@@ -250,6 +251,7 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     executeTask: actions.executeTask,
     openWorkspace: actions.openWorkspace,
     selectThread: actions.selectThread,
+    loadConversationBefore: actions.loadConversationBefore,
     createThread: actions.createThread,
     closeThreadTab: actions.closeThreadTab,
     restoreThreadTab: actions.restoreThreadTab,

@@ -1769,13 +1769,19 @@ impl Engine {
                         let prompt = request.prompt.clone();
 
                         let emit_many_steps = prompt.contains("e2e-many-steps");
+                        let emit_pagination_steps = prompt.contains("e2e-pagination-steps");
                         let emit_markdown_reasoning = prompt.contains("e2e-thinking-markdown");
 
-                        if emit_many_steps {
+                        if emit_many_steps || emit_pagination_steps {
+                            let count = if emit_pagination_steps {
+                                2505u32
+                            } else {
+                                12_000u32
+                            };
                             // Generate a large amount of completed items to stress the UI render/timing
                             // paths. This is used only in e2e mode (`LUBAN_E2E_ROOT` + fake codex bin).
                             // Keep the IDs simple and stable.
-                            for i in 0..12_000u32 {
+                            for i in 0..count {
                                 if cancel.load(Ordering::SeqCst) {
                                     break;
                                 }

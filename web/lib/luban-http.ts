@@ -26,8 +26,11 @@ export async function fetchThreads(workspaceId: number): Promise<ThreadsSnapshot
 export async function fetchConversation(
   workspaceId: number,
   threadId: number,
+  args: { before?: number; limit?: number } = {},
 ): Promise<ConversationSnapshot> {
-  const params = new URLSearchParams({ limit: "2000" })
+  const limit = args.limit ?? 2000
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (args.before != null) params.set("before", String(args.before))
   const res = await fetch(`/api/workspaces/${workspaceId}/conversations/${threadId}?${params.toString()}`)
   if (!res.ok)
     throw new Error(
