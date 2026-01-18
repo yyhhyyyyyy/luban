@@ -3349,7 +3349,7 @@ fn map_api_attachment(att: luban_api::AttachmentRef) -> AttachmentRef {
 
 pub fn new_default_services() -> anyhow::Result<Arc<dyn ProjectWorkspaceService>> {
     Ok(GitWorkspaceService::new_with_options(SqliteStoreOptions {
-        persist_ui_state: false,
+        persist_ui_state: true,
     })
     .context("failed to init backend services")?)
 }
@@ -3360,9 +3360,10 @@ mod tests {
     use luban_domain::{
         CodexCommandExecutionStatus, CodexThreadEvent, ContextImage, ContextItem,
         ConversationSnapshot as DomainConversationSnapshot, ConversationThreadMeta,
-        PersistedAppState,
+        PersistedAppState, PersistedProject, PersistedWorkspace, WorkspaceStatus,
     };
     use std::collections::HashMap;
+    use std::sync::OnceLock;
     use std::sync::atomic::AtomicBool;
     use std::time::Duration;
 
@@ -3949,6 +3950,103 @@ mod tests {
             snapshot.entries_total
         );
         assert!(snapshot.entries.len() <= 2000);
+    }
+
+    #[test]
+    fn default_services_persist_ui_state() {
+        static ENV_LOCK: OnceLock<std::sync::Mutex<()>> = OnceLock::new();
+        let _guard = ENV_LOCK
+            .get_or_init(|| std::sync::Mutex::new(()))
+            .lock()
+            .expect("mutex poisoned");
+
+        struct EnvGuard {
+            prev_root: Option<std::ffi::OsString>,
+            root: PathBuf,
+        }
+
+        impl Drop for EnvGuard {
+            fn drop(&mut self) {
+                if let Some(prev) = self.prev_root.take() {
+                    unsafe {
+                        std::env::set_var(luban_domain::paths::LUBAN_ROOT_ENV, prev);
+                    }
+                } else {
+                    unsafe {
+                        std::env::remove_var(luban_domain::paths::LUBAN_ROOT_ENV);
+                    }
+                }
+                let _ = std::fs::remove_dir_all(&self.root);
+            }
+        }
+
+        let root = std::env::temp_dir().join(format!(
+            "luban-tests-default-services-persist-ui-state-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).expect("create temp root");
+
+        let env_guard = EnvGuard {
+            prev_root: std::env::var_os(luban_domain::paths::LUBAN_ROOT_ENV),
+            root: root.clone(),
+        };
+        unsafe {
+            std::env::set_var(luban_domain::paths::LUBAN_ROOT_ENV, root.as_os_str());
+        }
+
+        let services = new_default_services().expect("init services");
+
+        let snapshot = PersistedAppState {
+            projects: vec![PersistedProject {
+                id: 1,
+                slug: "p".to_owned(),
+                name: "P".to_owned(),
+                path: PathBuf::from("/tmp/p"),
+                is_git: true,
+                expanded: false,
+                workspaces: vec![PersistedWorkspace {
+                    id: 10,
+                    workspace_name: "main".to_owned(),
+                    branch_name: "main".to_owned(),
+                    worktree_path: PathBuf::from("/tmp/p"),
+                    status: WorkspaceStatus::Active,
+                    last_activity_at_unix_seconds: None,
+                }],
+            }],
+            sidebar_width: None,
+            terminal_pane_width: None,
+            appearance_theme: None,
+            appearance_ui_font: None,
+            appearance_chat_font: None,
+            appearance_code_font: None,
+            appearance_terminal_font: None,
+            agent_default_model_id: None,
+            agent_default_thinking_effort: None,
+            agent_codex_enabled: Some(true),
+            last_open_workspace_id: Some(10),
+            workspace_active_thread_id: HashMap::from([(10, 2)]),
+            workspace_open_tabs: HashMap::from([(10, vec![1, 2])]),
+            workspace_archived_tabs: HashMap::new(),
+            workspace_next_thread_id: HashMap::from([(10, 3)]),
+            workspace_chat_scroll_y10: HashMap::new(),
+            workspace_chat_scroll_anchor: HashMap::new(),
+            workspace_unread_completions: HashMap::new(),
+            task_prompt_templates: HashMap::new(),
+        };
+
+        services
+            .save_app_state(snapshot.clone())
+            .expect("save app state");
+        let loaded = services.load_app_state().expect("load app state");
+
+        assert_eq!(loaded.workspace_open_tabs.get(&10), Some(&vec![1, 2]));
+        assert_eq!(loaded.workspace_next_thread_id.get(&10), Some(&3));
+        assert_eq!(loaded.workspace_active_thread_id.get(&10), Some(&2));
+        drop(env_guard);
     }
 
     #[test]
