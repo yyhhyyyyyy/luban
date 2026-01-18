@@ -189,22 +189,6 @@ pub(crate) fn codex_item_id(item: &CodexThreadItem) -> &str {
     }
 }
 
-fn entry_is_same_codex_item(entry: &ConversationEntry, item: &CodexThreadItem) -> bool {
-    match entry {
-        ConversationEntry::CodexItem { item: existing } => {
-            codex_item_id(existing) == codex_item_id(item)
-        }
-        _ => false,
-    }
-}
-
-pub(crate) fn entries_contain_codex_item(
-    entries: &[ConversationEntry],
-    item: &CodexThreadItem,
-) -> bool {
-    entries.iter().any(|e| entry_is_same_codex_item(e, item))
-}
-
 pub(crate) fn flush_in_progress_items(conversation: &mut WorkspaceConversation) {
     let pending = conversation
         .in_progress_order
@@ -214,12 +198,7 @@ pub(crate) fn flush_in_progress_items(conversation: &mut WorkspaceConversation) 
         .collect::<Vec<_>>();
 
     for item in pending {
-        if entries_contain_codex_item(&conversation.entries, &item) {
-            continue;
-        }
-        conversation.entries.push(ConversationEntry::CodexItem {
-            item: Box::new(item),
-        });
+        conversation.push_codex_item_if_new(item);
     }
 }
 
@@ -280,6 +259,10 @@ pub struct ConversationSnapshot {
     pub thread_id: Option<String>,
     pub entries: Vec<ConversationEntry>,
     #[serde(default)]
+    pub entries_total: u64,
+    #[serde(default)]
+    pub entries_start: u64,
+    #[serde(default)]
     pub pending_prompts: Vec<QueuedPrompt>,
     #[serde(default)]
     pub queue_paused: bool,
@@ -303,6 +286,9 @@ pub struct WorkspaceConversation {
     pub agent_model_id: String,
     pub thinking_effort: ThinkingEffort,
     pub entries: Vec<ConversationEntry>,
+    pub entries_total: u64,
+    pub entries_start: u64,
+    pub codex_item_ids: HashSet<String>,
     pub run_status: OperationStatus,
     pub current_run_config: Option<AgentRunConfig>,
     pub in_progress_items: BTreeMap<String, CodexThreadItem>,
@@ -310,6 +296,69 @@ pub struct WorkspaceConversation {
     pub next_queued_prompt_id: u64,
     pub pending_prompts: VecDeque<QueuedPrompt>,
     pub queue_paused: bool,
+}
+
+pub(crate) const MAX_CONVERSATION_ENTRIES_IN_MEMORY: usize = 5000;
+
+impl WorkspaceConversation {
+    pub(crate) fn reset_entries_from_snapshot(&mut self, snapshot: ConversationSnapshot) {
+        self.entries = snapshot.entries;
+        self.entries_total = snapshot.entries_total.max(
+            snapshot
+                .entries_start
+                .saturating_add(self.entries.len() as u64),
+        );
+        self.entries_start = snapshot.entries_start;
+        self.rebuild_codex_item_ids();
+        self.trim_entries_to_limit();
+    }
+
+    pub(crate) fn rebuild_codex_item_ids(&mut self) {
+        self.codex_item_ids.clear();
+        for entry in &self.entries {
+            if let ConversationEntry::CodexItem { item } = entry {
+                self.codex_item_ids
+                    .insert(codex_item_id(item.as_ref()).to_owned());
+            }
+        }
+    }
+
+    pub(crate) fn push_entry(&mut self, entry: ConversationEntry) {
+        if let ConversationEntry::CodexItem { item } = &entry {
+            self.codex_item_ids
+                .insert(codex_item_id(item.as_ref()).to_owned());
+        }
+        self.entries.push(entry);
+        self.entries_total = self
+            .entries_total
+            .max(self.entries_start.saturating_add(self.entries.len() as u64));
+        self.trim_entries_to_limit();
+    }
+
+    pub(crate) fn push_codex_item_if_new(&mut self, item: CodexThreadItem) -> bool {
+        let id = codex_item_id(&item);
+        if self.codex_item_ids.contains(id) {
+            return false;
+        }
+        self.push_entry(ConversationEntry::CodexItem {
+            item: Box::new(item),
+        });
+        true
+    }
+
+    fn trim_entries_to_limit(&mut self) {
+        if self.entries.len() <= MAX_CONVERSATION_ENTRIES_IN_MEMORY {
+            return;
+        }
+        let overflow = self.entries.len() - MAX_CONVERSATION_ENTRIES_IN_MEMORY;
+        let drained = self.entries.drain(0..overflow).collect::<Vec<_>>();
+        for entry in drained {
+            if let ConversationEntry::CodexItem { item } = entry {
+                self.codex_item_ids.remove(codex_item_id(item.as_ref()));
+            }
+        }
+        self.entries_start = self.entries_start.saturating_add(overflow as u64);
+    }
 }
 
 #[derive(Clone, Debug)]

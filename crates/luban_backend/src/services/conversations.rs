@@ -118,6 +118,8 @@ impl GitWorkspaceService {
             return Ok(Some(ConversationSnapshot {
                 thread_id: meta.thread_id,
                 entries: Vec::new(),
+                entries_total: 0,
+                entries_start: 0,
                 pending_prompts: Vec::new(),
                 queue_paused: false,
             }));
@@ -154,6 +156,8 @@ impl GitWorkspaceService {
         Ok(Some(ConversationSnapshot {
             thread_id: meta.thread_id,
             entries,
+            entries_total: 0,
+            entries_start: 0,
             pending_prompts: Vec::new(),
             queue_paused: false,
         }))

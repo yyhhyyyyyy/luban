@@ -2017,6 +2017,8 @@ impl SqliteDatabase {
         Ok(ConversationSnapshot {
             thread_id,
             entries,
+            entries_total: 0,
+            entries_start: 0,
             pending_prompts,
             queue_paused,
         })

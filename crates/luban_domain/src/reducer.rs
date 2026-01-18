@@ -1,7 +1,7 @@
 use crate::persistence;
 use crate::state::{
-    apply_draft_text_diff, codex_item_id, entries_contain_codex_item, entries_is_prefix,
-    entries_is_suffix, flush_in_progress_items,
+    apply_draft_text_diff, codex_item_id, entries_is_prefix, entries_is_suffix,
+    flush_in_progress_items,
 };
 use crate::{
     Action, AgentRunConfig, AppState, CodexThreadEvent, ConversationEntry, DraftAttachment, Effect,
@@ -496,7 +496,7 @@ impl AppState {
                 let conversation = self.ensure_conversation_mut(workspace_id, thread_id);
 
                 if conversation.thread_id.is_none() {
-                    conversation.thread_id = snapshot.thread_id;
+                    conversation.thread_id = snapshot.thread_id.clone();
                 }
 
                 let should_apply_queue_snapshot = conversation.entries.is_empty()
@@ -517,7 +517,7 @@ impl AppState {
                 }
 
                 if conversation.entries.is_empty() {
-                    conversation.entries = snapshot.entries;
+                    conversation.reset_entries_from_snapshot(snapshot);
                     return Vec::new();
                 }
 
@@ -528,7 +528,7 @@ impl AppState {
                         || entries_is_suffix(&snapshot.entries, &conversation.entries);
 
                 if snapshot_is_newer && !conversation_is_newer {
-                    conversation.entries = snapshot.entries;
+                    conversation.reset_entries_from_snapshot(snapshot);
                 }
 
                 Vec::new()
@@ -580,7 +580,7 @@ impl AppState {
                 }
 
                 if conversation.queue_paused && !conversation.pending_prompts.is_empty() {
-                    conversation.entries.push(ConversationEntry::UserMessage {
+                    conversation.push_entry(ConversationEntry::UserMessage {
                         text: text.clone(),
                         attachments: attachments.clone(),
                     });
@@ -600,7 +600,7 @@ impl AppState {
 
                 if conversation.pending_prompts.is_empty() {
                     conversation.queue_paused = false;
-                    conversation.entries.push(ConversationEntry::UserMessage {
+                    conversation.push_entry(ConversationEntry::UserMessage {
                         text: text.clone(),
                         attachments: attachments.clone(),
                     });
@@ -890,14 +890,12 @@ impl AppState {
                             .collect()
                     }
                     CodexThreadEvent::TurnDuration { duration_ms } => {
-                        conversation
-                            .entries
-                            .push(ConversationEntry::TurnDuration { duration_ms });
+                        conversation.push_entry(ConversationEntry::TurnDuration { duration_ms });
                         Vec::new()
                     }
                     CodexThreadEvent::TurnFailed { error } => {
                         flush_in_progress_items(conversation);
-                        conversation.entries.push(ConversationEntry::TurnError {
+                        conversation.push_entry(ConversationEntry::TurnError {
                             message: error.message.clone(),
                         });
                         conversation.run_status = OperationStatus::Idle;
@@ -925,17 +923,12 @@ impl AppState {
                         {
                             conversation.in_progress_order.remove(pos);
                         }
-                        let is_duplicate = entries_contain_codex_item(&conversation.entries, &item);
-                        if !is_duplicate {
-                            conversation.entries.push(ConversationEntry::CodexItem {
-                                item: Box::new(item),
-                            });
-                        }
+                        conversation.push_codex_item_if_new(item);
                         Vec::new()
                     }
                     CodexThreadEvent::Error { message } => {
                         flush_in_progress_items(conversation);
-                        conversation.entries.push(ConversationEntry::TurnError {
+                        conversation.push_entry(ConversationEntry::TurnError {
                             message: message.clone(),
                         });
                         conversation.run_status = OperationStatus::Idle;
@@ -992,7 +985,7 @@ impl AppState {
                 conversation.in_progress_items.clear();
                 conversation.in_progress_order.clear();
                 conversation.queue_paused = true;
-                conversation.entries.push(ConversationEntry::TurnCanceled);
+                conversation.push_entry(ConversationEntry::TurnCanceled);
                 vec![Effect::CancelAgentTurn {
                     workspace_id,
                     thread_id,
@@ -1439,6 +1432,9 @@ impl AppState {
             agent_model_id: model_id,
             thinking_effort,
             entries: Vec::new(),
+            entries_total: 0,
+            entries_start: 0,
+            codex_item_ids: HashSet::new(),
             run_status: OperationStatus::Idle,
             current_run_config: None,
             in_progress_items: BTreeMap::new(),
@@ -1722,7 +1718,7 @@ fn start_next_queued_prompt(
 
     let queued = conversation.pending_prompts.pop_front()?;
 
-    conversation.entries.push(ConversationEntry::UserMessage {
+    conversation.push_entry(ConversationEntry::UserMessage {
         text: queued.text.clone(),
         attachments: queued.attachments.clone(),
     });
@@ -2057,6 +2053,8 @@ mod tests {
                     attachments: Vec::new(),
                 })
                 .collect(),
+            entries_total: 0,
+            entries_start: 0,
             pending_prompts: Vec::new(),
             queue_paused: false,
         };
@@ -2875,6 +2873,8 @@ mod tests {
             snapshot: ConversationSnapshot {
                 thread_id: None,
                 entries: Vec::new(),
+                entries_total: 0,
+                entries_start: 0,
                 pending_prompts: Vec::new(),
                 queue_paused: false,
             },
@@ -3021,6 +3021,8 @@ mod tests {
             snapshot: ConversationSnapshot {
                 thread_id: Some("thread_0".to_owned()),
                 entries: Vec::new(),
+                entries_total: 0,
+                entries_start: 0,
                 pending_prompts: Vec::new(),
                 queue_paused: false,
             },
@@ -3064,6 +3066,8 @@ mod tests {
                     text: "Hello".to_owned(),
                     attachments: Vec::new(),
                 }],
+                entries_total: 0,
+                entries_start: 0,
                 pending_prompts: Vec::new(),
                 queue_paused: false,
             },
@@ -3096,6 +3100,8 @@ mod tests {
                     text: "Hello".to_owned(),
                     attachments: Vec::new(),
                 }],
+                entries_total: 0,
+                entries_start: 0,
                 pending_prompts: Vec::new(),
                 queue_paused: false,
             },
@@ -3113,6 +3119,8 @@ mod tests {
                     },
                     ConversationEntry::TurnDuration { duration_ms: 1234 },
                 ],
+                entries_total: 0,
+                entries_start: 0,
                 pending_prompts: Vec::new(),
                 queue_paused: false,
             },
@@ -3140,6 +3148,8 @@ mod tests {
             snapshot: ConversationSnapshot {
                 thread_id: None,
                 entries: Vec::new(),
+                entries_total: 0,
+                entries_start: 0,
                 pending_prompts: vec![QueuedPrompt {
                     id: 3,
                     text: "Queued".to_owned(),
@@ -3158,6 +3168,32 @@ mod tests {
         assert_eq!(conversation.pending_prompts.len(), 1);
         assert_eq!(conversation.pending_prompts[0].id, 3);
         assert_eq!(conversation.next_queued_prompt_id, 4);
+    }
+
+    #[test]
+    fn conversation_entries_are_bounded_in_memory() {
+        let mut state = AppState::demo();
+        let workspace_id = first_non_main_workspace_id(&state);
+        let thread_id = default_thread_id();
+
+        let total = crate::state::MAX_CONVERSATION_ENTRIES_IN_MEMORY + 100;
+        for idx in 0..total {
+            state.apply(Action::AgentEventReceived {
+                workspace_id,
+                thread_id,
+                event: CodexThreadEvent::TurnDuration {
+                    duration_ms: idx as u64,
+                },
+            });
+        }
+
+        let conversation = state.workspace_conversation(workspace_id).unwrap();
+        assert_eq!(
+            conversation.entries.len(),
+            crate::state::MAX_CONVERSATION_ENTRIES_IN_MEMORY
+        );
+        assert_eq!(conversation.entries_start, 100);
+        assert_eq!(conversation.entries_total, total as u64);
     }
 
     #[test]
