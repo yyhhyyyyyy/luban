@@ -125,6 +125,7 @@ export function ChatPanel({
   const programmaticScrollRef = useRef(false)
   const [isLoadingOlder, setIsLoadingOlder] = useState(false)
   const loadingOlderRef = useRef(false)
+  const lastScrollTopRef = useRef(0)
 
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([])
   const attachmentScopeRef = useRef<string>("")
@@ -1395,10 +1396,19 @@ export function ChatPanel({
               if (activeWorkspaceId == null || activeThreadId == null) return
               const el = e.target as HTMLDivElement
 
+              const prevScrollTop = lastScrollTopRef.current
+              lastScrollTopRef.current = el.scrollTop
+
+              const isNearTop = el.scrollTop < 400
+              const isAtTop = el.scrollTop <= 0
+              const isScrollingUp = el.scrollTop < prevScrollTop
+
               if (
+                !programmaticScrollRef.current &&
                 !loadingOlderRef.current &&
                 (conversation?.entries_start ?? 0) > 0 &&
-                el.scrollTop < 60
+                isNearTop &&
+                (isAtTop || isScrollingUp)
               ) {
                 void requestOlderConversationPage()
               }
