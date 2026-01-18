@@ -1117,21 +1117,23 @@ impl Engine {
         let services = self.services.clone();
         let tid = thread_id.0;
         let loaded = tokio::task::spawn_blocking(move || {
-            services.load_conversation(scope.project_slug, scope.workspace_name, tid)
+            services.load_conversation_page(
+                scope.project_slug,
+                scope.workspace_name,
+                tid,
+                before,
+                limit as u64,
+            )
         })
         .await
         .ok()
         .unwrap_or_else(|| Err("failed to join load conversation task".to_owned()))
         .map_err(|e| anyhow::anyhow!(e))?;
 
-        let total_entries = loaded.entries.len();
-        let before = before
-            .and_then(|v| usize::try_from(v).ok())
-            .unwrap_or(total_entries)
-            .min(total_entries);
-        let end = before;
-        let start = end.saturating_sub(limit);
-        let entries_truncated = start > 0 || end < total_entries;
+        let entries_total = loaded.entries_total;
+        let entries_start = loaded.entries_start;
+        let entries_end = entries_start.saturating_add(loaded.entries.len() as u64);
+        let entries_truncated = entries_start > 0 || entries_end < entries_total;
 
         Ok(ConversationSnapshot {
             rev: self.rev,
@@ -1146,15 +1148,9 @@ impl Engine {
                 ThinkingEffort::XHigh => luban_api::ThinkingEffort::XHigh,
             },
             run_status: luban_api::OperationStatus::Idle,
-            entries: loaded
-                .entries
-                .get(start..end)
-                .unwrap_or_default()
-                .iter()
-                .map(map_conversation_entry)
-                .collect(),
-            entries_total: total_entries as u64,
-            entries_start: start as u64,
+            entries: loaded.entries.iter().map(map_conversation_entry).collect(),
+            entries_total,
+            entries_start,
             entries_truncated,
             in_progress_items: Vec::new(),
             pending_prompts: loaded
@@ -1662,10 +1658,12 @@ impl Engine {
                 let services = self.services.clone();
                 let thread_local_id = thread_id.as_u64();
                 let result = tokio::task::spawn_blocking(move || {
-                    services.load_conversation(
+                    services.load_conversation_page(
                         scope.project_slug,
                         scope.workspace_name,
                         thread_local_id,
+                        None,
+                        5000,
                     )
                 })
                 .await
@@ -2416,7 +2414,10 @@ impl Engine {
             return Err(anyhow::anyhow!("conversation not found"));
         };
 
-        let total_entries = conversation.entries.len();
+        let window_start = usize::try_from(conversation.entries_start).unwrap_or(0);
+        let window_end = window_start.saturating_add(conversation.entries.len());
+        let total_entries = usize::try_from(conversation.entries_total).unwrap_or(window_end);
+
         let before = before
             .and_then(|v| usize::try_from(v).ok())
             .unwrap_or(total_entries)
@@ -2424,6 +2425,13 @@ impl Engine {
         let end = before;
         let start = end.saturating_sub(limit);
         let entries_truncated = start > 0 || end < total_entries;
+
+        if start < window_start || end > window_end {
+            return Err(anyhow::anyhow!("requested slice is not in memory"));
+        }
+
+        let local_start = start.saturating_sub(window_start);
+        let local_end = end.saturating_sub(window_start);
 
         Ok(ConversationSnapshot {
             rev: self.rev,
@@ -2443,7 +2451,7 @@ impl Engine {
             },
             entries: conversation
                 .entries
-                .get(start..end)
+                .get(local_start..local_end)
                 .unwrap_or_default()
                 .iter()
                 .map(map_conversation_entry)
@@ -3897,6 +3905,19 @@ mod tests {
                 }),
             });
         }
+        convo.entries_start = 0;
+        convo.entries_total = convo.entries.len() as u64;
+        convo.codex_item_ids = convo
+            .entries
+            .iter()
+            .filter_map(|entry| match entry {
+                ConversationEntry::CodexItem { item } => match item.as_ref() {
+                    CodexThreadItem::CommandExecution { id, .. } => Some(id.clone()),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
         let total = convo.entries.len();
 
         let (events, _) = broadcast::channel::<WsServerMessage>(1);
