@@ -243,6 +243,9 @@ pub enum Action {
     SidebarWidthChanged {
         width: u16,
     },
+    AppearanceGlobalZoomChanged {
+        zoom: f64,
+    },
     AppearanceThemeChanged {
         theme: AppearanceTheme,
     },

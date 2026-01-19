@@ -2333,6 +2333,7 @@ impl Engine {
                     code_font: self.state.appearance_fonts.code_font.clone(),
                     terminal_font: self.state.appearance_fonts.terminal_font.clone(),
                 },
+                global_zoom: (self.state.global_zoom_percent as f64) / 100.0,
             },
             agent: luban_api::AgentSettingsSnapshot {
                 codex_enabled: self.state.agent_codex_enabled(),
@@ -3279,6 +3280,9 @@ fn map_client_action(action: luban_api::ClientAction) -> Option<Action> {
                 terminal_font: fonts.terminal_font,
             })
         }
+        luban_api::ClientAction::AppearanceGlobalZoomChanged { zoom } => {
+            Some(Action::AppearanceGlobalZoomChanged { zoom })
+        }
         luban_api::ClientAction::CodexEnabledChanged { enabled } => {
             Some(Action::AgentCodexEnabledChanged { enabled })
         }
@@ -3550,6 +3554,7 @@ mod tests {
                 projects: Vec::new(),
                 sidebar_width: None,
                 terminal_pane_width: None,
+                global_zoom_percent: None,
                 appearance_theme: None,
                 appearance_ui_font: None,
                 appearance_chat_font: None,
@@ -4019,6 +4024,7 @@ mod tests {
             }],
             sidebar_width: None,
             terminal_pane_width: None,
+            global_zoom_percent: None,
             appearance_theme: None,
             appearance_ui_font: None,
             appearance_chat_font: None,
@@ -4179,6 +4185,7 @@ mod tests {
                 projects: Vec::new(),
                 sidebar_width: None,
                 terminal_pane_width: None,
+                global_zoom_percent: None,
                 appearance_theme: None,
                 appearance_ui_font: None,
                 appearance_chat_font: None,
@@ -4451,6 +4458,7 @@ mod tests {
                 projects: Vec::new(),
                 sidebar_width: None,
                 terminal_pane_width: None,
+                global_zoom_percent: None,
                 appearance_theme: None,
                 appearance_ui_font: None,
                 appearance_chat_font: None,
@@ -4768,6 +4776,7 @@ mod tests {
                 projects: Vec::new(),
                 sidebar_width: None,
                 terminal_pane_width: None,
+                global_zoom_percent: None,
                 appearance_theme: None,
                 appearance_ui_font: None,
                 appearance_chat_font: None,
@@ -4974,6 +4983,7 @@ mod tests {
                 projects: Vec::new(),
                 sidebar_width: None,
                 terminal_pane_width: None,
+                global_zoom_percent: None,
                 appearance_theme: None,
                 appearance_ui_font: None,
                 appearance_chat_font: None,

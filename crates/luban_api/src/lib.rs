@@ -29,6 +29,12 @@ pub struct AppSnapshot {
 pub struct AppearanceSnapshot {
     pub theme: AppearanceTheme,
     pub fonts: AppearanceFontsSnapshot,
+    #[serde(default = "default_global_zoom")]
+    pub global_zoom: f64,
+}
+
+fn default_global_zoom() -> f64 {
+    1.0
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -651,6 +657,9 @@ pub enum ClientAction {
     },
     AppearanceFontsChanged {
         fonts: AppearanceFontsSnapshot,
+    },
+    AppearanceGlobalZoomChanged {
+        zoom: f64,
     },
     CodexEnabledChanged {
         enabled: bool,

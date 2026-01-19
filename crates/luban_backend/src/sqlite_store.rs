@@ -18,6 +18,7 @@ const WORKSPACE_ARCHIVED_TAB_PREFIX: &str = "workspace_archived_tab_";
 const WORKSPACE_NEXT_THREAD_ID_PREFIX: &str = "workspace_next_thread_id_";
 const WORKSPACE_UNREAD_COMPLETION_PREFIX: &str = "workspace_unread_completion_";
 const LAST_OPEN_WORKSPACE_ID_KEY: &str = "last_open_workspace_id";
+const GLOBAL_ZOOM_PERCENT_KEY: &str = "global_zoom_percent";
 const AGENT_DEFAULT_MODEL_ID_KEY: &str = "agent_default_model_id";
 const AGENT_DEFAULT_THINKING_EFFORT_KEY: &str = "agent_default_thinking_effort";
 const AGENT_CODEX_ENABLED_KEY: &str = "agent_codex_enabled";
@@ -934,6 +935,7 @@ impl SqliteDatabase {
                 projects,
                 sidebar_width: None,
                 terminal_pane_width: None,
+                global_zoom_percent: None,
                 appearance_theme: None,
                 appearance_ui_font: None,
                 appearance_chat_font: None,
@@ -974,6 +976,17 @@ impl SqliteDatabase {
             )
             .optional()
             .context("failed to load terminal pane width")?
+            .and_then(|value| u16::try_from(value).ok());
+
+        let global_zoom_percent = self
+            .conn
+            .query_row(
+                "SELECT value FROM app_settings WHERE key = ?1",
+                params![GLOBAL_ZOOM_PERCENT_KEY],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .context("failed to load global zoom")?
             .and_then(|value| u16::try_from(value).ok());
 
         let appearance_theme = self
@@ -1264,6 +1277,7 @@ impl SqliteDatabase {
             projects,
             sidebar_width,
             terminal_pane_width,
+            global_zoom_percent,
             appearance_theme,
             appearance_ui_font,
             appearance_chat_font,
@@ -1535,6 +1549,22 @@ impl SqliteDatabase {
                 APPEARANCE_TERMINAL_FONT_KEY,
                 snapshot.appearance_terminal_font.as_deref(),
             )?;
+
+            if let Some(value) = snapshot.global_zoom_percent {
+                tx.execute(
+                    "INSERT INTO app_settings (key, value, created_at, updated_at)
+                     VALUES (?1, ?2, COALESCE((SELECT created_at FROM app_settings WHERE key = ?1), ?3), ?3)
+                     ON CONFLICT(key) DO UPDATE SET
+                       value = excluded.value,
+                       updated_at = excluded.updated_at",
+                    params![GLOBAL_ZOOM_PERCENT_KEY, value as i64, now],
+                )?;
+            } else {
+                tx.execute(
+                    "DELETE FROM app_settings WHERE key = ?1",
+                    params![GLOBAL_ZOOM_PERCENT_KEY],
+                )?;
+            }
         }
 
         if let Some(value) = snapshot.agent_default_model_id.as_deref() {
@@ -2556,6 +2586,7 @@ mod tests {
             }],
             sidebar_width: None,
             terminal_pane_width: None,
+            global_zoom_percent: None,
             appearance_theme: None,
             appearance_ui_font: None,
             appearance_chat_font: None,
@@ -2604,6 +2635,7 @@ mod tests {
             }],
             sidebar_width: Some(280),
             terminal_pane_width: Some(360),
+            global_zoom_percent: Some(110),
             appearance_theme: Some("dark".to_owned()),
             appearance_ui_font: Some("Inter".to_owned()),
             appearance_chat_font: Some("Inter".to_owned()),
@@ -2662,6 +2694,7 @@ mod tests {
             }],
             sidebar_width: None,
             terminal_pane_width: None,
+            global_zoom_percent: None,
             appearance_theme: None,
             appearance_ui_font: None,
             appearance_chat_font: None,
@@ -2797,6 +2830,7 @@ mod tests {
             }],
             sidebar_width: None,
             terminal_pane_width: None,
+            global_zoom_percent: None,
             appearance_theme: None,
             appearance_ui_font: None,
             appearance_chat_font: None,
@@ -2899,6 +2933,7 @@ mod tests {
             ],
             sidebar_width: None,
             terminal_pane_width: None,
+            global_zoom_percent: None,
             appearance_theme: None,
             appearance_ui_font: None,
             appearance_chat_font: None,
@@ -2957,6 +2992,7 @@ mod tests {
             }],
             sidebar_width: None,
             terminal_pane_width: None,
+            global_zoom_percent: None,
             appearance_theme: None,
             appearance_ui_font: None,
             appearance_chat_font: None,
@@ -3014,6 +3050,7 @@ mod tests {
             }],
             sidebar_width: None,
             terminal_pane_width: None,
+            global_zoom_percent: None,
             appearance_theme: None,
             appearance_ui_font: None,
             appearance_chat_font: None,
@@ -3056,6 +3093,7 @@ mod tests {
             projects: Vec::new(),
             sidebar_width: None,
             terminal_pane_width: None,
+            global_zoom_percent: None,
             appearance_theme: None,
             appearance_ui_font: None,
             appearance_chat_font: None,

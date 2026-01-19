@@ -565,6 +565,10 @@ export function createLubanActions(args: {
     args.sendAction({ type: "appearance_fonts_changed", fonts })
   }
 
+  function setGlobalZoom(zoom: number) {
+    args.sendAction({ type: "appearance_global_zoom_changed", zoom })
+  }
+
   return {
     pickProjectPath,
     addProject,
@@ -608,5 +612,6 @@ export function createLubanActions(args: {
     setThinkingEffort,
     setAppearanceTheme,
     setAppearanceFonts,
+    setGlobalZoom,
   }
 }

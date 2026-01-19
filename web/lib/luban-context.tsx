@@ -103,6 +103,7 @@ type LubanContextValue = {
   setThinkingEffort: (workspaceId: WorkspaceId, threadId: WorkspaceThreadId, effort: ThinkingEffort) => void
   setAppearanceTheme: (theme: AppearanceTheme) => void
   setAppearanceFonts: (fonts: AppearanceFontsSnapshot) => void
+  setGlobalZoom: (zoom: number) => void
 
   setCodexEnabled: (enabled: boolean) => void
   setTaskPromptTemplate: (intentKind: TaskIntentKind, template: string) => void
@@ -268,6 +269,7 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     setThinkingEffort: actions.setThinkingEffort,
     setAppearanceTheme: actions.setAppearanceTheme,
     setAppearanceFonts: actions.setAppearanceFonts,
+    setGlobalZoom: actions.setGlobalZoom,
     setCodexEnabled: actions.setCodexEnabled,
     setTaskPromptTemplate: actions.setTaskPromptTemplate,
     setSystemPromptTemplate: actions.setSystemPromptTemplate,

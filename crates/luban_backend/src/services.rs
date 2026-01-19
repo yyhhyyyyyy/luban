@@ -2931,6 +2931,7 @@ mod tests {
             }],
             sidebar_width: None,
             terminal_pane_width: None,
+            global_zoom_percent: None,
             appearance_theme: None,
             appearance_ui_font: None,
             appearance_chat_font: None,

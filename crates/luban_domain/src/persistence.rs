@@ -65,6 +65,7 @@ pub(crate) fn apply_persisted_app_state(
     state.projects = projects;
     state.sidebar_width = persisted.sidebar_width;
     state.terminal_pane_width = persisted.terminal_pane_width;
+    state.global_zoom_percent = persisted.global_zoom_percent.unwrap_or(100);
     state.appearance_theme = persisted
         .appearance_theme
         .as_deref()
@@ -258,6 +259,7 @@ pub(crate) fn to_persisted_app_state(state: &AppState) -> PersistedAppState {
             .collect(),
         sidebar_width: state.sidebar_width,
         terminal_pane_width: state.terminal_pane_width,
+        global_zoom_percent: Some(state.global_zoom_percent),
         appearance_theme: Some(state.appearance_theme.as_str().to_owned()),
         appearance_ui_font: Some(state.appearance_fonts.ui_font.clone()),
         appearance_chat_font: Some(state.appearance_fonts.chat_font.clone()),

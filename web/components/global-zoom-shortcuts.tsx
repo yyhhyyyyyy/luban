@@ -6,11 +6,11 @@ import { isTauri } from "@tauri-apps/api/core"
 
 import {
   applyGlobalZoom,
+  clampGlobalZoom,
   DEFAULT_GLOBAL_ZOOM,
-  loadGlobalZoom,
-  saveGlobalZoom,
   stepGlobalZoom,
 } from "@/lib/global-zoom"
+import { useLuban } from "@/lib/luban-context"
 
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false
@@ -20,14 +20,16 @@ function isEditableTarget(target: EventTarget | null): boolean {
 }
 
 export function GlobalZoomShortcuts() {
+  const { app, setGlobalZoom } = useLuban()
   const [zoom, setZoom] = useState<number>(DEFAULT_GLOBAL_ZOOM)
 
   useLayoutEffect(() => {
     if (!isTauri()) return
-    const initial = loadGlobalZoom()
+    if (!app) return
+    const initial = clampGlobalZoom(app.appearance.global_zoom)
     setZoom(initial)
     applyGlobalZoom(initial)
-  }, [])
+  }, [app])
 
   useLayoutEffect(() => {
     if (!isTauri()) return
@@ -49,8 +51,8 @@ export function GlobalZoomShortcuts() {
 
       setZoom((current) => {
         const next = reset ? DEFAULT_GLOBAL_ZOOM : stepGlobalZoom(current, plus ? 1 : -1)
-        saveGlobalZoom(next)
         applyGlobalZoom(next)
+        setGlobalZoom(next)
         return next
       })
 

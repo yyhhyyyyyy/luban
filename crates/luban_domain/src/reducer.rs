@@ -30,6 +30,7 @@ impl AppState {
             right_pane: RightPane::None,
             sidebar_width: None,
             terminal_pane_width: None,
+            global_zoom_percent: 100,
             appearance_theme: crate::AppearanceTheme::default(),
             appearance_fonts: crate::AppearanceFonts::default(),
             agent_default_model_id: default_agent_model_id().to_owned(),
@@ -1150,6 +1151,15 @@ impl AppState {
             }
             Action::TerminalPaneWidthChanged { width } => {
                 self.terminal_pane_width = Some(width);
+                vec![Effect::SaveAppState]
+            }
+            Action::AppearanceGlobalZoomChanged { zoom } => {
+                let clamped = zoom.clamp(0.7, 1.6);
+                let percent = (clamped * 100.0).round() as u16;
+                if self.global_zoom_percent == percent {
+                    return Vec::new();
+                }
+                self.global_zoom_percent = percent;
                 vec![Effect::SaveAppState]
             }
             Action::SidebarWidthChanged { width } => {
@@ -2304,6 +2314,7 @@ mod tests {
                 projects: Vec::new(),
                 sidebar_width: None,
                 terminal_pane_width: Some(480),
+                global_zoom_percent: None,
                 appearance_theme: None,
                 appearance_ui_font: None,
                 appearance_chat_font: None,
@@ -2327,6 +2338,46 @@ mod tests {
     }
 
     #[test]
+    fn global_zoom_is_persisted() {
+        let mut state = AppState::new();
+        let effects = state.apply(Action::AppearanceGlobalZoomChanged { zoom: 1.2 });
+        assert_eq!(state.global_zoom_percent, 120);
+        assert_eq!(effects.len(), 1);
+        assert!(matches!(effects[0], Effect::SaveAppState));
+
+        let persisted = state.to_persisted();
+        assert_eq!(persisted.global_zoom_percent, Some(120));
+
+        let mut restored = AppState::new();
+        restored.apply(Action::AppStateLoaded {
+            persisted: Box::new(PersistedAppState {
+                projects: Vec::new(),
+                sidebar_width: None,
+                terminal_pane_width: None,
+                global_zoom_percent: Some(135),
+                appearance_theme: None,
+                appearance_ui_font: None,
+                appearance_chat_font: None,
+                appearance_code_font: None,
+                appearance_terminal_font: None,
+                agent_default_model_id: None,
+                agent_default_thinking_effort: None,
+                agent_codex_enabled: Some(true),
+                last_open_workspace_id: None,
+                workspace_active_thread_id: HashMap::new(),
+                workspace_open_tabs: HashMap::new(),
+                workspace_archived_tabs: HashMap::new(),
+                workspace_next_thread_id: HashMap::new(),
+                workspace_chat_scroll_y10: HashMap::new(),
+                workspace_chat_scroll_anchor: HashMap::new(),
+                workspace_unread_completions: HashMap::new(),
+                task_prompt_templates: HashMap::new(),
+            }),
+        });
+        assert_eq!(restored.global_zoom_percent, 135);
+    }
+
+    #[test]
     fn sidebar_width_is_persisted() {
         let mut state = AppState::new();
         let effects = state.apply(Action::SidebarWidthChanged { width: 280 });
@@ -2343,6 +2394,7 @@ mod tests {
                 projects: Vec::new(),
                 sidebar_width: Some(360),
                 terminal_pane_width: None,
+                global_zoom_percent: None,
                 appearance_theme: None,
                 appearance_ui_font: None,
                 appearance_chat_font: None,
@@ -2384,6 +2436,7 @@ mod tests {
                 projects: Vec::new(),
                 sidebar_width: None,
                 terminal_pane_width: None,
+                global_zoom_percent: None,
                 appearance_theme: Some("light".to_owned()),
                 appearance_ui_font: None,
                 appearance_chat_font: None,

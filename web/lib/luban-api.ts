@@ -16,6 +16,7 @@ export type AppearanceFontsSnapshot = {
 export type AppearanceSnapshot = {
   theme: AppearanceTheme
   fonts: AppearanceFontsSnapshot
+  global_zoom: number
 }
 
 export type AgentSettingsSnapshot = {
@@ -354,6 +355,7 @@ export type ClientAction =
     }
   | { type: "appearance_theme_changed"; theme: AppearanceTheme }
   | { type: "appearance_fonts_changed"; fonts: AppearanceFontsSnapshot }
+  | { type: "appearance_global_zoom_changed"; zoom: number }
   | { type: "codex_enabled_changed"; enabled: boolean }
   | { type: "task_prompt_template_changed"; intent_kind: TaskIntentKind; template: string }
   | { type: "system_prompt_template_changed"; kind: SystemTaskKind; template: string }
