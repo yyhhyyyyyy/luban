@@ -107,8 +107,19 @@ export function ConversationMessage({
         <div className="flex justify-end">
           <div
             data-testid="user-message-bubble"
-            className="max-w-[85%] border border-border rounded-lg px-3 py-2.5 bg-muted/30 luban-font-chat"
+            className="relative max-w-[85%] border border-border rounded-lg px-3 pr-9 py-2.5 bg-muted/30 luban-font-chat"
           >
+            {message.content && message.content.trim().length > 0 && (
+              <button
+                type="button"
+                data-testid="user-message-copy"
+                className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition-opacity hover:text-foreground p-1 -m-1 text-muted-foreground/70"
+                onClick={() => void copyToClipboard(message.content)}
+                aria-label="Copy message"
+              >
+                <Copy className="w-3 h-3" />
+              </button>
+            )}
             {message.attachments && message.attachments.length > 0 && (
               <div className="mb-2 flex flex-wrap gap-2">
                 {message.attachments.map((attachment) => {

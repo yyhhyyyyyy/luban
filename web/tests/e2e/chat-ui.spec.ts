@@ -82,6 +82,27 @@ test("pressing enter submits a user message", async ({ page }) => {
   await expect(page.getByTestId("chat-input")).toHaveValue("")
 })
 
+test("user messages can be copied", async ({ page }) => {
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"])
+  await ensureWorkspace(page)
+
+  const runId = Math.random().toString(16).slice(2)
+  const marker = `e2e-copy-${runId}`
+
+  await page.getByTestId("chat-input").fill(marker)
+  await page.getByTestId("chat-input").press("Enter")
+
+  const bubble = page.getByTestId("user-message-bubble").filter({ hasText: marker }).first()
+  await expect(bubble).toBeVisible({ timeout: 20_000 })
+
+  await bubble.hover()
+  await bubble.getByTestId("user-message-copy").click()
+
+  await expect
+    .poll(async () => await page.evaluate(() => navigator.clipboard.readText()), { timeout: 5_000 })
+    .toBe(marker)
+})
+
 test("chat input scrolls when content exceeds max height", async ({ page }) => {
   await ensureWorkspace(page)
 
