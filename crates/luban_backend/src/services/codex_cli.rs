@@ -1,6 +1,7 @@
 use anyhow::{Context as _, anyhow};
 use luban_domain::CodexThreadEvent;
 use std::{
+    ffi::OsString,
     io::{BufRead as _, BufReader, Read as _, Write as _},
     path::{Path, PathBuf},
     process::Command,
@@ -11,6 +12,59 @@ use std::{
 
 fn should_skip_git_repo_check(worktree_path: &Path) -> bool {
     !worktree_path.join(".git").exists()
+}
+
+fn build_codex_exec_args(
+    sandbox_mode: &str,
+    worktree_path: &Path,
+    thread_id: Option<&str>,
+    image_paths: &[PathBuf],
+    model: Option<&str>,
+    model_reasoning_effort: Option<&str>,
+    skip_git_repo_check: bool,
+) -> Vec<OsString> {
+    let mut args: Vec<OsString> = vec![
+        "--sandbox".into(),
+        sandbox_mode.into(),
+        "--ask-for-approval".into(),
+        "never".into(),
+        "--search".into(),
+        "exec".into(),
+    ];
+
+    if skip_git_repo_check {
+        args.push("--skip-git-repo-check".into());
+    }
+
+    args.push("--json".into());
+    args.push("-C".into());
+    args.push(worktree_path.as_os_str().to_owned());
+
+    if !image_paths.is_empty() {
+        args.push("--image".into());
+        for path in image_paths {
+            args.push(path.as_os_str().to_owned());
+        }
+    }
+
+    if let Some(model) = model {
+        args.push("--model".into());
+        args.push(model.into());
+    }
+    if let Some(effort) = model_reasoning_effort {
+        args.push("-c".into());
+        args.push(format!("model_reasoning_effort=\"{effort}\"").into());
+    }
+
+    if let Some(thread_id) = thread_id {
+        args.push("resume".into());
+        args.push(thread_id.into());
+        args.push("-".into());
+    } else {
+        args.push("-".into());
+    }
+
+    args
 }
 
 pub(super) struct CodexTurnParams {
@@ -89,44 +143,15 @@ pub(super) fn run_codex_turn_streamed_via_cli(
     let sandbox_mode = sandbox_mode.as_deref().unwrap_or("danger-full-access");
 
     let mut command = Command::new(codex);
-    command
-        .arg("--sandbox")
-        .arg(sandbox_mode)
-        .arg("--ask-for-approval")
-        .arg("never")
-        .arg("--search");
-
-    if should_skip_git_repo_check(&worktree_path) {
-        command.arg("--skip-git-repo-check");
-    }
-
-    command
-        .arg("exec")
-        .arg("--json")
-        .arg("-C")
-        .arg(&worktree_path);
-
-    if !image_paths.is_empty() {
-        command.arg("--image");
-        for path in &image_paths {
-            command.arg(path);
-        }
-    }
-
-    if let Some(model) = model {
-        command.arg("--model").arg(model);
-    }
-    if let Some(effort) = model_reasoning_effort {
-        command
-            .arg("-c")
-            .arg(format!("model_reasoning_effort=\"{effort}\""));
-    }
-
-    if let Some(thread_id) = thread_id {
-        command.arg("resume").arg(thread_id).arg("-");
-    } else {
-        command.arg("-");
-    }
+    command.args(build_codex_exec_args(
+        sandbox_mode,
+        &worktree_path,
+        thread_id.as_deref(),
+        &image_paths,
+        model.as_deref(),
+        model_reasoning_effort.as_deref(),
+        should_skip_git_repo_check(&worktree_path),
+    ));
 
     let mut child = command
         .stdin(std::process::Stdio::piped())
@@ -258,6 +283,34 @@ pub(super) fn run_codex_turn_streamed_via_cli(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn skip_git_repo_check_flag_is_after_exec() {
+        let args = build_codex_exec_args(
+            "danger-full-access",
+            Path::new("/tmp/non-git"),
+            None,
+            &[],
+            None,
+            None,
+            true,
+        );
+        let args = args
+            .iter()
+            .map(|v| v.to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+        let exec_pos = args.iter().position(|v| v == "exec").expect("missing exec");
+        let skip_pos = args
+            .iter()
+            .position(|v| v == "--skip-git-repo-check")
+            .expect("missing skip flag");
+        let json_pos = args
+            .iter()
+            .position(|v| v == "--json")
+            .expect("missing --json");
+        assert!(exec_pos < skip_pos);
+        assert!(skip_pos < json_pos);
+    }
 
     fn temp_dir(prefix: &str) -> std::path::PathBuf {
         let nanos = std::time::SystemTime::now()

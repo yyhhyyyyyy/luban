@@ -8,9 +8,9 @@ use crate::{
     DraftAttachment, Effect, MainPane, OperationStatus, PersistedAppState, Project, ProjectId,
     QueuedPrompt, RightPane, ThinkingEffort, Workspace, WorkspaceConversation, WorkspaceId,
     WorkspaceStatus, WorkspaceTabs, WorkspaceThreadId, default_agent_model_id,
-    default_system_prompt_template,
-    default_system_prompt_templates, default_task_prompt_template, default_task_prompt_templates,
-    default_thinking_effort, normalize_thinking_effort, thinking_effort_supported,
+    default_system_prompt_template, default_system_prompt_templates, default_task_prompt_template,
+    default_task_prompt_templates, default_thinking_effort, normalize_thinking_effort,
+    thinking_effort_supported,
 };
 use std::collections::VecDeque;
 use std::{
