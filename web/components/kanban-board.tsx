@@ -47,12 +47,12 @@ function WorktreeCard({
       onClick={onClick}
       className={cn(
         "group p-3 rounded-lg border border-border cursor-pointer transition-all",
-        isSelected ? "shadow-lg shadow-primary/20 bg-accent/50 border-primary/50" : "hover:bg-accent/50",
+        isSelected ? "shadow-lg shadow-primary/20 bg-accent/50 border-primary/50" : "hover:bg-accent/30",
       )}
     >
-      <div className="flex items-center gap-1.5 mb-1.5">
-        <FolderGit2 className="w-3 h-3 text-muted-foreground" />
-        <span className="text-[10px] text-muted-foreground">{worktree.projectName}</span>
+      <div className="flex items-center gap-1.5 mb-2 text-muted-foreground">
+        <FolderGit2 className="w-3 h-3" />
+        <span className="text-xs">{worktree.projectName}</span>
       </div>
 
       <div className="flex items-center gap-2 mb-2">
@@ -61,7 +61,7 @@ function WorktreeCard({
       </div>
 
       <div className="flex items-center justify-between">
-        <span className="text-[10px] text-muted-foreground/50 font-mono">{worktree.id}</span>
+        <span className="text-xs text-muted-foreground/50 font-mono">{worktree.id}</span>
         <PRBadge
           status={worktree.prStatus}
           prNumber={worktree.prNumber}
@@ -268,7 +268,7 @@ function WorktreePreviewPanel({
             className="flex items-center gap-1.5 px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted rounded transition-colors"
             title="Go to workspace"
           >
-            <ArrowRight className="w-3.5 h-3.5" />
+            <ArrowRight className="w-4 h-4" />
             Open
           </button>
           <button
@@ -391,7 +391,7 @@ export function KanbanBoard({ onViewModeChange }: KanbanBoardProps) {
   }
 
   return (
-    <div className="flex-1 flex bg-background overflow-hidden">
+    <div data-testid="kanban-board" className="flex-1 flex bg-background overflow-hidden">
       <div className="flex-1 flex flex-col overflow-hidden">
         <div className="h-11 px-4 border-b border-border flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -403,16 +403,21 @@ export function KanbanBoard({ onViewModeChange }: KanbanBoardProps) {
               <span className="text-sm font-medium">Kanban</span>
               <ChevronDown className="w-3 h-3 text-muted-foreground" />
             </button>
-            <span className="text-xs text-muted-foreground">{allWorktrees.length} active worktrees</span>
+            <span data-testid="kanban-active-count" className="text-xs text-muted-foreground">
+              {allWorktrees.length} active worktrees
+            </span>
           </div>
         </div>
 
         <div className="flex-1 flex gap-4 p-4 overflow-x-auto">
           {kanbanColumns.map((column) => (
-            <div key={column.id} className="flex-shrink-0 w-72 flex flex-col">
+            <div key={column.id} data-testid={`kanban-column-${column.id}`} className="flex-shrink-0 w-72 flex flex-col">
               <div className="flex items-center gap-2 mb-3 px-1">
                 <span className={cn("text-sm font-medium", column.color)}>{column.label}</span>
-                <span className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                <span
+                  data-testid={`kanban-column-count-${column.id}`}
+                  className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded"
+                >
                   {worktreesByColumn[column.id]?.length ?? 0}
                 </span>
               </div>
