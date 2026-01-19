@@ -195,21 +195,25 @@ pub enum Action {
     AgentEventReceived {
         workspace_id: WorkspaceId,
         thread_id: WorkspaceThreadId,
+        run_id: u64,
         event: CodexThreadEvent,
     },
     AgentRunStartedAt {
         workspace_id: WorkspaceId,
         thread_id: WorkspaceThreadId,
+        run_id: u64,
         started_at_unix_ms: u64,
     },
     AgentRunFinishedAt {
         workspace_id: WorkspaceId,
         thread_id: WorkspaceThreadId,
+        run_id: u64,
         finished_at_unix_ms: u64,
     },
     AgentTurnFinished {
         workspace_id: WorkspaceId,
         thread_id: WorkspaceThreadId,
+        run_id: u64,
     },
     CancelAgentTurn {
         workspace_id: WorkspaceId,

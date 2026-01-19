@@ -293,6 +293,8 @@ pub struct WorkspaceConversation {
     pub entries_total: u64,
     pub entries_start: u64,
     pub codex_item_ids: HashSet<String>,
+    pub active_run_id: Option<u64>,
+    pub next_run_id: u64,
     pub run_status: OperationStatus,
     pub run_started_at_unix_ms: Option<u64>,
     pub run_finished_at_unix_ms: Option<u64>,

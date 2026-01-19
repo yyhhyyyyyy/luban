@@ -4,10 +4,11 @@ use crate::state::{
     flush_in_progress_items,
 };
 use crate::{
-    Action, AgentRunConfig, AppState, CodexThreadEvent, ConversationEntry, DraftAttachment, Effect,
-    MainPane, OperationStatus, PersistedAppState, Project, ProjectId, QueuedPrompt, RightPane,
-    ThinkingEffort, Workspace, WorkspaceConversation, WorkspaceId, WorkspaceStatus, WorkspaceTabs,
-    WorkspaceThreadId, default_agent_model_id, default_system_prompt_template,
+    Action, AgentRunConfig, AppState, AttachmentRef, CodexThreadEvent, ConversationEntry,
+    DraftAttachment, Effect, MainPane, OperationStatus, PersistedAppState, Project, ProjectId,
+    QueuedPrompt, RightPane, ThinkingEffort, Workspace, WorkspaceConversation, WorkspaceId,
+    WorkspaceStatus, WorkspaceTabs, WorkspaceThreadId, default_agent_model_id,
+    default_system_prompt_template,
     default_system_prompt_templates, default_task_prompt_template, default_task_prompt_templates,
     default_thinking_effort, normalize_thinking_effort, thinking_effort_supported,
 };
@@ -584,46 +585,26 @@ impl AppState {
                 }
 
                 if conversation.queue_paused && !conversation.pending_prompts.is_empty() {
-                    conversation.push_entry(ConversationEntry::UserMessage {
-                        text: text.clone(),
-                        attachments: attachments.clone(),
-                    });
-                    conversation.run_status = OperationStatus::Running;
-                    conversation.run_started_at_unix_ms = None;
-                    conversation.run_finished_at_unix_ms = None;
-                    conversation.current_run_config = Some(run_config.clone());
-                    conversation.in_progress_items.clear();
-                    conversation.in_progress_order.clear();
-                    let effects = vec![Effect::RunAgentTurn {
+                    return vec![start_agent_run(
+                        conversation,
                         workspace_id,
                         thread_id,
                         text,
                         attachments,
                         run_config,
-                    }];
-                    return effects;
+                    )];
                 }
 
                 if conversation.pending_prompts.is_empty() {
                     conversation.queue_paused = false;
-                    conversation.push_entry(ConversationEntry::UserMessage {
-                        text: text.clone(),
-                        attachments: attachments.clone(),
-                    });
-                    conversation.run_status = OperationStatus::Running;
-                    conversation.run_started_at_unix_ms = None;
-                    conversation.run_finished_at_unix_ms = None;
-                    conversation.current_run_config = Some(run_config.clone());
-                    conversation.in_progress_items.clear();
-                    conversation.in_progress_order.clear();
-                    let effects = vec![Effect::RunAgentTurn {
+                    return vec![start_agent_run(
+                        conversation,
                         workspace_id,
                         thread_id,
                         text,
                         attachments,
                         run_config,
-                    }];
-                    return effects;
+                    )];
                 }
 
                 let id = conversation.next_queued_prompt_id;
@@ -876,12 +857,16 @@ impl AppState {
             Action::AgentRunStartedAt {
                 workspace_id,
                 thread_id,
+                run_id,
                 started_at_unix_ms,
             } => {
                 let Some(conversation) = self.conversations.get_mut(&(workspace_id, thread_id))
                 else {
                     return Vec::new();
                 };
+                if conversation.active_run_id != Some(run_id) {
+                    return Vec::new();
+                }
                 conversation.run_started_at_unix_ms = Some(started_at_unix_ms);
                 conversation.run_finished_at_unix_ms = None;
                 Vec::new()
@@ -889,29 +874,39 @@ impl AppState {
             Action::AgentRunFinishedAt {
                 workspace_id,
                 thread_id,
+                run_id,
                 finished_at_unix_ms,
             } => {
                 let Some(conversation) = self.conversations.get_mut(&(workspace_id, thread_id))
                 else {
                     return Vec::new();
                 };
+                if conversation.active_run_id != Some(run_id) {
+                    return Vec::new();
+                }
                 conversation.run_finished_at_unix_ms = Some(finished_at_unix_ms);
                 Vec::new()
             }
             Action::AgentEventReceived {
                 workspace_id,
                 thread_id,
+                run_id,
                 event,
             } => {
                 let conversation = self.ensure_conversation_mut(workspace_id, thread_id);
 
                 match event {
                     CodexThreadEvent::ThreadStarted { thread_id } => {
-                        conversation.thread_id = Some(thread_id);
+                        if conversation.thread_id.is_none() {
+                            conversation.thread_id = Some(thread_id);
+                        }
                         Vec::new()
                     }
                     CodexThreadEvent::TurnStarted => Vec::new(),
                     CodexThreadEvent::TurnCompleted { usage } => {
+                        if conversation.active_run_id != Some(run_id) {
+                            return Vec::new();
+                        }
                         let _ = usage;
                         conversation.run_status = OperationStatus::Idle;
                         conversation.current_run_config = None;
@@ -923,10 +918,16 @@ impl AppState {
                             .collect()
                     }
                     CodexThreadEvent::TurnDuration { duration_ms } => {
+                        if conversation.active_run_id != Some(run_id) {
+                            return Vec::new();
+                        }
                         conversation.push_entry(ConversationEntry::TurnDuration { duration_ms });
                         Vec::new()
                     }
                     CodexThreadEvent::TurnFailed { error } => {
+                        if conversation.active_run_id != Some(run_id) {
+                            return Vec::new();
+                        }
                         flush_in_progress_items(conversation);
                         conversation.push_entry(ConversationEntry::TurnError {
                             message: error.message.clone(),
@@ -941,6 +942,9 @@ impl AppState {
                     }
                     CodexThreadEvent::ItemStarted { item }
                     | CodexThreadEvent::ItemUpdated { item } => {
+                        if conversation.active_run_id != Some(run_id) {
+                            return Vec::new();
+                        }
                         let id = codex_item_id(&item).to_owned();
                         conversation.in_progress_items.insert(id.clone(), item);
                         if !conversation.in_progress_order.iter().any(|v| v == &id) {
@@ -949,6 +953,9 @@ impl AppState {
                         Vec::new()
                     }
                     CodexThreadEvent::ItemCompleted { item } => {
+                        if conversation.active_run_id != Some(run_id) {
+                            return Vec::new();
+                        }
                         let id = codex_item_id(&item);
                         conversation.in_progress_items.remove(id);
                         if let Some(pos) =
@@ -960,6 +967,9 @@ impl AppState {
                         Vec::new()
                     }
                     CodexThreadEvent::Error { message } => {
+                        if conversation.active_run_id != Some(run_id) {
+                            return Vec::new();
+                        }
                         flush_in_progress_items(conversation);
                         conversation.push_entry(ConversationEntry::TurnError {
                             message: message.clone(),
@@ -977,19 +987,24 @@ impl AppState {
             Action::AgentTurnFinished {
                 workspace_id,
                 thread_id,
+                run_id,
             } => {
                 let is_visible = matches!(self.main_pane, MainPane::Workspace(id) if id == workspace_id)
                     || self.dashboard_preview_workspace_id == Some(workspace_id);
                 let mut effects = Vec::new();
 
-                if let Some(conversation) = self.conversations.get_mut(&(workspace_id, thread_id))
-                    && conversation.run_status == OperationStatus::Running
-                {
-                    conversation.run_status = OperationStatus::Idle;
-                    conversation.current_run_config = None;
-                    flush_in_progress_items(conversation);
-                    conversation.in_progress_items.clear();
-                    conversation.in_progress_order.clear();
+                if let Some(conversation) = self.conversations.get_mut(&(workspace_id, thread_id)) {
+                    if conversation.active_run_id != Some(run_id) {
+                        return Vec::new();
+                    }
+                    conversation.active_run_id = None;
+                    if conversation.run_status == OperationStatus::Running {
+                        conversation.run_status = OperationStatus::Idle;
+                        conversation.current_run_config = None;
+                        flush_in_progress_items(conversation);
+                        conversation.in_progress_items.clear();
+                        conversation.in_progress_order.clear();
+                    }
                 }
 
                 if !is_visible && self.workspace(workspace_id).is_some() {
@@ -1012,8 +1027,12 @@ impl AppState {
                 if conversation.run_status != OperationStatus::Running {
                     return Vec::new();
                 }
+                let Some(run_id) = conversation.active_run_id else {
+                    return Vec::new();
+                };
                 conversation.run_status = OperationStatus::Idle;
                 conversation.current_run_config = None;
+                conversation.active_run_id = None;
                 flush_in_progress_items(conversation);
                 conversation.in_progress_items.clear();
                 conversation.in_progress_order.clear();
@@ -1022,6 +1041,7 @@ impl AppState {
                 vec![Effect::CancelAgentTurn {
                     workspace_id,
                     thread_id,
+                    run_id,
                 }]
             }
             Action::CreateWorkspaceThread { workspace_id } => {
@@ -1521,6 +1541,8 @@ impl AppState {
             entries_total: 0,
             entries_start: 0,
             codex_item_ids: HashSet::new(),
+            active_run_id: None,
+            next_run_id: 1,
             run_status: OperationStatus::Idle,
             run_started_at_unix_ms: None,
             run_finished_at_unix_ms: None,
@@ -1805,24 +1827,47 @@ fn start_next_queued_prompt(
     }
 
     let queued = conversation.pending_prompts.pop_front()?;
+    Some(start_agent_run(
+        conversation,
+        workspace_id,
+        thread_id,
+        queued.text,
+        queued.attachments,
+        queued.run_config,
+    ))
+}
+
+fn start_agent_run(
+    conversation: &mut WorkspaceConversation,
+    workspace_id: WorkspaceId,
+    thread_id: WorkspaceThreadId,
+    text: String,
+    attachments: Vec<AttachmentRef>,
+    run_config: AgentRunConfig,
+) -> Effect {
+    let run_id = conversation.next_run_id;
+    conversation.next_run_id = conversation.next_run_id.saturating_add(1);
+    conversation.active_run_id = Some(run_id);
 
     conversation.push_entry(ConversationEntry::UserMessage {
-        text: queued.text.clone(),
-        attachments: queued.attachments.clone(),
+        text: text.clone(),
+        attachments: attachments.clone(),
     });
     conversation.run_status = OperationStatus::Running;
     conversation.run_started_at_unix_ms = None;
     conversation.run_finished_at_unix_ms = None;
-    conversation.current_run_config = Some(queued.run_config.clone());
+    conversation.current_run_config = Some(run_config.clone());
     conversation.in_progress_items.clear();
     conversation.in_progress_order.clear();
-    Some(Effect::RunAgentTurn {
+
+    Effect::RunAgentTurn {
         workspace_id,
         thread_id,
-        text: queued.text,
-        attachments: queued.attachments,
-        run_config: queued.run_config,
-    })
+        run_id,
+        text,
+        attachments,
+        run_config,
+    }
 }
 
 #[cfg(test)]
@@ -2126,10 +2171,12 @@ mod tests {
             .expect("missing conversation");
         assert_eq!(conversation.run_status, OperationStatus::Running);
         assert_eq!(conversation.pending_prompts.len(), 1);
+        let run_id = conversation.active_run_id.expect("missing active run id");
 
         let effects = state.apply(Action::AgentEventReceived {
             workspace_id,
             thread_id,
+            run_id,
             event: CodexThreadEvent::TurnCompleted {
                 usage: CodexUsage {
                     input_tokens: 0,
@@ -2787,9 +2834,15 @@ mod tests {
             text: "Test".to_owned(),
             attachments: Vec::new(),
         });
+        let run_id = state
+            .workspace_thread_conversation(workspace_id, thread_id)
+            .expect("missing conversation")
+            .active_run_id
+            .expect("missing active run id");
         state.apply(Action::AgentEventReceived {
             workspace_id,
             thread_id,
+            run_id,
             event: CodexThreadEvent::ItemStarted {
                 item: CodexThreadItem::Reasoning {
                     id: "r-1".to_owned(),
@@ -2800,6 +2853,7 @@ mod tests {
         state.apply(Action::AgentEventReceived {
             workspace_id,
             thread_id,
+            run_id,
             event: CodexThreadEvent::ItemStarted {
                 item: CodexThreadItem::CommandExecution {
                     id: "c-1".to_owned(),
@@ -2826,6 +2880,7 @@ mod tests {
         state.apply(Action::AgentEventReceived {
             workspace_id,
             thread_id,
+            run_id,
             event: CodexThreadEvent::ItemCompleted {
                 item: CodexThreadItem::Reasoning {
                     id: "r-1".to_owned(),
@@ -3204,6 +3259,11 @@ mod tests {
             text: "Hello".to_owned(),
             attachments: Vec::new(),
         });
+        let run_id = state
+            .workspace_thread_conversation(workspace_id, thread_id)
+            .expect("missing conversation")
+            .active_run_id
+            .expect("missing active run id");
 
         let item = CodexThreadItem::AgentMessage {
             id: "item_0".to_owned(),
@@ -3212,6 +3272,7 @@ mod tests {
         state.apply(Action::AgentEventReceived {
             workspace_id,
             thread_id,
+            run_id,
             event: CodexThreadEvent::ItemStarted { item },
         });
 
@@ -3272,6 +3333,11 @@ mod tests {
         state.apply(Action::AgentEventReceived {
             workspace_id,
             thread_id,
+            run_id: state
+                .workspace_thread_conversation(workspace_id, thread_id)
+                .expect("missing conversation")
+                .active_run_id
+                .expect("missing active run id"),
             event: CodexThreadEvent::TurnDuration { duration_ms: 1234 },
         });
 
@@ -3402,11 +3468,24 @@ mod tests {
         let workspace_id = first_non_main_workspace_id(&state);
         let thread_id = default_thread_id();
 
+        state.apply(Action::SendAgentMessage {
+            workspace_id,
+            thread_id,
+            text: "Hello".to_owned(),
+            attachments: Vec::new(),
+        });
+        let run_id = state
+            .workspace_thread_conversation(workspace_id, thread_id)
+            .expect("missing conversation")
+            .active_run_id
+            .expect("missing active run id");
+
         let total = crate::state::MAX_CONVERSATION_ENTRIES_IN_MEMORY + 100;
         for idx in 0..total {
             state.apply(Action::AgentEventReceived {
                 workspace_id,
                 thread_id,
+                run_id,
                 event: CodexThreadEvent::TurnDuration {
                     duration_ms: idx as u64,
                 },
@@ -3418,8 +3497,8 @@ mod tests {
             conversation.entries.len(),
             crate::state::MAX_CONVERSATION_ENTRIES_IN_MEMORY
         );
-        assert_eq!(conversation.entries_start, 100);
-        assert_eq!(conversation.entries_total, total as u64);
+        assert_eq!(conversation.entries_start, 101);
+        assert_eq!(conversation.entries_total, (total + 1) as u64);
     }
 
     #[test]
@@ -3471,6 +3550,11 @@ mod tests {
             text: "Hello".to_owned(),
             attachments: Vec::new(),
         });
+        let run_id = state
+            .workspace_thread_conversation(workspace_id, thread_id)
+            .expect("missing conversation")
+            .active_run_id
+            .expect("missing active run id");
 
         let item = CodexThreadItem::AgentMessage {
             id: "item_0".to_owned(),
@@ -3480,11 +3564,13 @@ mod tests {
         state.apply(Action::AgentEventReceived {
             workspace_id,
             thread_id,
+            run_id,
             event: CodexThreadEvent::ItemCompleted { item: item.clone() },
         });
         state.apply(Action::AgentEventReceived {
             workspace_id,
             thread_id,
+            run_id,
             event: CodexThreadEvent::ItemCompleted { item },
         });
 
@@ -3509,6 +3595,11 @@ mod tests {
             text: "Hello".to_owned(),
             attachments: Vec::new(),
         });
+        let run_id = state
+            .workspace_thread_conversation(workspace_id, thread_id)
+            .expect("missing conversation")
+            .active_run_id
+            .expect("missing active run id");
 
         let item = CodexThreadItem::AgentMessage {
             id: "item_0".to_owned(),
@@ -3518,16 +3609,19 @@ mod tests {
         state.apply(Action::AgentEventReceived {
             workspace_id,
             thread_id,
+            run_id,
             event: CodexThreadEvent::ItemCompleted { item: item.clone() },
         });
         state.apply(Action::AgentEventReceived {
             workspace_id,
             thread_id,
+            run_id,
             event: CodexThreadEvent::TurnDuration { duration_ms: 1000 },
         });
         state.apply(Action::AgentEventReceived {
             workspace_id,
             thread_id,
+            run_id,
             event: CodexThreadEvent::ItemCompleted { item },
         });
 
@@ -3681,9 +3775,15 @@ mod tests {
             attachments: Vec::new(),
         });
 
+        let run_id = state
+            .workspace_thread_conversation(workspace_id, thread_id)
+            .expect("missing conversation")
+            .active_run_id
+            .expect("missing active run id");
         let effects = state.apply(Action::AgentEventReceived {
             workspace_id,
             thread_id,
+            run_id,
             event: CodexThreadEvent::TurnCompleted {
                 usage: CodexUsage {
                     input_tokens: 0,
@@ -3740,9 +3840,15 @@ mod tests {
             attachments: Vec::new(),
         });
 
+        let run_id = state
+            .workspace_thread_conversation(workspace_id, thread_id)
+            .expect("missing conversation")
+            .active_run_id
+            .expect("missing active run id");
         let effects = state.apply(Action::AgentEventReceived {
             workspace_id,
             thread_id,
+            run_id,
             event: CodexThreadEvent::TurnFailed {
                 error: CodexThreadError {
                     message: "boom".to_owned(),
@@ -3775,6 +3881,75 @@ mod tests {
                 && run_config.model_id == default_agent_model_id()
                 && run_config.thinking_effort == default_thinking_effort()
         ));
+    }
+
+    #[test]
+    fn stale_agent_events_are_ignored_after_new_run_starts() {
+        let mut state = AppState::demo();
+        let workspace_id = first_non_main_workspace_id(&state);
+        let thread_id = default_thread_id();
+
+        state.apply(Action::SendAgentMessage {
+            workspace_id,
+            thread_id,
+            text: "First".to_owned(),
+            attachments: Vec::new(),
+        });
+        let run_id_a = state
+            .workspace_thread_conversation(workspace_id, thread_id)
+            .expect("missing conversation")
+            .active_run_id
+            .expect("missing active run id");
+
+        state.apply(Action::CancelAgentTurn {
+            workspace_id,
+            thread_id,
+        });
+
+        state.apply(Action::SendAgentMessage {
+            workspace_id,
+            thread_id,
+            text: "Second".to_owned(),
+            attachments: Vec::new(),
+        });
+        let run_id_b = state
+            .workspace_thread_conversation(workspace_id, thread_id)
+            .expect("missing conversation")
+            .active_run_id
+            .expect("missing active run id");
+        assert_ne!(run_id_a, run_id_b);
+
+        let effects = state.apply(Action::AgentEventReceived {
+            workspace_id,
+            thread_id,
+            run_id: run_id_a,
+            event: CodexThreadEvent::TurnCompleted {
+                usage: CodexUsage {
+                    input_tokens: 0,
+                    cached_input_tokens: 0,
+                    output_tokens: 0,
+                },
+            },
+        });
+        assert!(effects.is_empty());
+
+        state.apply(Action::AgentRunFinishedAt {
+            workspace_id,
+            thread_id,
+            run_id: run_id_a,
+            finished_at_unix_ms: 123,
+        });
+
+        let conversation = state.workspace_conversation(workspace_id).unwrap();
+        assert_eq!(conversation.run_status, OperationStatus::Running);
+        assert_eq!(conversation.active_run_id, Some(run_id_b));
+        assert_eq!(conversation.run_finished_at_unix_ms, None);
+        assert!(
+            conversation
+                .entries
+                .iter()
+                .all(|entry| !matches!(entry, ConversationEntry::TurnError { .. }))
+        );
     }
 
     #[test]

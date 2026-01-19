@@ -173,9 +173,15 @@ pub struct Engine {
     services: Arc<dyn ProjectWorkspaceService>,
     events: broadcast::Sender<WsServerMessage>,
     tx: mpsc::Sender<EngineCommand>,
-    cancel_flags: HashMap<(WorkspaceId, WorkspaceThreadId), Arc<AtomicBool>>,
+    cancel_flags: HashMap<(WorkspaceId, WorkspaceThreadId), CancelFlagEntry>,
     pull_requests: HashMap<WorkspaceId, PullRequestCacheEntry>,
     pull_requests_in_flight: HashSet<WorkspaceId>,
+}
+
+#[derive(Clone)]
+struct CancelFlagEntry {
+    run_id: u64,
+    flag: Arc<AtomicBool>,
 }
 
 impl Engine {
@@ -1738,6 +1744,7 @@ impl Engine {
             Effect::RunAgentTurn {
                 workspace_id,
                 thread_id,
+                run_id,
                 text,
                 attachments,
                 run_config: _,
@@ -1796,8 +1803,13 @@ impl Engine {
                 };
 
                 let cancel = Arc::new(AtomicBool::new(false));
-                self.cancel_flags
-                    .insert((workspace_id, thread_id), cancel.clone());
+                self.cancel_flags.insert(
+                    (workspace_id, thread_id),
+                    CancelFlagEntry {
+                        run_id,
+                        flag: cancel.clone(),
+                    },
+                );
 
                 if use_fake_agent {
                     let tx = self.tx.clone();
@@ -1828,6 +1840,7 @@ impl Engine {
                                     action: Box::new(Action::AgentEventReceived {
                                         workspace_id,
                                         thread_id,
+                                        run_id,
                                         event: luban_domain::CodexThreadEvent::ItemCompleted {
                                             item: luban_domain::CodexThreadItem::CommandExecution {
                                                 id: format!("e2e_many_{i}"),
@@ -1846,6 +1859,7 @@ impl Engine {
                                     action: Box::new(Action::AgentEventReceived {
                                         workspace_id,
                                         thread_id,
+                                        run_id,
                                         event: luban_domain::CodexThreadEvent::TurnFailed {
                                             error: luban_domain::CodexThreadError {
                                                 message: "e2e agent stub".to_owned(),
@@ -1859,6 +1873,7 @@ impl Engine {
                                 action: Box::new(Action::AgentTurnFinished {
                                     workspace_id,
                                     thread_id,
+                                    run_id,
                                 }),
                             });
                             return;
@@ -1880,6 +1895,7 @@ impl Engine {
                                         action: Box::new(Action::AgentEventReceived {
                                             workspace_id,
                                             thread_id,
+                                            run_id,
                                             event: luban_domain::CodexThreadEvent::ItemStarted {
                                                 item: luban_domain::CodexThreadItem::CommandExecution {
                                                     id: "e2e_cmd_1".to_owned(),
@@ -1898,6 +1914,7 @@ impl Engine {
 	                                        action: Box::new(Action::AgentEventReceived {
 	                                            workspace_id,
 	                                            thread_id,
+	                                            run_id,
 	                                            event: luban_domain::CodexThreadEvent::ItemCompleted {
 	                                                item: luban_domain::CodexThreadItem::CommandExecution {
 	                                                    id: "e2e_cmd_1".to_owned(),
@@ -1916,6 +1933,7 @@ impl Engine {
                                         action: Box::new(Action::AgentEventReceived {
                                             workspace_id,
                                             thread_id,
+                                            run_id,
                                             event: luban_domain::CodexThreadEvent::ItemStarted {
                                                 item: luban_domain::CodexThreadItem::CommandExecution {
                                                     id: "e2e_cmd_2".to_owned(),
@@ -1934,6 +1952,7 @@ impl Engine {
                                         action: Box::new(Action::AgentEventReceived {
                                             workspace_id,
                                             thread_id,
+                                            run_id,
                                             event: luban_domain::CodexThreadEvent::ItemCompleted {
                                                 item: luban_domain::CodexThreadItem::CommandExecution {
                                                     id: "e2e_cmd_2".to_owned(),
@@ -1952,6 +1971,7 @@ impl Engine {
                                         action: Box::new(Action::AgentEventReceived {
                                             workspace_id,
                                             thread_id,
+                                            run_id,
                                             event: luban_domain::CodexThreadEvent::ItemStarted {
                                                 item: luban_domain::CodexThreadItem::CommandExecution {
                                                     id: "e2e_cmd_3".to_owned(),
@@ -1975,6 +1995,7 @@ impl Engine {
                                     action: Box::new(Action::AgentEventReceived {
                                         workspace_id,
                                         thread_id,
+                                        run_id,
                                         event: luban_domain::CodexThreadEvent::ItemStarted {
                                             item: luban_domain::CodexThreadItem::Reasoning {
                                                 id: "e2e_reasoning_1".to_owned(),
@@ -1990,6 +2011,7 @@ impl Engine {
                                     action: Box::new(Action::AgentEventReceived {
                                         workspace_id,
                                         thread_id,
+                                        run_id,
                                         event: luban_domain::CodexThreadEvent::ItemCompleted {
                                             item: luban_domain::CodexThreadItem::Reasoning {
                                                 id: "e2e_reasoning_1".to_owned(),
@@ -2007,6 +2029,7 @@ impl Engine {
                                     action: Box::new(Action::AgentEventReceived {
                                         workspace_id,
                                         thread_id,
+                                        run_id,
                                         event: luban_domain::CodexThreadEvent::ItemCompleted {
                                             item: luban_domain::CodexThreadItem::FileChange {
                                                 id: "e2e_file_change_1".to_owned(),
@@ -2035,6 +2058,7 @@ impl Engine {
                                 action: Box::new(Action::AgentEventReceived {
                                     workspace_id,
                                     thread_id,
+                                    run_id,
                                     event: luban_domain::CodexThreadEvent::TurnFailed {
                                         error: luban_domain::CodexThreadError {
                                             message: "e2e agent stub".to_owned(),
@@ -2052,6 +2076,7 @@ impl Engine {
                             action: Box::new(Action::AgentRunFinishedAt {
                                 workspace_id,
                                 thread_id,
+                                run_id,
                                 finished_at_unix_ms: std::time::SystemTime::now()
                                     .duration_since(std::time::UNIX_EPOCH)
                                     .unwrap_or_default()
@@ -2065,6 +2090,7 @@ impl Engine {
                             action: Box::new(Action::AgentTurnFinished {
                                 workspace_id,
                                 thread_id,
+                                run_id,
                             }),
                         });
                     });
@@ -2072,6 +2098,7 @@ impl Engine {
                     return Ok(VecDeque::from([Action::AgentRunStartedAt {
                         workspace_id,
                         thread_id,
+                        run_id,
                         started_at_unix_ms,
                     }]));
                 }
@@ -2086,6 +2113,7 @@ impl Engine {
                                 action: Box::new(Action::AgentEventReceived {
                                     workspace_id,
                                     thread_id,
+                                    run_id,
                                     event,
                                 }),
                             });
@@ -2101,6 +2129,7 @@ impl Engine {
                             action: Box::new(Action::AgentEventReceived {
                                 workspace_id,
                                 thread_id,
+                                run_id,
                                 event: luban_domain::CodexThreadEvent::Error { message },
                             }),
                         });
@@ -2114,6 +2143,7 @@ impl Engine {
                         action: Box::new(Action::AgentRunFinishedAt {
                             workspace_id,
                             thread_id,
+                            run_id,
                             finished_at_unix_ms: std::time::SystemTime::now()
                                 .duration_since(std::time::UNIX_EPOCH)
                                 .unwrap_or_default()
@@ -2127,6 +2157,7 @@ impl Engine {
                         action: Box::new(Action::AgentTurnFinished {
                             workspace_id,
                             thread_id,
+                            run_id,
                         }),
                     });
                 });
@@ -2134,15 +2165,19 @@ impl Engine {
                 Ok(VecDeque::from([Action::AgentRunStartedAt {
                     workspace_id,
                     thread_id,
+                    run_id,
                     started_at_unix_ms,
                 }]))
             }
             Effect::CancelAgentTurn {
                 workspace_id,
                 thread_id,
+                run_id,
             } => {
-                if let Some(flag) = self.cancel_flags.get(&(workspace_id, thread_id)) {
-                    flag.store(true, Ordering::SeqCst);
+                if let Some(entry) = self.cancel_flags.get(&(workspace_id, thread_id))
+                    && entry.run_id == run_id
+                {
+                    entry.flag.store(true, Ordering::SeqCst);
                 }
                 let finished_at_unix_ms = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -2153,6 +2188,7 @@ impl Engine {
                 Ok(VecDeque::from([Action::AgentRunFinishedAt {
                     workspace_id,
                     thread_id,
+                    run_id,
                     finished_at_unix_ms,
                 }]))
             }
@@ -2884,6 +2920,7 @@ fn conversation_key_for_action(action: &Action) -> Option<(WorkspaceId, Workspac
         Action::AgentTurnFinished {
             workspace_id,
             thread_id,
+            ..
         } => Some((*workspace_id, *thread_id)),
         Action::CancelAgentTurn {
             workspace_id,
@@ -2968,6 +3005,7 @@ fn queue_state_key_for_action(action: &Action) -> Option<(WorkspaceId, Workspace
         Action::AgentEventReceived {
             workspace_id,
             thread_id,
+            run_id: _,
             event:
                 CodexThreadEvent::TurnCompleted { .. }
                 | CodexThreadEvent::TurnFailed { .. }

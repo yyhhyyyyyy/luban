@@ -62,6 +62,7 @@ pub enum Effect {
     RunAgentTurn {
         workspace_id: WorkspaceId,
         thread_id: WorkspaceThreadId,
+        run_id: u64,
         text: String,
         attachments: Vec<AttachmentRef>,
         run_config: AgentRunConfig,
@@ -69,6 +70,7 @@ pub enum Effect {
     CancelAgentTurn {
         workspace_id: WorkspaceId,
         thread_id: WorkspaceThreadId,
+        run_id: u64,
     },
 
     RenameWorkspaceBranch {
