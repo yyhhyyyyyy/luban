@@ -82,6 +82,29 @@ test("pressing enter submits a user message", async ({ page }) => {
   await expect(page.getByTestId("chat-input")).toHaveValue("")
 })
 
+test("chat input scrolls when content exceeds max height", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  const payload = Array.from({ length: 40 }, (_, i) => `line ${i + 1}`).join("\n")
+  const input = page.getByTestId("chat-input")
+  await input.fill(payload)
+
+  const metrics = await input.evaluate((el) => {
+    const e = el as HTMLTextAreaElement
+    e.scrollTop = 99999
+    return {
+      clientHeight: e.clientHeight,
+      scrollHeight: e.scrollHeight,
+      scrollTop: e.scrollTop,
+      overflowY: getComputedStyle(e).overflowY,
+    }
+  })
+
+  expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight)
+  expect(["auto", "scroll"]).toContain(metrics.overflowY)
+  expect(metrics.scrollTop).toBeGreaterThan(0)
+})
+
 test("enter commits IME composition without sending", async ({ page }) => {
   await ensureWorkspace(page)
 

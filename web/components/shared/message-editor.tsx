@@ -117,7 +117,8 @@ export function MessageEditor({
     const maxHeightPx = 160
     const nextHeight = Math.min(el.scrollHeight, maxHeightPx)
     el.style.height = `${nextHeight}px`
-    el.style.overflow = "hidden"
+    el.style.overflowX = "hidden"
+    el.style.overflowY = el.scrollHeight > maxHeightPx ? "auto" : "hidden"
   }, [value])
 
   const handleDrop = (e: React.DragEvent) => {
@@ -668,7 +669,6 @@ export function MessageEditor({
           onPaste={onPaste}
           placeholder={placeholder}
           className="w-full bg-transparent text-sm leading-5 text-foreground placeholder:text-muted-foreground resize-none focus:outline-none min-h-[20px] max-h-[160px] luban-font-chat"
-          style={{ overflow: "hidden" }}
           disabled={disabled}
           autoFocus={autoFocus}
           onKeyDown={handleKeyDown}
