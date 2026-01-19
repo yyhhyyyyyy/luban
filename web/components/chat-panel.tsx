@@ -145,6 +145,7 @@ export function ChatPanel({
   const [escHintVisible, setEscHintVisible] = useState(false)
   const escTimeoutRef = useRef<number | null>(null)
   const ESC_TIMEOUT_MS = 2000
+  const escHintVisibleRef = useRef(false)
 
   const [agentOverrideStatus, setAgentOverrideStatus] = useState<AgentRunningStatus | null>(null)
   const [agentEditorValue, setAgentEditorValue] = useState("")
@@ -653,6 +654,10 @@ export function ChatPanel({
     }
   }, [])
 
+  useEffect(() => {
+    escHintVisibleRef.current = escHintVisible
+  }, [escHintVisible])
+
   const handleAgentCancel = useCallback(() => {
     if (!agentStatus) return
     setAgentOverrideStatus("cancelling")
@@ -678,7 +683,7 @@ export function ChatPanel({
             target.isContentEditable),
       )
 
-      if (escHintVisible) {
+      if (escHintVisibleRef.current) {
         e.preventDefault()
         clearEscHint()
         handleAgentCancel()
@@ -706,7 +711,7 @@ export function ChatPanel({
         escTimeoutRef.current = null
       }
     }
-  }, [agentStatus, editingQueuedPromptId, isRenamingBranch, escHintVisible, clearEscHint, handleAgentCancel])
+  }, [agentStatus, editingQueuedPromptId, isRenamingBranch, clearEscHint, handleAgentCancel])
 
   useEffect(() => {
     if (agentStatus !== "running") {

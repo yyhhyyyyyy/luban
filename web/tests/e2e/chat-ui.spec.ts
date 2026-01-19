@@ -566,6 +566,39 @@ test("double-Esc while agent is running opens cancel editor", async ({ page }) =
   await page.getByTestId("agent-running-input").press("Escape")
 })
 
+test("esc cancel hint auto-hides when countdown ends", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  const workspaceId = await activeWorkspaceId(page)
+
+  const threadId = await createThreadViaUi(page, workspaceId)
+  expect(threadId).toBeGreaterThan(0)
+
+  const runId = Math.random().toString(16).slice(2)
+  const seed = `e2e-esc-hint-timeout-${runId}`
+
+  await sendWsAction(page, {
+    type: "send_agent_message",
+    workspace_id: workspaceId,
+    thread_id: threadId,
+    text: `${seed}-e2e-running-card`,
+    attachments: [],
+  })
+
+  await expect(page.getByTestId("agent-running-cancel")).toBeVisible({ timeout: 20_000 })
+
+  await page.keyboard.press("Escape")
+  await expect(page.getByTestId("esc-cancel-hint")).toBeVisible({ timeout: 20_000 })
+
+  await expect
+    .poll(async () => await page.getByTestId("esc-cancel-hint").count(), { timeout: 10_000 })
+    .toBe(0)
+
+  // Cleanup: cancel this run so it doesn't leak into other tests.
+  await page.getByTestId("agent-running-cancel").click()
+  await page.getByTestId("agent-running-input").press("Escape")
+})
+
 test("expanded agent running card keeps header anchored as activities grow", async ({ page }) => {
   await ensureWorkspace(page)
 
