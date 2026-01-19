@@ -3,6 +3,8 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use tauri::{Manager as _, WebviewUrl, WebviewWindowBuilder};
 
+mod path_env;
+
 #[tauri::command]
 fn open_external(url: String) -> Result<(), String> {
     if !(url.starts_with("http://") || url.starts_with("https://")) {
@@ -54,6 +56,7 @@ fn main() -> anyhow::Result<()> {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![open_external])
         .setup(|app| {
+            let _ = path_env::fix_path_env();
             let handle = app.handle();
             let web_dist = resolve_web_dist(handle);
             unsafe {
