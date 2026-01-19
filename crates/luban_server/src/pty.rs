@@ -4,6 +4,7 @@ use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 use std::collections::{HashMap, VecDeque};
 use std::io::{Read as _, Write};
 use std::path::PathBuf;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 
@@ -32,7 +33,10 @@ impl PtyManager {
     ) -> anyhow::Result<Arc<PtySession>> {
         let mut guard = self.inner.lock().expect("pty manager lock poisoned");
         if let Some(existing) = guard.get(&(workspace_id, thread_id)) {
-            return Ok(existing.clone());
+            if !existing.is_terminated() {
+                return Ok(existing.clone());
+            }
+            guard.remove(&(workspace_id, thread_id));
         }
 
         let session = Arc::new(PtySession::spawn(cwd)?);
@@ -49,6 +53,8 @@ impl Default for PtyManager {
 
 pub struct PtySession {
     output: broadcast::Sender<Vec<u8>>,
+    terminated: Arc<std::sync::atomic::AtomicBool>,
+    terminated_tx: broadcast::Sender<()>,
     history: Arc<Mutex<OutputHistory>>,
     writer: Mutex<Box<dyn Write + Send>>,
     master: Mutex<Box<dyn MasterPty + Send>>,
@@ -102,7 +108,11 @@ impl PtySession {
         let writer = pair.master.take_writer().context("take pty writer")?;
 
         let (output, _) = broadcast::channel::<Vec<u8>>(256);
+        let (terminated_tx, _) = broadcast::channel::<()>(8);
+        let terminated = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let output_for_thread = output.clone();
+        let terminated_for_thread = terminated.clone();
+        let terminated_tx_for_thread = terminated_tx.clone();
         let history = Arc::new(Mutex::new(OutputHistory::default()));
         let history_for_thread = history.clone();
 
@@ -124,11 +134,15 @@ impl PtySession {
                         Err(_) => break,
                     }
                 }
+                terminated_for_thread.store(true, Ordering::SeqCst);
+                let _ = terminated_tx_for_thread.send(());
             })
             .context("spawn pty reader thread")?;
 
         Ok(Self {
             output,
+            terminated,
+            terminated_tx,
             history,
             writer: Mutex::new(writer),
             master: Mutex::new(pair.master),
@@ -136,8 +150,16 @@ impl PtySession {
         })
     }
 
+    pub fn is_terminated(&self) -> bool {
+        self.terminated.load(Ordering::SeqCst)
+    }
+
     pub fn subscribe_output(&self) -> broadcast::Receiver<Vec<u8>> {
         self.output.subscribe()
+    }
+
+    pub fn subscribe_terminated(&self) -> broadcast::Receiver<()> {
+        self.terminated_tx.subscribe()
     }
 
     pub fn snapshot_output_history(&self) -> Vec<Vec<u8>> {
@@ -149,7 +171,11 @@ impl PtySession {
 
     pub fn write_input(&self, bytes: &[u8]) -> anyhow::Result<()> {
         let mut writer = self.writer.lock().expect("pty writer lock poisoned");
-        writer.write_all(bytes).context("pty write")?;
+        if let Err(err) = writer.write_all(bytes) {
+            self.terminated.store(true, Ordering::SeqCst);
+            let _ = self.terminated_tx.send(());
+            return Err(err).context("pty write");
+        }
         writer.flush().ok();
         Ok(())
     }
@@ -177,6 +203,7 @@ enum PtyClientMessage {
 
 pub async fn pty_ws_task(mut socket: WebSocket, session: Arc<PtySession>) {
     let mut output = session.subscribe_output();
+    let mut terminated = session.subscribe_terminated();
 
     for chunk in session.snapshot_output_history() {
         if socket.send(Message::Binary(chunk.into())).await.is_err() {
@@ -186,9 +213,22 @@ pub async fn pty_ws_task(mut socket: WebSocket, session: Arc<PtySession>) {
 
     loop {
         tokio::select! {
+            _ = terminated.recv() => {
+                let _ = socket
+                    .send(Message::Text("{\"type\":\"exited\"}".to_owned().into()))
+                    .await;
+                let _ = socket.send(Message::Close(None)).await;
+                break;
+            }
             incoming = socket.recv() => {
                 let Some(Ok(msg)) = incoming else { break };
                 if handle_incoming(&session, msg).is_err() {
+                    if session.is_terminated() {
+                        let _ = socket
+                            .send(Message::Text("{\"type\":\"exited\"}".to_owned().into()))
+                            .await;
+                        let _ = socket.send(Message::Close(None)).await;
+                    }
                     break;
                 }
             }

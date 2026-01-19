@@ -365,3 +365,32 @@ test("terminal scrollbar is styled via app CSS", async ({ page }) => {
 
   expect(hasStyle).toBe(true)
 })
+
+test("terminal restarts after the shell exits", async ({ page }) => {
+  let ptySocketCount = 0
+  page.on("websocket", (ws) => {
+    if (!ws.url().includes("/api/pty/")) return
+    ptySocketCount += 1
+  })
+
+  await ensureWorkspace(page)
+
+  const terminal = page.getByTestId("pty-terminal")
+  await expect
+    .poll(async () => await terminal.locator("canvas").count(), { timeout: 20_000 })
+    .toBeGreaterThan(0)
+
+  await expect.poll(async () => ptySocketCount, { timeout: 20_000 }).toBeGreaterThan(0)
+
+  await terminal.evaluate((el) => {
+    const event = new Event("paste", { bubbles: true, cancelable: true }) as any
+    Object.defineProperty(event, "clipboardData", {
+      value: {
+        getData: (t: string) => (t === "text/plain" ? "exit\n" : ""),
+      },
+    })
+    el.dispatchEvent(event)
+  })
+
+  await expect.poll(async () => ptySocketCount, { timeout: 20_000 }).toBeGreaterThan(1)
+})

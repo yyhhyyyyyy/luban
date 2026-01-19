@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Terminal, type ITheme } from "@xterm/xterm"
 import { FitAddon } from "@xterm/addon-fit"
 import { WebglAddon } from "@xterm/addon-webgl"
@@ -202,6 +202,7 @@ export function PtyTerminal() {
   const { activeWorkspaceId } = useLuban()
   const { fonts } = useAppearance()
   const { resolvedTheme } = useTheme()
+  const [sessionEpoch, setSessionEpoch] = useState(0)
   const outerRef = useRef<HTMLDivElement | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
   const termRef = useRef<Terminal | null>(null)
@@ -255,6 +256,7 @@ export function PtyTerminal() {
     const ptyThreadId = 1
 
     let disposed = false
+    let restartRequested = false
     const fitAddon = new FitAddon()
     const webglAddon = new WebglAddon()
     fitAddonRef.current = fitAddon
@@ -448,7 +450,18 @@ export function PtyTerminal() {
 
     ws.onmessage = (ev) => {
       if (disposed) return
-      if (typeof ev.data === "string") return
+      if (typeof ev.data === "string") {
+        try {
+          const payload = JSON.parse(ev.data) as { type?: string } | null
+          if (payload && payload.type === "exited") {
+            restartRequested = true
+            ws?.close()
+          }
+        } catch {
+          // Ignore non-JSON control messages.
+        }
+        return
+      }
       const bytes = new Uint8Array(ev.data as ArrayBuffer)
       term.write(decoder.decode(bytes))
     }
@@ -456,6 +469,12 @@ export function PtyTerminal() {
     ws.onopen = () => {
       if (disposed) return
       scheduleFitAndResizeSync()
+    }
+
+    ws.onclose = () => {
+      if (disposed) return
+      if (!restartRequested) return
+      setSessionEpoch((prev) => prev + 1)
     }
 
     dataDisposable = term.onData((data: string) => {
@@ -479,7 +498,7 @@ export function PtyTerminal() {
       webglAddon.dispose()
       term.dispose()
     }
-  }, [activeWorkspaceId])
+  }, [activeWorkspaceId, sessionEpoch])
 
   return (
     <div
