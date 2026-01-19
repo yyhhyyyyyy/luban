@@ -390,7 +390,9 @@ export function PtyTerminal() {
       tabIndex={0}
       className="luban-terminal h-full w-full p-0 font-mono text-xs overflow-hidden bg-card text-card-foreground focus:outline-none flex"
     >
-      <div ref={containerRef} className="flex-1 min-h-0 min-w-0 overflow-hidden" />
+      <div className="flex-1 min-h-0 min-w-0 overflow-hidden px-3">
+        <div ref={containerRef} className="h-full w-full overflow-hidden" />
+      </div>
     </div>
   )
 }
