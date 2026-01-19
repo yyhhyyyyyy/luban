@@ -125,6 +125,42 @@ test("thread tabs persist across reload", async ({ page }) => {
   ).toHaveCount(1)
 })
 
+test("running status spinner stays centered", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  const workspaceId = await activeWorkspaceId(page)
+  const token = `e2e-spinner-${Math.random().toString(16).slice(2)}`
+  await sendWsAction(page, {
+    type: "send_agent_message",
+    workspace_id: workspaceId,
+    thread_id: 1,
+    text: `e2e-running-card-${token}`,
+    attachments: [],
+  })
+
+  const row = page.getByTestId("worktree-branch-name").first().locator("..").locator("..")
+  const spinner = row.locator("svg.animate-spin").first()
+  await spinner.waitFor({ state: "visible", timeout: 10_000 })
+
+  const drift = await spinner.evaluate(async (el) => {
+    const centers: Array<{ x: number; y: number }> = []
+    for (let i = 0; i < 12; i++) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+      const rect = el.getBoundingClientRect()
+      centers.push({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 })
+    }
+    const xs = centers.map((p) => p.x)
+    const ys = centers.map((p) => p.y)
+    const dx = Math.max(...xs) - Math.min(...xs)
+    const dy = Math.max(...ys) - Math.min(...ys)
+    return { dx, dy }
+  })
+
+  // The spinner rotates, but its visual center should stay in place (no wobble).
+  expect(drift.dx).toBeLessThanOrEqual(1)
+  expect(drift.dy).toBeLessThanOrEqual(1)
+})
+
 test("creating a worktree auto-opens its conversation", async ({ page }) => {
   await ensureWorkspace(page)
 

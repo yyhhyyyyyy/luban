@@ -52,10 +52,13 @@ export function AgentStatusIcon({
   const config = agentStatusConfig[status]
   const Icon = config.icon
   const iconSize = size === "xs" ? "w-3 h-3" : size === "sm" ? "w-3.5 h-3.5" : "w-4 h-4"
+  const spinStyle: React.CSSProperties | undefined = config.animate
+    ? { transformBox: "fill-box", transformOrigin: "center" }
+    : undefined
 
   return (
     <span className={cn("relative flex items-center justify-center flex-shrink-0", config.color, className)}>
-      <Icon className={cn(iconSize, config.animate && "animate-spin")} />
+      <Icon className={cn(iconSize, config.animate && "animate-spin")} style={spinStyle} />
       {status === "pending" && (
         <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-status-warning rounded-full" />
       )}
@@ -85,6 +88,9 @@ export function PRBadge({
   const config = prStatusConfig[status]
   const Icon = config.icon
   const iconSize = size === "sm" ? "w-2.5 h-2.5" : "w-3 h-3"
+  const spinStyle: React.CSSProperties | undefined = config.animate
+    ? { transformBox: "fill-box", transformOrigin: "center" }
+    : undefined
 
   const canOpenPr = workspaceId != null && onOpenPullRequest != null
   const canOpenCi = workspaceId != null && onOpenPullRequestFailedAction != null
@@ -126,7 +132,11 @@ export function PRBadge({
           <Icon className={cn(iconSize, config.color, "hover:opacity-80 transition-opacity")} />
         </button>
       ) : (
-        <Icon className={cn(iconSize, config.color, config.animate && "animate-spin")} title={title} />
+        <Icon
+          className={cn(iconSize, config.color, config.animate && "animate-spin")}
+          title={title}
+          style={spinStyle}
+        />
       )}
     </div>
   )

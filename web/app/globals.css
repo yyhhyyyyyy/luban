@@ -211,6 +211,11 @@
     @apply bg-background text-foreground;
   }
 
+  svg.animate-spin {
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+
   .xterm .xterm-viewport {
     overflow-y: auto !important;
     background-color: transparent !important;
