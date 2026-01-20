@@ -54,6 +54,7 @@ import { AgentRunningCard, type AgentRunningStatus } from "@/components/shared/a
 import { openSettingsPanel } from "@/lib/open-settings"
 import { computeProjectDisplayNames } from "@/lib/project-display-names"
 import { focusChatInput } from "@/lib/focus-chat-input"
+import { useAgentCancelHotkey } from "@/lib/use-agent-cancel-hotkey"
 
 interface ChatTab {
   id: string
@@ -141,11 +142,6 @@ export function ChatPanel({
   const [queuedDraftModelId, setQueuedDraftModelId] = useState<string | null>(null)
   const [queuedDraftThinkingEffort, setQueuedDraftThinkingEffort] = useState<ThinkingEffort | null>(null)
   const queuedAttachmentScopeRef = useRef<string>("")
-
-  const [escHintVisible, setEscHintVisible] = useState(false)
-  const escTimeoutRef = useRef<number | null>(null)
-  const ESC_TIMEOUT_MS = 2000
-  const escHintVisibleRef = useRef(false)
 
   const [agentOverrideStatus, setAgentOverrideStatus] = useState<AgentRunningStatus | null>(null)
   const [agentEditorValue, setAgentEditorValue] = useState("")
@@ -646,18 +642,6 @@ export function ChatPanel({
     }
   }, [agentOverrideStatus, baseAgentStatus])
 
-  const clearEscHint = useCallback(() => {
-    setEscHintVisible(false)
-    if (escTimeoutRef.current != null) {
-      window.clearTimeout(escTimeoutRef.current)
-      escTimeoutRef.current = null
-    }
-  }, [])
-
-  useEffect(() => {
-    escHintVisibleRef.current = escHintVisible
-  }, [escHintVisible])
-
   const handleAgentCancel = useCallback(() => {
     if (!agentStatus) return
     setAgentOverrideStatus("cancelling")
@@ -668,56 +652,11 @@ export function ChatPanel({
     setAgentOverrideStatus("resuming")
   }, [agentStatus])
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return
-      if (agentStatus !== "running") return
-      if (editingQueuedPromptId != null) return
-      if (isRenamingBranch) return
-
-      const target = e.target as HTMLElement | null
-      const isInInput = Boolean(
-        target &&
-          (target.tagName === "INPUT" ||
-            target.tagName === "TEXTAREA" ||
-            target.isContentEditable),
-      )
-
-      if (escHintVisibleRef.current) {
-        e.preventDefault()
-        clearEscHint()
-        handleAgentCancel()
-        return
-      }
-
-      if (!isInInput) {
-        e.preventDefault()
-      }
-      setEscHintVisible(true)
-      if (escTimeoutRef.current != null) {
-        window.clearTimeout(escTimeoutRef.current)
-      }
-      escTimeoutRef.current = window.setTimeout(() => {
-        setEscHintVisible(false)
-        escTimeoutRef.current = null
-      }, ESC_TIMEOUT_MS)
-    }
-
-    window.addEventListener("keydown", handleKeyDown)
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown)
-      if (escTimeoutRef.current != null) {
-        window.clearTimeout(escTimeoutRef.current)
-        escTimeoutRef.current = null
-      }
-    }
-  }, [agentStatus, editingQueuedPromptId, isRenamingBranch, clearEscHint, handleAgentCancel])
-
-  useEffect(() => {
-    if (agentStatus !== "running") {
-      clearEscHint()
-    }
-  }, [agentStatus, clearEscHint])
+  const { escHintVisible, escTimeoutMs: ESC_TIMEOUT_MS, clearEscHint } = useAgentCancelHotkey({
+    enabled: agentStatus === "running",
+    blocked: editingQueuedPromptId != null || isRenamingBranch,
+    onCancel: handleAgentCancel,
+  })
 
   const clearAgentEditor = () => {
     setAgentEditorValue("")

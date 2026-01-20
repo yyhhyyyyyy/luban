@@ -44,8 +44,8 @@ function DialogContent({
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
 }) {
-  const handleKeyDown = React.useCallback(
-    (event: React.KeyboardEvent) => {
+  const handleKeyDown = React.useCallback<React.KeyboardEventHandler<HTMLDivElement>>(
+    (event) => {
       if (event.key === "Escape") {
         event.stopPropagation()
         ;(event.nativeEvent as unknown as { stopImmediatePropagation?: () => void }).stopImmediatePropagation?.()
