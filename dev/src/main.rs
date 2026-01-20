@@ -202,44 +202,6 @@ fn package_env_required() -> Result<()> {
     Ok(())
 }
 
-fn codesign_required_identity() -> Result<String> {
-    if std::env::consts::OS != "macos" {
-        anyhow::bail!("macos codesign is only supported on macos hosts");
-    }
-    env_var_opt("APPLE_CODESIGN_IDENTITY")
-        .or_else(|| env_var_opt("APPLE_SIGNING_IDENTITY"))
-        .context("missing codesign identity; set APPLE_CODESIGN_IDENTITY (or APPLE_SIGNING_IDENTITY)")
-}
-
-fn codesign_app(app_dir: &Path) -> Result<()> {
-    let identity = codesign_required_identity()?;
-
-    if !ProcessCommand::new("codesign").arg("--version").output().is_ok() {
-        anyhow::bail!("codesign not found; install Xcode command line tools to sign macOS bundles");
-    }
-
-    let mut sign = ProcessCommand::new("codesign");
-    sign.arg("--force")
-        .arg("--deep")
-        .arg("--options")
-        .arg("runtime")
-        .arg("--timestamp")
-        .arg("--sign")
-        .arg(identity)
-        .arg(app_dir);
-    run_cmd(sign, "codesign app")?;
-
-    let mut verify = ProcessCommand::new("codesign");
-    verify
-        .arg("--verify")
-        .arg("--deep")
-        .arg("--strict")
-        .arg(app_dir);
-    run_cmd(verify, "codesign verify")?;
-
-    Ok(())
-}
-
 fn run_package(target: String, profile: String, out_dir: PathBuf) -> Result<()> {
     package_env_required()?;
 
@@ -279,10 +241,6 @@ fn run_package(target: String, profile: String, out_dir: PathBuf) -> Result<()> 
 
     let app_dir = find_first_app_dir(&bundle_macos)?
         .with_context(|| format!("macOS bundle not found under: {}", bundle_macos.display()))?;
-
-    if profile == "release" {
-        codesign_app(&app_dir)?;
-    }
 
     std::fs::create_dir_all(&out_dir).with_context(|| format!("create {}", out_dir.display()))?;
 
