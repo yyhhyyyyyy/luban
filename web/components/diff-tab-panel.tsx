@@ -1,10 +1,16 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { AlignJustify, ChevronDown, ChevronRight, Columns2, GitCompareArrows } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-import { MultiFileDiff, type FileContents } from "@pierre/diffs/react"
+import {
+  MultiFileDiff,
+  WorkerPoolContextProvider,
+  type FileContents,
+  type WorkerInitializationRenderOptions,
+  type WorkerPoolOptions,
+} from "@pierre/diffs/react"
 import type { ChangedFile } from "./right-sidebar"
 
 export type DiffStyle = "split" | "unified"
@@ -48,14 +54,23 @@ export function DiffTabPanel({
   }
 
   return (
-    <AllFilesDiffViewer
-      files={files}
-      activeFileId={activeFileId}
-      diffStyle={diffStyle}
-      onStyleChange={onStyleChange}
-    />
+    <WorkerPoolContextProvider poolOptions={pierreDiffWorkerPoolOptions} highlighterOptions={pierreDiffHighlighterOptions}>
+      <AllFilesDiffViewer
+        files={files}
+        activeFileId={activeFileId}
+        diffStyle={diffStyle}
+        onStyleChange={onStyleChange}
+      />
+    </WorkerPoolContextProvider>
   )
 }
+
+const pierreDiffWorkerPoolOptions: WorkerPoolOptions = {
+  workerFactory: () => new Worker(new URL("../workers/pierre-diffs-worker.ts", import.meta.url), { type: "module" }),
+  poolSize: 2,
+}
+
+const pierreDiffHighlighterOptions: WorkerInitializationRenderOptions = { langs: ["text"] }
 
 function AllFilesDiffViewer({
   files,
@@ -81,6 +96,69 @@ function AllFilesDiffViewer({
     })
   }
 
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null)
+  const [renderedFiles, setRenderedFiles] = useState<Set<string>>(() => new Set())
+  const collapsedFilesRef = useRef<Set<string>>(new Set())
+  const renderedFilesRef = useRef<Set<string>>(new Set())
+  const pendingRenderIdsRef = useRef<Set<string>>(new Set())
+  const flushTimerRef = useRef<number | null>(null)
+
+  const fileIndexById = useMemo(() => {
+    const out = new Map<string, number>()
+    for (const [idx, item] of files.entries()) {
+      out.set(item.file.id, idx)
+    }
+    return out
+  }, [files])
+
+  const flushPendingRenderedFiles = () => {
+    flushTimerRef.current = null
+    const pending = pendingRenderIdsRef.current
+    if (pending.size === 0) return
+    setRenderedFiles((prev) => {
+      const next = new Set(prev)
+      for (const id of pending) next.add(id)
+      pending.clear()
+      return next
+    })
+  }
+
+  const renderFilesImmediately = (ids: string[]) => {
+    const unique = ids.filter((id) => !renderedFilesRef.current.has(id))
+    if (unique.length === 0) return
+    setRenderedFiles((prev) => {
+      const next = new Set(prev)
+      for (const id of unique) next.add(id)
+      return next
+    })
+  }
+
+  const scheduleRenderFiles = (ids: string[]) => {
+    for (const id of ids) {
+      if (renderedFilesRef.current.has(id)) continue
+      pendingRenderIdsRef.current.add(id)
+    }
+    if (pendingRenderIdsRef.current.size === 0) return
+    if (flushTimerRef.current != null) return
+
+    type RequestIdleCallbackFn = (callback: IdleRequestCallback, options?: IdleRequestOptions) => number
+    const ric = (globalThis as { requestIdleCallback?: RequestIdleCallbackFn }).requestIdleCallback
+    if (typeof ric === "function") {
+      flushTimerRef.current = ric(flushPendingRenderedFiles, { timeout: 200 })
+      return
+    }
+
+    flushTimerRef.current = globalThis.setTimeout(flushPendingRenderedFiles, 0) as unknown as number
+  }
+
+  useEffect(() => {
+    collapsedFilesRef.current = collapsedFiles
+  }, [collapsedFiles])
+
+  useEffect(() => {
+    renderedFilesRef.current = renderedFiles
+  }, [renderedFiles])
+
   useEffect(() => {
     if (!activeFileId) return
     if (activeFileId === prevActiveFileIdRef.current) return
@@ -88,7 +166,7 @@ function AllFilesDiffViewer({
     const el = fileRefs.current[activeFileId]
     if (!el) return
 
-    if (collapsedFiles.has(activeFileId)) {
+    if (collapsedFilesRef.current.has(activeFileId)) {
       setCollapsedFiles((prev) => {
         const next = new Set(prev)
         next.delete(activeFileId)
@@ -96,9 +174,58 @@ function AllFilesDiffViewer({
       })
     }
 
+    renderFilesImmediately([activeFileId])
     el.scrollIntoView({ behavior: "smooth", block: "start" })
     prevActiveFileIdRef.current = activeFileId
   }, [activeFileId, collapsedFiles])
+
+  useEffect(() => {
+    const root = scrollContainerRef.current
+    if (!root) return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const toRender: string[] = []
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue
+          const target = entry.target as HTMLElement
+          const fileId = target.dataset.diffFileId
+          if (!fileId) continue
+          if (collapsedFilesRef.current.has(fileId)) continue
+          if (renderedFilesRef.current.has(fileId)) continue
+          toRender.push(fileId)
+
+          const idx = fileIndexById.get(fileId)
+          if (idx == null) continue
+          for (const delta of [-1, 1]) {
+            const n = files[idx + delta]
+            if (!n) continue
+            if (!collapsedFilesRef.current.has(n.file.id) && !renderedFilesRef.current.has(n.file.id))
+              toRender.push(n.file.id)
+          }
+        }
+        if (toRender.length > 0) scheduleRenderFiles(toRender)
+      },
+      { root, rootMargin: "800px 0px 800px 0px", threshold: 0.01 },
+    )
+
+    for (const item of files) {
+      const el = fileRefs.current[item.file.id]
+      if (el) observer.observe(el)
+    }
+
+    return () => {
+      observer.disconnect()
+    }
+  }, [fileIndexById, files])
+
+  useEffect(() => {
+    if (files.length === 0) return
+    const initial: string[] = []
+    if (activeFileId) initial.push(activeFileId)
+    initial.push(files[0].file.id)
+    renderFilesImmediately(initial)
+  }, [files])
 
   const getStatusColor = (status: ChangedFile["status"]) => {
     switch (status) {
@@ -170,19 +297,30 @@ function AllFilesDiffViewer({
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-auto" data-testid="diff-scroll-container">
+      <div
+        className="flex-1 min-h-0 overflow-auto"
+        data-testid="diff-scroll-container"
+        ref={scrollContainerRef}
+      >
         {files.map((fileData) => {
           const isCollapsed = collapsedFiles.has(fileData.file.id)
+          const isRendered = renderedFiles.has(fileData.file.id)
           return (
             <div
               key={fileData.file.id}
+              data-diff-file-id={fileData.file.id}
               ref={(el) => {
                 fileRefs.current[fileData.file.id] = el
               }}
               className="border-b border-border last:border-b-0"
             >
               <button
-                onClick={() => toggleCollapse(fileData.file.id)}
+                onClick={() => {
+                  const fileId = fileData.file.id
+                  const willExpand = collapsedFilesRef.current.has(fileId)
+                  toggleCollapse(fileId)
+                  if (willExpand) renderFilesImmediately([fileId])
+                }}
                 className="sticky top-0 z-[5] w-full flex items-center gap-2 px-4 py-2 bg-muted/80 backdrop-blur-sm border-b border-border/50 text-xs hover:bg-muted transition-colors text-left"
               >
                 {isCollapsed ? (
@@ -203,18 +341,24 @@ function AllFilesDiffViewer({
               </button>
 
               {!isCollapsed && (
-                <MultiFileDiff
-                  oldFile={fileData.oldFile}
-                  newFile={fileData.newFile}
-                  options={{
-                    theme: { dark: "pierre-dark", light: "pierre-light" },
-                    diffStyle: diffStyle,
-                    diffIndicators: "bars",
-                    hunkSeparators: "line-info",
-                    lineDiffType: "word-alt",
-                    enableLineSelection: true,
-                  }}
-                />
+                <>
+                  {!isRendered ? (
+                    <div className="px-4 py-3 text-xs text-muted-foreground">Rendering…</div>
+                  ) : (
+                    <MultiFileDiff
+                      oldFile={fileData.oldFile}
+                      newFile={fileData.newFile}
+                      options={{
+                        theme: { dark: "pierre-dark", light: "pierre-light" },
+                        diffStyle: diffStyle,
+                        diffIndicators: "bars",
+                        hunkSeparators: "line-info",
+                        lineDiffType: "word-alt",
+                        enableLineSelection: true,
+                      }}
+                    />
+                  )}
+                </>
               )}
             </div>
           )
