@@ -4,7 +4,6 @@ import type React from "react"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
-  Send,
   Copy,
   ArrowDown,
   Clock,
@@ -37,9 +36,8 @@ import {
   saveJson,
 } from "@/lib/ui-prefs"
 import type { ChangedFile } from "./right-sidebar"
-import { CodexAgentSelector } from "@/components/shared/agent-selector"
 import { OpenButton } from "@/components/shared/open-button"
-import { MessageEditor, type ComposerAttachment as EditorComposerAttachment } from "@/components/shared/message-editor"
+import { type ComposerAttachment as EditorComposerAttachment } from "@/components/shared/message-editor"
 import { AgentRunningCard, type AgentRunningStatus } from "@/components/shared/agent-running-card"
 import { openSettingsPanel } from "@/lib/open-settings"
 import { computeProjectDisplayNames } from "@/lib/project-display-names"
@@ -50,6 +48,7 @@ import { ThreadTabsBar } from "@/components/thread-tabs-bar"
 import { DiffTabPanel, type DiffFileData, type DiffStyle } from "@/components/diff-tab-panel"
 import { QueuedPromptRow } from "@/components/queued-prompts"
 import { EscCancelHint } from "@/components/esc-cancel-hint"
+import { ChatComposer } from "@/components/chat-composer"
 
 type ComposerAttachment = EditorComposerAttachment
 
@@ -1230,80 +1229,56 @@ export function ChatPanel({
               ) : null}
 
               {editingQueuedPromptId == null && (
-              <div className="px-4 pb-4">
-                <div className="max-w-3xl mx-auto">
-                  <MessageEditor
-                    value={draftText}
-                    onChange={(value) => {
-                      setDraftText(value)
-                      persistDraft(value)
-                    }}
-                    attachments={attachments}
-                    onRemoveAttachment={removeAttachment}
-                    onFileSelect={handleFileSelect}
-                    onPaste={handlePaste}
-                    onAddAttachmentRef={(attachment) => {
-                      const isImage = attachment.kind === "image"
-                      const previewUrl =
-                        isImage && activeWorkspaceId != null
-                          ? `/api/workspaces/${activeWorkspaceId}/attachments/${attachment.id}?ext=${encodeURIComponent(attachment.extension)}`
-                          : undefined
-                      setAttachments((prev) => [
-                        ...prev,
-                        {
-                          id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-                          type: isImage ? "image" : "file",
-                          name: attachment.name,
-                          size: attachment.byte_len,
-                          previewUrl,
-                          status: "ready",
-                          attachment,
-                        },
-                      ])
-                    }}
-                    workspaceId={activeWorkspaceId}
-                    commands={codexCustomPrompts}
-                    messageHistory={messageHistory}
-                    onCommand={handleCommand}
-                    placeholder="Let's chart the cosmos of ideas..."
-                    disabled={activeWorkspaceId == null || activeThreadId == null}
-                    agentSelector={
-                      <CodexAgentSelector
-                        dropdownPosition="top"
-                        disabled={activeWorkspaceId == null || activeThreadId == null}
-                        modelId={conversation?.agent_model_id}
-                        thinkingEffort={conversation?.thinking_effort}
-                        defaultModelId={app?.agent.default_model_id ?? null}
-                        defaultThinkingEffort={app?.agent.default_thinking_effort ?? null}
-                        onOpenAgentSettings={(agentId, agentFilePath) =>
-                          openSettingsPanel("agent", { agentId, agentFilePath })
-                        }
-                        onChangeModelId={(modelId) => {
-                          if (activeWorkspaceId == null || activeThreadId == null) return
-                          setChatModel(activeWorkspaceId, activeThreadId, modelId)
-                        }}
-                        onChangeThinkingEffort={(effort) => {
-                          if (activeWorkspaceId == null || activeThreadId == null) return
-                          setThinkingEffort(activeWorkspaceId, activeThreadId, effort)
-                        }}
-                      />
-                    }
-                    primaryAction={{
-                      onClick: handleSend,
-                      disabled: !canSend,
-                      ariaLabel: "Send message",
-                      icon: <Send className="w-3.5 h-3.5" />,
-                      testId: "chat-send",
-                    }}
-                    testIds={{
-                      textInput: "chat-input",
-                      attachInput: "chat-attach-input",
-                      attachButton: "chat-attach",
-                      attachmentTile: "chat-attachment-tile",
-                    }}
-                  />
-                </div>
-              </div>
+                <ChatComposer
+                  value={draftText}
+                  onChange={(value) => {
+                    setDraftText(value)
+                    persistDraft(value)
+                  }}
+                  attachments={attachments}
+                  onRemoveAttachment={removeAttachment}
+                  onFileSelect={handleFileSelect}
+                  onPaste={handlePaste}
+                  onAddAttachmentRef={(attachment) => {
+                    const isImage = attachment.kind === "image"
+                    const previewUrl =
+                      isImage && activeWorkspaceId != null
+                        ? `/api/workspaces/${activeWorkspaceId}/attachments/${attachment.id}?ext=${encodeURIComponent(attachment.extension)}`
+                        : undefined
+                    setAttachments((prev) => [
+                      ...prev,
+                      {
+                        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                        type: isImage ? "image" : "file",
+                        name: attachment.name,
+                        size: attachment.byte_len,
+                        previewUrl,
+                        status: "ready",
+                        attachment,
+                      },
+                    ])
+                  }}
+                  workspaceId={activeWorkspaceId}
+                  commands={codexCustomPrompts}
+                  messageHistory={messageHistory}
+                  onCommand={handleCommand}
+                  disabled={activeWorkspaceId == null || activeThreadId == null}
+                  agentModelId={conversation?.agent_model_id}
+                  agentThinkingEffort={conversation?.thinking_effort}
+                  defaultModelId={app?.agent.default_model_id ?? null}
+                  defaultThinkingEffort={app?.agent.default_thinking_effort ?? null}
+                  onOpenAgentSettings={(agentId, agentFilePath) => openSettingsPanel("agent", { agentId, agentFilePath })}
+                  onChangeModelId={(modelId) => {
+                    if (activeWorkspaceId == null || activeThreadId == null) return
+                    setChatModel(activeWorkspaceId, activeThreadId, modelId)
+                  }}
+                  onChangeThinkingEffort={(effort) => {
+                    if (activeWorkspaceId == null || activeThreadId == null) return
+                    setThinkingEffort(activeWorkspaceId, activeThreadId, effort)
+                  }}
+                  onSend={handleSend}
+                  canSend={canSend}
+                />
               )}
             </div>
           </div>
