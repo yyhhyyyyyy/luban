@@ -172,26 +172,27 @@ fn sign_archive(archive_path: &Path) -> Result<String> {
     help.arg("tauri").arg("--help");
     run_cmd(help, "cargo tauri --help")?;
 
+    // `cargo tauri signer sign` writes a `.sig` file next to the input file.
+    // Use the file as the source of truth instead of parsing stdout.
     let mut sign = ProcessCommand::new("cargo");
     sign.arg("tauri").arg("signer").arg("sign").arg(archive_path);
-    let output = run_cmd_capture_stdout(sign, "cargo tauri signer sign")?;
+    run_cmd(sign, "cargo tauri signer sign")?;
 
-    // `cargo tauri signer sign` prints human-friendly messages on stdout.
-    // Extract the actual signature by taking the last base64-ish line.
-    let signature = output
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .filter(|line| {
-            line.len() >= 32
-                && line
-                    .bytes()
-                    .all(|b| matches!(b, b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'+' | b'/' | b'=' | b'-' | b'_'))
-        })
-        .last()
-        .with_context(|| format!("failed to parse signature from cargo tauri signer output:\n{output}"))?;
+    let mut extension = archive_path
+        .extension()
+        .context("archive has no extension")?
+        .to_os_string();
+    extension.push(".sig");
+    let sig_path = archive_path.with_extension(extension);
 
-    Ok(signature.to_owned())
+    let signature = std::fs::read_to_string(&sig_path)
+        .with_context(|| format!("read signature {}", sig_path.display()))?
+        .trim()
+        .to_owned();
+    if signature.is_empty() {
+        anyhow::bail!("signature file is empty: {}", sig_path.display());
+    }
+    Ok(signature)
 }
 
 fn package_env_required() -> Result<()> {
@@ -256,8 +257,13 @@ fn run_package(target: String, profile: String, out_dir: PathBuf) -> Result<()> 
     run_cmd(tar, "tar app")?;
 
     let signature = sign_archive(&archive_path)?;
-    let sig_path = archive_path.with_extension("app.tar.gz.sig");
-    std::fs::write(&sig_path, format!("{signature}\n")).with_context(|| format!("write {}", sig_path.display()))?;
+
+    let mut sig_ext = archive_path
+        .extension()
+        .context("archive has no extension")?
+        .to_os_string();
+    sig_ext.push(".sig");
+    let sig_path = archive_path.with_extension(sig_ext);
 
     let base_url = env_var_opt("LUBAN_RELEASE_BASE_URL").unwrap_or_else(|| "https://releases.luban.dev".to_owned());
     let url = format!("{}/{}/{}", base_url.trim_end_matches('/'), version, archive_name);
