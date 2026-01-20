@@ -1,9 +1,8 @@
 use anyhow::{Context as _, Result};
-use aws_config::BehaviorVersion;
-use aws_credential_types::Credentials;
-use aws_sdk_s3::config::Region;
-use aws_sdk_s3::primitives::ByteStream;
 use clap::{Parser, Subcommand};
+use opendal::layers::RetryLayer;
+use opendal::services::S3;
+use opendal::Operator;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::io::Write;
@@ -64,30 +63,6 @@ fn read_kv_file(path: &Path) -> Result<HashMap<String, String>> {
         out.insert(k.trim().to_owned(), v.trim().to_owned());
     }
     Ok(out)
-}
-
-async fn put_object(
-    client: &aws_sdk_s3::Client,
-    bucket: &str,
-    key: &str,
-    path: &Path,
-    content_type: &str,
-    cache_control: &str,
-) -> Result<()> {
-    let body = ByteStream::from_path(path.to_path_buf())
-        .await
-        .with_context(|| format!("read upload body {}", path.display()))?;
-    client
-        .put_object()
-        .bucket(bucket)
-        .key(key)
-        .cache_control(cache_control)
-        .content_type(content_type)
-        .body(body)
-        .send()
-        .await
-        .with_context(|| format!("upload s3://{bucket}/{key}"))?;
-    Ok(())
 }
 
 fn file_name(path: &Path) -> Result<String> {
@@ -324,6 +299,55 @@ struct ManifestPlatform {
     signature: String,
 }
 
+fn build_r2_operator(
+    endpoint_url: &str,
+    bucket: &str,
+    region: &str,
+    access_key_id: &str,
+    secret_access_key: &str,
+    session_token: Option<&str>,
+) -> Result<Operator> {
+    let mut builder = S3::default()
+        .endpoint(endpoint_url)
+        .bucket(bucket)
+        .region(region)
+        .access_key_id(access_key_id)
+        .secret_access_key(secret_access_key);
+
+    if let Some(token) = session_token {
+        if !token.trim().is_empty() {
+            builder = builder.session_token(token);
+        }
+    }
+
+    // Avoid metadata calls that don't apply to local packaging workflows.
+    let builder = builder.disable_ec2_metadata().disable_stat_with_override();
+
+    Ok(Operator::new(builder)
+        .context("build opendal S3 operator")?
+        .layer(RetryLayer::new())
+        .finish())
+}
+
+async fn upload_file(
+    op: &Operator,
+    bucket: &str,
+    key: &str,
+    path: &Path,
+    content_type: &str,
+    cache_control: &str,
+) -> Result<()> {
+    let body = tokio::fs::read(path)
+        .await
+        .with_context(|| format!("read upload body {}", path.display()))?;
+    op.write_with(key, body)
+        .content_type(content_type)
+        .cache_control(cache_control)
+        .await
+        .with_context(|| format!("upload s3://{bucket}/{key}"))?;
+    Ok(())
+}
+
 async fn run_upload(package_env: PathBuf) -> Result<()> {
     let r2_endpoint_url = env_var("R2_ENDPOINT_URL")?;
     let r2_bucket = env_var("R2_BUCKET")?;
@@ -349,25 +373,17 @@ async fn run_upload(package_env: PathBuf) -> Result<()> {
     let archive_key = file_name(&archive_path)?;
     let signature_key = format!("{archive_key}.sig");
 
-    let credentials = Credentials::new(access_key, secret_key, session_token, None, "env");
+    let op = build_r2_operator(
+        &r2_endpoint_url,
+        &r2_bucket,
+        &region,
+        &access_key,
+        &secret_key,
+        session_token.as_deref(),
+    )?;
 
-    let shared_config = aws_config::defaults(BehaviorVersion::latest())
-        .region(Region::new(region))
-        .credentials_provider(credentials)
-        .load()
-        .await;
-
-    let s3_config = aws_sdk_s3::config::Builder::from(&shared_config)
-        .endpoint_url(r2_endpoint_url)
-        // Cloudflare R2 endpoints are typically not wildcard-cert'ed for virtual host style.
-        // Force path-style addressing to avoid TLS hostname mismatch.
-        .force_path_style(true)
-        .build();
-
-    let client = aws_sdk_s3::Client::from_conf(s3_config);
-
-    put_object(
-        &client,
+    upload_file(
+        &op,
         &r2_bucket,
         &archive_key,
         &archive_path,
@@ -376,8 +392,8 @@ async fn run_upload(package_env: PathBuf) -> Result<()> {
     )
     .await?;
 
-    put_object(
-        &client,
+    upload_file(
+        &op,
         &r2_bucket,
         &signature_key,
         &signature_path,
@@ -386,8 +402,8 @@ async fn run_upload(package_env: PathBuf) -> Result<()> {
     )
     .await?;
 
-    put_object(
-        &client,
+    upload_file(
+        &op,
         &r2_bucket,
         "latest.json",
         &manifest_path,
