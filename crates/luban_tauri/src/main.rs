@@ -3,6 +3,8 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use tauri::{Manager as _, WebviewUrl, WebviewWindowBuilder};
 
+#[cfg(target_os = "macos")]
+mod macos_process_name;
 mod path_env;
 
 #[tauri::command]
@@ -53,6 +55,9 @@ fn webview_devtools_enabled() -> bool {
 }
 
 fn main() -> anyhow::Result<()> {
+    #[cfg(target_os = "macos")]
+    macos_process_name::set_process_name("Luban");
+
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![open_external])
         .setup(|app| {
