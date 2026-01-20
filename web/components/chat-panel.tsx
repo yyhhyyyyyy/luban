@@ -5,25 +5,17 @@ import type React from "react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Send,
-  ChevronDown,
-  ChevronRight,
   Copy,
   ArrowDown,
   Keyboard,
-  MessageSquare,
-  Plus,
   Clock,
   X,
   GitBranch,
-  GitCompareArrows,
-  RotateCcw,
   Pencil,
   Sparkles,
   Check,
   Loader2,
   Paperclip,
-  Columns2,
-  AlignJustify,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useLuban } from "@/lib/luban-context"
@@ -46,7 +38,6 @@ import {
   saveJson,
 } from "@/lib/ui-prefs"
 import type { ChangedFile } from "./right-sidebar"
-import { MultiFileDiff, type FileContents } from "@pierre/diffs/react"
 import { CodexAgentSelector } from "@/components/shared/agent-selector"
 import { OpenButton } from "@/components/shared/open-button"
 import { MessageEditor, type ComposerAttachment as EditorComposerAttachment } from "@/components/shared/message-editor"
@@ -57,13 +48,9 @@ import { focusChatInput } from "@/lib/focus-chat-input"
 import { useAgentCancelHotkey } from "@/lib/use-agent-cancel-hotkey"
 import { useThreadTabs, type ArchivedTab } from "@/lib/use-thread-tabs"
 import { ThreadTabsBar } from "@/components/thread-tabs-bar"
+import { DiffTabPanel, type DiffFileData, type DiffStyle } from "@/components/diff-tab-panel"
 
 type ComposerAttachment = EditorComposerAttachment
-interface DiffFileData {
-  file: ChangedFile
-  oldFile: FileContents
-  newFile: FileContents
-}
 
 export function ChatPanel({
   pendingDiffFile,
@@ -140,7 +127,7 @@ export function ChatPanel({
   const [agentRunNowMs, setAgentRunNowMs] = useState(() => Date.now())
 
   const [activePanel, setActivePanel] = useState<"thread" | "diff">("thread")
-  const [diffStyle, setDiffStyle] = useState<"split" | "unified">("split")
+  const [diffStyle, setDiffStyle] = useState<DiffStyle>("split")
   const [diffFiles, setDiffFiles] = useState<DiffFileData[]>([])
   const [diffActiveFileId, setDiffActiveFileId] = useState<string | undefined>(undefined)
   const [isDiffTabOpen, setIsDiffTabOpen] = useState(false)
@@ -1084,23 +1071,14 @@ export function ChatPanel({
 
       {activePanel === "diff" ? (
         <div className="flex-1 overflow-hidden">
-          {isDiffLoading ? (
-            <div className="px-4 py-3 text-xs text-muted-foreground">Loading…</div>
-          ) : diffError ? (
-            <div className="px-4 py-3 text-xs text-destructive">{diffError}</div>
-          ) : diffFiles.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-              <GitCompareArrows className="w-8 h-8 mb-2 opacity-50" />
-              <span className="text-xs">No changes</span>
-            </div>
-          ) : (
-            <AllFilesDiffViewer
-              files={diffFiles}
-              activeFileId={diffActiveFileId}
-              diffStyle={diffStyle}
-              onStyleChange={setDiffStyle}
-            />
-          )}
+          <DiffTabPanel
+            isLoading={isDiffLoading}
+            error={diffError}
+            files={diffFiles}
+            activeFileId={diffActiveFileId}
+            diffStyle={diffStyle}
+            onStyleChange={setDiffStyle}
+          />
         </div>
       ) : (
         <>
@@ -1551,173 +1529,6 @@ function QueuedPromptRow({
         <div className="text-[13px] text-foreground/80 line-clamp-2 cursor-grab active:cursor-grabbing">
           {prompt.text}
         </div>
-      </div>
-    </div>
-  )
-}
-
-function AllFilesDiffViewer({
-  files,
-  activeFileId,
-  diffStyle,
-  onStyleChange,
-}: {
-  files: DiffFileData[]
-  activeFileId?: string
-  diffStyle: "split" | "unified"
-  onStyleChange: (style: "split" | "unified") => void
-}) {
-  const fileRefs = useRef<Record<string, HTMLDivElement | null>>({})
-  const prevActiveFileIdRef = useRef<string | undefined>(undefined)
-  const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(() => new Set())
-
-  const toggleCollapse = (fileId: string) => {
-    setCollapsedFiles((prev) => {
-      const next = new Set(prev)
-      if (next.has(fileId)) next.delete(fileId)
-      else next.add(fileId)
-      return next
-    })
-  }
-
-  useEffect(() => {
-    if (!activeFileId) return
-    if (activeFileId === prevActiveFileIdRef.current) return
-
-    const el = fileRefs.current[activeFileId]
-    if (!el) return
-
-    if (collapsedFiles.has(activeFileId)) {
-      setCollapsedFiles((prev) => {
-        const next = new Set(prev)
-        next.delete(activeFileId)
-        return next
-      })
-    }
-
-    el.scrollIntoView({ behavior: "smooth", block: "start" })
-    prevActiveFileIdRef.current = activeFileId
-  }, [activeFileId, collapsedFiles])
-
-  const getStatusColor = (status: ChangedFile["status"]) => {
-    switch (status) {
-      case "modified":
-        return "text-status-warning"
-      case "added":
-        return "text-status-success"
-      case "deleted":
-        return "text-status-error"
-      case "renamed":
-        return "text-status-info"
-      default:
-        return "text-muted-foreground"
-    }
-  }
-
-  const getStatusLabel = (status: ChangedFile["status"]) => {
-    switch (status) {
-      case "modified":
-        return "M"
-      case "added":
-        return "A"
-      case "deleted":
-        return "D"
-      case "renamed":
-        return "R"
-      default:
-        return "?"
-    }
-  }
-
-  const totalAdditions = files.reduce((sum, f) => sum + (f.file.additions ?? 0), 0)
-  const totalDeletions = files.reduce((sum, f) => sum + (f.file.deletions ?? 0), 0)
-
-  return (
-    <div className="flex-1 flex flex-col overflow-hidden bg-background" data-testid="diff-viewer">
-      <div className="flex items-center gap-2 px-4 py-2 bg-muted/50 border-b border-border text-xs">
-        <span className="text-foreground font-medium">{files.length} files changed</span>
-        <span className="text-muted-foreground">
-          {totalAdditions > 0 && <span className="text-status-success">+{totalAdditions}</span>}
-          {totalAdditions > 0 && totalDeletions > 0 && <span className="mx-1">/</span>}
-          {totalDeletions > 0 && <span className="text-status-error">-{totalDeletions}</span>}
-        </span>
-        <div className="ml-auto flex items-center gap-0.5 p-0.5 bg-muted rounded">
-          <button
-            onClick={() => onStyleChange("split")}
-            className={cn(
-              "p-1 rounded transition-colors",
-              diffStyle === "split"
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-            title="Split view"
-          >
-            <Columns2 className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={() => onStyleChange("unified")}
-            className={cn(
-              "p-1 rounded transition-colors",
-              diffStyle === "unified"
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-            title="Unified view"
-          >
-            <AlignJustify className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      </div>
-
-      <div className="flex-1 overflow-auto">
-        {files.map((fileData) => {
-          const isCollapsed = collapsedFiles.has(fileData.file.id)
-          return (
-            <div
-              key={fileData.file.id}
-              ref={(el) => {
-                fileRefs.current[fileData.file.id] = el
-              }}
-              className="border-b border-border last:border-b-0"
-            >
-              <button
-                onClick={() => toggleCollapse(fileData.file.id)}
-                className="sticky top-0 z-[5] w-full flex items-center gap-2 px-4 py-2 bg-muted/80 backdrop-blur-sm border-b border-border/50 text-xs hover:bg-muted transition-colors text-left"
-              >
-                {isCollapsed ? (
-                  <ChevronRight className="w-3 h-3 text-muted-foreground flex-shrink-0" />
-                ) : (
-                  <ChevronDown className="w-3 h-3 text-muted-foreground flex-shrink-0" />
-                )}
-                <span className={cn("font-mono font-semibold", getStatusColor(fileData.file.status))}>
-                  {getStatusLabel(fileData.file.status)}
-                </span>
-                <span className="font-mono text-foreground">{fileData.file.path}</span>
-                {fileData.file.additions != null && fileData.file.additions > 0 && (
-                  <span className="text-status-success">+{fileData.file.additions}</span>
-                )}
-                {fileData.file.deletions != null && fileData.file.deletions > 0 && (
-                  <span className="text-status-error">-{fileData.file.deletions}</span>
-                )}
-              </button>
-
-              {!isCollapsed && (
-                <MultiFileDiff
-                  oldFile={fileData.oldFile}
-                  newFile={fileData.newFile}
-                  options={{
-                    theme: { dark: "pierre-dark", light: "pierre-light" },
-                    diffStyle: diffStyle,
-                    diffIndicators: "bars",
-                    hunkSeparators: "line-info",
-                    lineDiffType: "word-alt",
-                    enableLineSelection: true,
-                  }}
-                />
-              )}
-            </div>
-          )
-        })}
       </div>
     </div>
   )
