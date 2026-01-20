@@ -60,6 +60,33 @@ test("terminal background matches card background and survives reload", async ({
   expect(Math.abs(pixelAfter.b - (rgbAfter?.b ?? 0))).toBeLessThanOrEqual(tol)
 })
 
+test("terminal scrollbar is thin like chat scrollbar", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  const terminal = page.getByTestId("pty-terminal")
+  await expect
+    .poll(async () => await terminal.locator("canvas").count(), { timeout: 20_000 })
+    .toBeGreaterThan(0)
+
+  const widths = await terminal.evaluate((outer) => {
+    const scrollbar = outer.querySelector(".xterm-scrollable-element > .scrollbar.vertical") as HTMLElement | null
+    const slider = outer.querySelector(".xterm-scrollable-element > .scrollbar.vertical > .slider") as HTMLElement | null
+    if (!scrollbar || !slider) return null
+    return {
+      scrollbar: scrollbar.getBoundingClientRect().width,
+      slider: slider.getBoundingClientRect().width,
+    }
+  })
+
+  expect(widths, "terminal scrollbar DOM not found").not.toBeNull()
+  expect(widths?.scrollbar ?? 0).toBeGreaterThan(0)
+  expect(widths?.slider ?? 0).toBeGreaterThan(0)
+
+  const max = 10
+  expect(widths?.scrollbar ?? 0).toBeLessThanOrEqual(max)
+  expect(widths?.slider ?? 0).toBeLessThanOrEqual(max)
+})
+
 test("terminal paste sends input frames", async ({ page }) => {
   const token = `luban-e2e-paste-${Math.random().toString(16).slice(2)}`
   const payload = `echo ${token}\n`

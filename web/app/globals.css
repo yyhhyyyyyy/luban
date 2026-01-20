@@ -221,7 +221,44 @@
     background-color: transparent !important;
   }
 
+  .luban-terminal .xterm-scrollable-element {
+    background-color: transparent !important;
+  }
+
   /* Keep terminal scrollbars consistent with the chat scrollbar style. */
+  .luban-terminal .xterm-scrollable-element > .scrollbar.vertical {
+    left: auto !important;
+    right: 0 !important;
+    width: 8px !important;
+  }
+
+  .luban-terminal .xterm-scrollable-element > .scrollbar.horizontal {
+    height: 8px !important;
+  }
+
+  .luban-terminal .xterm-scrollable-element > .scrollbar.vertical > .slider {
+    width: 100% !important;
+  }
+
+  .luban-terminal .xterm-scrollable-element > .scrollbar.horizontal > .slider {
+    height: 100% !important;
+  }
+
+  .luban-terminal .xterm-scrollable-element > .scrollbar > .slider {
+    background-color: transparent !important;
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  .luban-terminal:hover .xterm-scrollable-element > .scrollbar > .slider {
+    background-color: color-mix(in srgb, var(--muted-foreground) 35%, transparent) !important;
+  }
+
+  .luban-terminal:hover .xterm-scrollable-element > .scrollbar > .slider:hover {
+    background-color: color-mix(in srgb, var(--muted-foreground) 55%, transparent) !important;
+  }
+
   .luban-terminal .xterm-viewport {
     scrollbar-width: thin;
     scrollbar-color: color-mix(in srgb, var(--muted-foreground) 45%, transparent) transparent;
