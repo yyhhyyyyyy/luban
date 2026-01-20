@@ -174,8 +174,24 @@ fn sign_archive(archive_path: &Path) -> Result<String> {
 
     let mut sign = ProcessCommand::new("cargo");
     sign.arg("tauri").arg("signer").arg("sign").arg(archive_path);
-    let sig = run_cmd_capture_stdout(sign, "cargo tauri signer sign")?;
-    Ok(sig)
+    let output = run_cmd_capture_stdout(sign, "cargo tauri signer sign")?;
+
+    // `cargo tauri signer sign` prints human-friendly messages on stdout.
+    // Extract the actual signature by taking the last base64-ish line.
+    let signature = output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .filter(|line| {
+            line.len() >= 32
+                && line
+                    .bytes()
+                    .all(|b| matches!(b, b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'+' | b'/' | b'=' | b'-' | b'_'))
+        })
+        .last()
+        .with_context(|| format!("failed to parse signature from cargo tauri signer output:\n{output}"))?;
+
+    Ok(signature.to_owned())
 }
 
 fn package_env_required() -> Result<()> {
@@ -183,6 +199,44 @@ fn package_env_required() -> Result<()> {
     if !has_key {
         anyhow::bail!("missing signing key; set TAURI_PRIVATE_KEY or TAURI_PRIVATE_KEY_PATH (and optional TAURI_PRIVATE_KEY_PASSWORD)");
     }
+    Ok(())
+}
+
+fn codesign_required_identity() -> Result<String> {
+    if std::env::consts::OS != "macos" {
+        anyhow::bail!("macos codesign is only supported on macos hosts");
+    }
+    env_var_opt("APPLE_CODESIGN_IDENTITY")
+        .or_else(|| env_var_opt("APPLE_SIGNING_IDENTITY"))
+        .context("missing codesign identity; set APPLE_CODESIGN_IDENTITY (or APPLE_SIGNING_IDENTITY)")
+}
+
+fn codesign_app(app_dir: &Path) -> Result<()> {
+    let identity = codesign_required_identity()?;
+
+    if !ProcessCommand::new("codesign").arg("--version").output().is_ok() {
+        anyhow::bail!("codesign not found; install Xcode command line tools to sign macOS bundles");
+    }
+
+    let mut sign = ProcessCommand::new("codesign");
+    sign.arg("--force")
+        .arg("--deep")
+        .arg("--options")
+        .arg("runtime")
+        .arg("--timestamp")
+        .arg("--sign")
+        .arg(identity)
+        .arg(app_dir);
+    run_cmd(sign, "codesign app")?;
+
+    let mut verify = ProcessCommand::new("codesign");
+    verify
+        .arg("--verify")
+        .arg("--deep")
+        .arg("--strict")
+        .arg(app_dir);
+    run_cmd(verify, "codesign verify")?;
+
     Ok(())
 }
 
@@ -226,6 +280,10 @@ fn run_package(target: String, profile: String, out_dir: PathBuf) -> Result<()> 
     let app_dir = find_first_app_dir(&bundle_macos)?
         .with_context(|| format!("macOS bundle not found under: {}", bundle_macos.display()))?;
 
+    if profile == "release" {
+        codesign_app(&app_dir)?;
+    }
+
     std::fs::create_dir_all(&out_dir).with_context(|| format!("create {}", out_dir.display()))?;
 
     let archive_name = format!("Luban_{version}_{platform_key}.app.tar.gz");
@@ -244,7 +302,7 @@ fn run_package(target: String, profile: String, out_dir: PathBuf) -> Result<()> 
     std::fs::write(&sig_path, format!("{signature}\n")).with_context(|| format!("write {}", sig_path.display()))?;
 
     let base_url = env_var_opt("LUBAN_RELEASE_BASE_URL").unwrap_or_else(|| "https://releases.luban.dev".to_owned());
-    let url = format!("{}/{}", base_url.trim_end_matches('/'), archive_name);
+    let url = format!("{}/{}/{}", base_url.trim_end_matches('/'), version, archive_name);
     let pub_date = now_rfc3339_utc()?;
 
     let platforms = if platform_key == "darwin-universal" {
@@ -357,6 +415,11 @@ async fn run_upload(package_env: PathBuf) -> Result<()> {
     let region = env_var_opt("AWS_DEFAULT_REGION").unwrap_or_else(|| "auto".to_owned());
 
     let kv = read_kv_file(&package_env)?;
+    let version = kv
+        .get("LUBAN_PACKAGE_VERSION")
+        .context("LUBAN_PACKAGE_VERSION missing from package.env")?
+        .trim()
+        .to_owned();
     let archive_path = PathBuf::from(
         kv.get("LUBAN_PACKAGE_ARCHIVE")
             .context("LUBAN_PACKAGE_ARCHIVE missing from package.env")?,
@@ -370,7 +433,8 @@ async fn run_upload(package_env: PathBuf) -> Result<()> {
             .context("LUBAN_PACKAGE_MANIFEST missing from package.env")?,
     );
 
-    let archive_key = file_name(&archive_path)?;
+    let archive_name = file_name(&archive_path)?;
+    let archive_key = format!("{version}/{archive_name}");
     let signature_key = format!("{archive_key}.sig");
 
     let op = build_r2_operator(
