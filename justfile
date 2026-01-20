@@ -106,11 +106,11 @@ build-server profile="debug":
 ci: fmt lint test
 
 package target profile="release":
-  cargo run --manifest-path=dev/Cargo.toml -- package "{{target}}" --profile "{{profile}}"
+  cargo run --quiet --manifest-path=dev/Cargo.toml -- package "{{target}}" --profile "{{profile}}"
 
 upload:
   if [ ! -f .context/package/package.env ]; then \
     echo "missing .context/package/package.env; run: just package darwin-aarch64"; \
     exit 1; \
   fi; \
-  cargo run --manifest-path=dev/Cargo.toml -- upload
+  cargo run --quiet --manifest-path=dev/Cargo.toml -- upload
