@@ -55,17 +55,8 @@ import { openSettingsPanel } from "@/lib/open-settings"
 import { computeProjectDisplayNames } from "@/lib/project-display-names"
 import { focusChatInput } from "@/lib/focus-chat-input"
 import { useAgentCancelHotkey } from "@/lib/use-agent-cancel-hotkey"
-
-interface ChatTab {
-  id: string
-  title: string
-  isActive: boolean
-}
-
-interface ArchivedTab {
-  id: string
-  title: string
-}
+import { useThreadTabs, type ArchivedTab } from "@/lib/use-thread-tabs"
+import { ThreadTabsBar } from "@/components/thread-tabs-bar"
 
 type ComposerAttachment = EditorComposerAttachment
 interface DiffFileData {
@@ -81,7 +72,6 @@ export function ChatPanel({
   pendingDiffFile?: ChangedFile | null
   onDiffFileOpened?: () => void
 }) {
-  const [showTabDropdown, setShowTabDropdown] = useState(false)
   const [codexCustomPrompts, setCodexCustomPrompts] = useState<CodexCustomPromptSnapshot[]>([])
 
   const scrollContainerRef = useRef<HTMLDivElement | null>(null)
@@ -360,70 +350,11 @@ export function ChatPanel({
     el.select()
   }, [isRenamingBranch])
 
-  const threadsById = useMemo(() => {
-    const out = new Map<number, (typeof threads)[number]>()
-    for (const t of threads) out.set(t.thread_id, t)
-    return out
-  }, [threads])
-
-  const { openThreadIds, closedThreadIds } = useMemo(() => {
-    const all = threads.map((t) => t.thread_id)
-    if (all.length === 0) return { openThreadIds: [] as number[], closedThreadIds: [] as number[] }
-
-    const openFromTabs = (workspaceTabs?.open_tabs ?? []).filter((id) => threadsById.has(id))
-    const archivedFromTabs = (workspaceTabs?.archived_tabs ?? []).filter((id) => threadsById.has(id))
-
-    const open = [...openFromTabs]
-    if (
-      activeThreadId != null &&
-      threadsById.has(activeThreadId) &&
-      !open.includes(activeThreadId)
-    ) {
-      open.push(activeThreadId)
-    }
-
-    const known = new Set<number>([...open, ...archivedFromTabs])
-    const recovered = all.filter((id) => !known.has(id))
-
-    return {
-      openThreadIds: open.length > 0 ? open : [all[0]!],
-      closedThreadIds: [...recovered, ...archivedFromTabs],
-    }
-  }, [threads, threadsById, workspaceTabs?.open_tabs, workspaceTabs?.archived_tabs, activeThreadId])
-
-  const openThreads = useMemo(() => {
-    const out: (typeof threads)[number][] = []
-    for (const id of openThreadIds) {
-      const t = threadsById.get(id)
-      if (t) out.push(t)
-    }
-    return out
-  }, [openThreadIds, threadsById])
-
-  const archivedTabs: ArchivedTab[] = useMemo(() => {
-    const out: ArchivedTab[] = []
-    for (const id of [...closedThreadIds].reverse()) {
-      const t = threadsById.get(id)
-      if (t) {
-        out.push({ id: String(id), title: t.title })
-      } else {
-        out.push({ id: String(id), title: `Thread ${id}` })
-      }
-    }
-    return out
-  }, [threadsById, closedThreadIds])
-
-  const tabs: ChatTab[] = useMemo(
-    () =>
-      openThreads.map((t) => ({
-        id: String(t.thread_id),
-        title: t.title,
-        isActive: t.thread_id === activeThreadId,
-      })),
-    [openThreads, activeThreadId],
-  )
-
-  const activeTabId = activeThreadId != null ? String(activeThreadId) : ""
+  const { tabs, archivedTabs, openThreadIds, activeTabId } = useThreadTabs({
+    threads,
+    workspaceTabs,
+    activeThreadId,
+  })
 
   useEffect(() => {
     if (activeWorkspaceId == null || activeThreadId == null) {
@@ -558,7 +489,6 @@ export function ChatPanel({
     if (activeWorkspaceId == null) return
     const id = Number(tab.id)
     if (!Number.isFinite(id)) return
-    setShowTabDropdown(false)
     void restoreThreadTab(id)
   }
 
@@ -1140,155 +1070,19 @@ export function ChatPanel({
         </div>
       </div>
 
-      <div className="flex items-center h-10 border-b border-border bg-muted/30">
-        <div className="flex-1 flex items-center min-w-0 overflow-x-auto scrollbar-none">
-          {tabs.map((tab) => (
-            <div
-              key={tab.id}
-              onClick={() => handleTabClick(tab.id)}
-              className={cn(
-                "group relative flex items-center gap-2 h-10 px-3 cursor-pointer transition-colors min-w-0 max-w-[180px]",
-                activePanel === "thread" && tab.id === activeTabId
-                  ? "text-foreground bg-background"
-                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50",
-              )}
-            >
-              <MessageSquare className="w-3.5 h-3.5 flex-shrink-0" />
-              <span data-testid="thread-tab-title" className="text-xs truncate flex-1">
-                {tab.title}
-              </span>
-              {tabs.length > 1 && (
-                <button
-                  onClick={(e) => handleCloseTab(tab.id, e)}
-                  className="p-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto hover:bg-muted rounded transition-all"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              )}
-              {activePanel === "thread" && tab.id === activeTabId && (
-                <div className="absolute bottom-0 left-2 right-2 h-0.5 bg-primary rounded-full" />
-              )}
-            </div>
-          ))}
-
-          {isDiffTabOpen && (
-            <div
-              key="diff-tab"
-              onClick={handleDiffTabClick}
-              className={cn(
-                "group relative flex items-center gap-2 h-10 px-3 cursor-pointer transition-colors min-w-0 max-w-[180px]",
-                activePanel === "diff"
-                  ? "text-foreground bg-background"
-                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50",
-              )}
-            >
-              <GitCompareArrows className="w-3.5 h-3.5 flex-shrink-0" />
-              <span className="text-xs truncate flex-1">Changes</span>
-              <button
-                onClick={handleCloseDiffTab}
-                className="p-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto hover:bg-muted rounded transition-all"
-                title="Close changes tab"
-              >
-                <X className="w-3 h-3" />
-              </button>
-              {activePanel === "diff" && (
-                <div className="absolute bottom-0 left-2 right-2 h-0.5 bg-primary rounded-full" />
-              )}
-            </div>
-          )}
-
-          <button
-            onClick={handleAddTab}
-            className="flex items-center justify-center w-8 h-10 text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors flex-shrink-0"
-            title="New tab"
-          >
-            <Plus className="w-4 h-4" />
-          </button>
-        </div>
-
-        <div className="flex items-center px-1">
-          <div className="relative">
-            <button
-              onClick={() => setShowTabDropdown(!showTabDropdown)}
-              className={cn(
-                "flex items-center justify-center w-8 h-8 text-muted-foreground hover:text-foreground hover:bg-muted rounded transition-colors",
-                showTabDropdown && "bg-muted text-foreground",
-              )}
-              title="All tabs"
-            >
-              <ChevronDown className="w-4 h-4" />
-            </button>
-
-            {showTabDropdown && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setShowTabDropdown(false)} />
-                <div className="absolute right-0 top-full mt-1 w-64 bg-card border border-border rounded-lg shadow-xl z-50 overflow-hidden">
-                  <div className="p-2 border-b border-border">
-                    <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium px-2">
-                      Open Tabs
-                    </span>
-                  </div>
-                  <div className="max-h-40 overflow-y-auto">
-                    {isDiffTabOpen && (
-                      <button
-                        onClick={() => {
-                          handleDiffTabClick()
-                          setShowTabDropdown(false)
-                        }}
-                        className={cn(
-                          "w-full flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-muted transition-colors",
-                          activePanel === "diff" && "bg-primary/10 text-primary",
-                        )}
-                      >
-                        <GitCompareArrows className="w-3.5 h-3.5 flex-shrink-0" />
-                        <span className="truncate">Changes</span>
-                      </button>
-                    )}
-                    {tabs.map((tab) => (
-                      <button
-                        key={tab.id}
-                        onClick={() => {
-                          handleTabClick(tab.id)
-                          setShowTabDropdown(false)
-                        }}
-                        className={cn(
-                          "w-full flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-muted transition-colors",
-                          activePanel === "thread" && tab.id === activeTabId && "bg-primary/10 text-primary",
-                        )}
-                      >
-                        <MessageSquare className="w-3.5 h-3.5 flex-shrink-0" />
-                        <span className="truncate">{tab.title}</span>
-                      </button>
-                    ))}
-                  </div>
-
-                  {archivedTabs.length > 0 && (
-                    <>
-                      <div className="p-2 border-t border-border">
-                        <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium px-2">
-                          Recently Closed
-                        </span>
-                      </div>
-                      <div className="max-h-32 overflow-y-auto">
-                        {archivedTabs.map((tab) => (
-                          <button
-                            key={tab.id}
-                            onClick={() => handleRestoreTab(tab)}
-                            className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-                          >
-                            <RotateCcw className="w-3.5 h-3.5 flex-shrink-0" />
-                            <span className="truncate flex-1">{tab.title}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
+      <ThreadTabsBar
+        tabs={tabs}
+        archivedTabs={archivedTabs}
+        activeTabId={activeTabId}
+        activePanel={activePanel}
+        isDiffTabOpen={isDiffTabOpen}
+        onTabClick={handleTabClick}
+        onCloseTab={handleCloseTab}
+        onAddTab={handleAddTab}
+        onDiffTabClick={handleDiffTabClick}
+        onCloseDiffTab={handleCloseDiffTab}
+        onRestoreTab={handleRestoreTab}
+      />
 
       {activePanel === "diff" ? (
         <div className="flex-1 overflow-hidden">
