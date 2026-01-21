@@ -29,6 +29,12 @@ High-fidelity AI IDE mock used as a design system demo. The goal is consistent t
 pnpm dev
 ```
 
+## Workflow (Design-first UI)
+
+- Treat this project as the interaction and visual source of truth.
+- Commit `design/` changes first.
+- Align `web/` by applying the `design` commit diff as the implementation checklist.
+
 ## Commands
 
 ```bash
