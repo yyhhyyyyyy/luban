@@ -5,6 +5,13 @@ pub use codex::{
     CodexThreadItem, CodexTodoItem, CodexUsage,
 };
 
+mod agent_thread;
+pub use agent_thread::{
+    AgentCommandExecutionStatus, AgentErrorMessage, AgentFileUpdateChange, AgentMcpToolCallStatus,
+    AgentPatchApplyStatus, AgentPatchChangeKind, AgentThreadError, AgentThreadEvent,
+    AgentThreadItem, AgentTodoItem, AgentUsage,
+};
+
 mod adapters;
 pub use adapters::{
     CodexConfigEntry, CodexConfigEntryKind, ContextImage, CreatedWorkspace, OpenTarget,
