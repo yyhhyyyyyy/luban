@@ -15,6 +15,17 @@ This document constrains and guides how AI agents (and human contributors) shoul
 - Keep changes small and reviewable. For functional changes, add or update tests.
 - After finishing a task, run the relevant checks, then commit and push.
 
+## 0.0 Design-first UI workflow (required)
+
+The `design/` project is the high-fidelity interaction reference. For UI/UX work, the workflow is:
+
+- **Design first**: implement and commit changes in `design/` before changing `web/`.
+- **Align by diff**: use the `design` commit diff as the alignment checklist for `web/` implementation.
+- **Two-commit rule (preferred)**:
+  - Commit 1: `design/**` only
+  - Commit 2: `web/**` only, and the message MUST reference the design commit hash
+- **Exceptions**: backend-only or non-UI changes MAY skip `design/`, but the PR description MUST explicitly state why.
+
 ## 0.1 Postmortems (required)
 
 This repository treats postmortems as a first-class engineering artifact.
@@ -164,6 +175,10 @@ Every delivery must include at least:
 2) Run and test commands (via `just`, e.g., `just fmt && just lint && just test`)
 3) Manual verification steps (3–7 steps)
 4) Risk points and rollback approach (if applicable)
+
+For any UI/UX changes in `web/`, also include:
+5) The design commit hash used as the source-of-truth
+6) A short alignment checklist derived from the `design` diff (what changed and where it was applied)
 
 ## 10. Prohibited items (hard prohibitions)
 - Do not bypass the `just` workflow by writing a pile of cargo commands (unless the justfile does not cover it, and you explain why)
