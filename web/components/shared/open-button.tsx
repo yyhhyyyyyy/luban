@@ -15,10 +15,10 @@ function BrandIcon({ src, alt, className }: { src: string; alt: string; classNam
     <Image
       src={src}
       alt={alt}
-      width={16}
-      height={16}
+      width={12}
+      height={12}
       className={className}
-      style={{ width: "auto", height: "auto", maxWidth: 14, maxHeight: 14 }}
+      style={{ width: 12, height: 12 }}
     />
   )
 }
@@ -144,17 +144,17 @@ export function OpenButton() {
         disabled={disabled}
         data-testid="open-button-primary"
         className={cn(
-          "inline-flex items-center gap-1.5 px-2 py-1 text-xs transition-colors rounded-l",
+          "inline-flex items-center gap-1 text-xs transition-colors rounded-l px-1",
           "text-muted-foreground hover:text-foreground hover:bg-muted",
           disabled && "opacity-60 cursor-default hover:bg-transparent hover:text-muted-foreground",
         )}
       >
         {copied && selection.type === "action" && selection.id === "copy-path" ? (
-          <Check className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />
+          <Check className="w-3 h-3 text-green-500 flex-shrink-0" />
         ) : (
-          renderIcon(config.icon, "w-3.5 h-3.5 flex-shrink-0")
+          renderIcon(config.icon, "w-3 h-3 flex-shrink-0")
         )}
-        <span className="pr-1">{config.name}</span>
+        <span className="text-xs">{config.name}</span>
       </button>
 
       <button

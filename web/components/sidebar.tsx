@@ -312,8 +312,8 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
             >
               <div
                 className={cn(
-                  "flex items-center hover:bg-sidebar-accent/50 transition-colors",
-                  isStandaloneMainActive && "bg-sidebar-accent/30",
+                  "relative flex items-center transition-colors",
+                  isStandaloneMainActive ? "bg-primary/6" : "hover:bg-sidebar-accent/50",
                 )}
               >
                 <button
@@ -335,7 +335,9 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
                   }}
                   className={cn(
                     "flex-1 flex items-center gap-2 px-3 py-1.5 text-left",
-                    !canExpand && !standaloneMainWorktree && "cursor-default",
+                    canExpand || standaloneMainWorktree || project.worktrees.length === 0
+                      ? "cursor-pointer"
+                      : "cursor-default",
                   )}
                 >
                   {canExpand ? (
@@ -351,7 +353,13 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
                   ) : (
                     <span className="w-3 h-3 flex-shrink-0" />
                   )}
-                  <span className="text-sm text-muted-foreground truncate flex-1" title={project.path}>
+                  <span
+                    className={cn(
+                      "text-sm truncate flex-1 transition-colors",
+                      isStandaloneMainActive ? "text-foreground" : "text-muted-foreground",
+                    )}
+                    title={project.path}
+                  >
                     {project.displayName}
                   </span>
                   {canExpand && !isExpanded && activeCount > 0 && (
@@ -360,6 +368,12 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
                     </span>
                   )}
                 </button>
+                {isStandaloneMainActive && (
+                  <div
+                    data-testid="project-active-underline"
+                    className="absolute bottom-0 left-3 right-3 h-0.5 bg-primary rounded-full"
+                  />
+                )}
                 <div className="flex items-center gap-0.5 pr-2 opacity-0 group-hover/project:opacity-100 transition-opacity">
                   {project.isGit && (
                     <button
@@ -405,8 +419,8 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
                     <div
                       key={worktree.workspaceId}
                       className={cn(
-                        "group/worktree flex items-center gap-2 px-2 py-1.5 hover:bg-sidebar-accent/30 transition-all cursor-pointer rounded mx-1",
-                        worktree.workspaceId === activeWorkspaceId && "bg-sidebar-accent/30",
+                        "group/worktree relative flex items-center gap-2 px-2 py-1.5 transition-all cursor-pointer",
+                        worktree.workspaceId === activeWorkspaceId ? "bg-primary/6" : "hover:bg-sidebar-accent/30",
                         newlyCreatedWorkspaceId === worktree.workspaceId &&
                           "animate-in slide-in-from-left-2 fade-in duration-300 ring-1 ring-primary/30",
                         worktree.isArchiving && "animate-pulse opacity-50 pointer-events-none",
@@ -485,6 +499,12 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
 	                          <Archive className="w-3 h-3" />
 	                        </button>
 	                      )}
+                      {worktree.workspaceId === activeWorkspaceId && (
+                        <div
+                          data-testid="worktree-active-underline"
+                          className="absolute bottom-0 left-2 right-2 h-0.5 bg-primary rounded-full"
+                        />
+                      )}
                     </div>
                   ))}
 

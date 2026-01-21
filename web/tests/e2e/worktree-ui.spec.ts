@@ -121,6 +121,15 @@ test("switching between worktrees keeps chat content stable (no flash)", async (
 
   await projectContainer.getByTestId("worktree-branch-name").filter({ hasText: nameA }).first().click()
   await expect(page.getByText(tokenA).first()).toBeVisible({ timeout: 20_000 })
+  {
+    const row = projectContainer
+      .getByTestId("worktree-branch-name")
+      .filter({ hasText: nameA })
+      .first()
+      .locator("..")
+      .locator("..")
+    await expect(row.getByTestId("worktree-active-underline")).toBeVisible({ timeout: 10_000 })
+  }
 
   const nameB = await page.evaluate(async (workspaceId) => {
     const res = await fetch("/api/app")
@@ -136,6 +145,15 @@ test("switching between worktrees keeps chat content stable (no flash)", async (
 
   await projectContainer.getByTestId("worktree-branch-name").filter({ hasText: String(nameB) }).first().click()
   await expect(page.getByText(tokenB).first()).toBeVisible({ timeout: 20_000 })
+  {
+    const row = projectContainer
+      .getByTestId("worktree-branch-name")
+      .filter({ hasText: String(nameB) })
+      .first()
+      .locator("..")
+      .locator("..")
+    await expect(row.getByTestId("worktree-active-underline")).toBeVisible({ timeout: 10_000 })
+  }
 
   const sawEmptyState = await page.evaluate(() => Boolean((window as any).__e2eSawChatEmptyState))
   expect(sawEmptyState).toBe(false)
