@@ -60,20 +60,50 @@ fn webview_devtools_enabled() -> bool {
     false
 }
 
+fn build_app_menu<R: tauri::Runtime, M: tauri::Manager<R>>(
+    manager: &M,
+) -> anyhow::Result<tauri::menu::Menu<R>> {
+    let menu_builder = tauri::menu::MenuBuilder::new(manager).item(&{
+        let app_submenu_builder = tauri::menu::SubmenuBuilder::new(manager, "Luban")
+            .text(MENU_ID_CHECK_FOR_UPDATES, "Check for Updates...")
+            .separator()
+            .about(None);
+
+        #[cfg(target_os = "macos")]
+        let app_submenu_builder = app_submenu_builder
+            .separator()
+            .services()
+            .separator()
+            .hide()
+            .hide_others();
+
+        let app_submenu_builder = app_submenu_builder.separator().quit();
+
+        app_submenu_builder.build().context("build app submenu")?
+    });
+
+    let menu_builder = menu_builder.item(&{
+        let edit_submenu_builder = tauri::menu::SubmenuBuilder::new(manager, "Edit");
+
+        #[cfg(target_os = "macos")]
+        let edit_submenu_builder = edit_submenu_builder.undo().redo().separator();
+
+        edit_submenu_builder
+            .cut()
+            .copy()
+            .paste()
+            .separator()
+            .select_all()
+            .build()
+            .context("build edit submenu")?
+    });
+
+    menu_builder.build().context("build app menu")
+}
+
 fn install_app_menu(app: &tauri::App) -> anyhow::Result<()> {
     let handle = app.handle();
-    let menu = tauri::menu::MenuBuilder::new(handle)
-        .item(
-            &tauri::menu::SubmenuBuilder::new(handle, "Luban")
-                .text(MENU_ID_CHECK_FOR_UPDATES, "Check for Updates...")
-                .separator()
-                .about(None)
-                .quit()
-                .build()
-                .context("build app submenu")?,
-        )
-        .build()
-        .context("build app menu")?;
+    let menu = build_app_menu(handle)?;
     app.set_menu(menu).context("set app menu")?;
     Ok(())
 }
@@ -270,6 +300,76 @@ fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // `muda` requires creating menu items on the macOS main thread.
+    // Rust's test harness runs `#[test]` functions on worker threads, so these
+    // menu-structure assertions are only enabled off macOS.
+    #[cfg(not(target_os = "macos"))]
+    fn find_submenu<R: tauri::Runtime>(
+        menu: &tauri::menu::Menu<R>,
+        name: &str,
+    ) -> tauri::menu::Submenu<R> {
+        menu.items()
+            .expect("menu items must be available")
+            .into_iter()
+            .filter_map(|item| match item {
+                tauri::menu::MenuItemKind::Submenu(submenu) => Some(submenu),
+                _ => None,
+            })
+            .find(|submenu| match submenu.text() {
+                Ok(text) => text == name,
+                Err(_) => false,
+            })
+            .unwrap_or_else(|| panic!("submenu {name} must exist"))
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn app_menu_includes_edit_submenu_with_clipboard_items() {
+        let app = tauri::test::mock_app();
+        let menu = build_app_menu(app.handle()).expect("app menu must build");
+
+        let edit = find_submenu(&menu, "Edit");
+        let predefined_texts: Vec<String> = edit
+            .items()
+            .expect("edit submenu items must be available")
+            .into_iter()
+            .filter_map(|item| match item {
+                tauri::menu::MenuItemKind::Predefined(predefined) => predefined.text().ok(),
+                _ => None,
+            })
+            .collect();
+
+        for text in ["Cut", "Copy", "Paste", "Select All"] {
+            assert!(
+                predefined_texts.iter().any(|t| t == text),
+                "edit submenu must include {text}"
+            );
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn app_menu_includes_update_check_item() {
+        let app = tauri::test::mock_app();
+        let menu = build_app_menu(app.handle()).expect("app menu must build");
+
+        let luban = find_submenu(&menu, "Luban");
+        let menu_item_texts: Vec<String> = luban
+            .items()
+            .expect("app submenu items must be available")
+            .into_iter()
+            .filter_map(|item| match item {
+                tauri::menu::MenuItemKind::MenuItem(menu_item) => menu_item.text().ok(),
+                _ => None,
+            })
+            .collect();
+
+        assert!(
+            menu_item_texts.iter().any(|t| t == "Check for Updates..."),
+            "app submenu must include the update check item"
+        );
+    }
 
     #[test]
     fn server_addr_defaults_to_random_port() {
