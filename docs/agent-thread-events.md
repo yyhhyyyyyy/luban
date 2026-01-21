@@ -50,6 +50,7 @@ Implemented:
 - `crates/luban_domain/src/agent_thread.rs`: exported `AgentThreadEvent` and related types.
 - `crates/luban_domain/src/adapters.rs`: `ProjectWorkspaceService::run_agent_turn_streamed` now streams `AgentThreadEvent`.
 - `crates/luban_backend/src/services/amp_cli.rs`: Amp `--stream-json` parser and runner.
+- `crates/luban_backend/src/services/amp_cli.rs`: common Amp tools are normalized (bash/web_search/file edits).
 - `crates/luban_backend/src/services.rs`: backend runner selection via `LUBAN_AGENT_RUNNER=amp`.
 
 Environment variables:
@@ -63,6 +64,7 @@ Known limitations:
 - Amp runner does not support image attachments yet (returns an error if images are present).
 - Amp stream parsing is intentionally tolerant; we may need to adjust mapping once we capture more
   real-world stream variants.
+- Tool name normalization is heuristic and based on Amp built-in tool names.
 
 ## How to Verify
 
@@ -92,3 +94,4 @@ Manual smoke steps:
 
 - 2026-01-21: Introduced `AgentThreadEvent` and added Amp `--stream-json` normalization.
 - 2026-01-21: Updated `ProjectWorkspaceService` to stream `AgentThreadEvent`.
+- 2026-01-21: Mapped Amp tool_use/tool_result to richer items (bash/web_search/file changes).

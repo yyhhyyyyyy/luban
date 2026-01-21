@@ -1,7 +1,8 @@
 use anyhow::{Context as _, anyhow};
 use luban_domain::{
-    AgentErrorMessage, AgentMcpToolCallStatus, AgentThreadError, AgentThreadEvent, AgentThreadItem,
-    AgentUsage,
+    AgentCommandExecutionStatus, AgentErrorMessage, AgentFileUpdateChange, AgentMcpToolCallStatus,
+    AgentPatchApplyStatus, AgentPatchChangeKind, AgentThreadError, AgentThreadEvent,
+    AgentThreadItem, AgentUsage,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -85,7 +86,7 @@ struct AmpStreamState {
     reasoning_id: String,
     agent_message: String,
     reasoning: String,
-    tools: HashMap<String, (String, Value)>,
+    tools: HashMap<String, AmpToolUse>,
 }
 
 impl AmpStreamState {
@@ -98,6 +99,30 @@ impl AmpStreamState {
             tools: HashMap::new(),
         }
     }
+}
+
+#[derive(Clone, Debug)]
+struct AmpToolUse {
+    name: String,
+    input: Value,
+    kind: AmpToolKind,
+    summary: AmpToolSummary,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AmpToolKind {
+    CommandExecution,
+    FileChange,
+    WebSearch,
+    McpToolCall,
+}
+
+#[derive(Clone, Debug)]
+enum AmpToolSummary {
+    None,
+    Command { command: String },
+    FileChange { changes: Vec<(String, String)> },
+    WebSearch { query: String },
 }
 
 fn value_as_string(value: &Value) -> Option<String> {
@@ -122,6 +147,64 @@ fn parse_tool_result_content(content: &Value) -> Value {
         return Value::String(s.to_owned());
     }
     content.clone()
+}
+
+fn tool_name_key(name: &str) -> String {
+    name.trim().to_ascii_lowercase()
+}
+
+fn extract_string_field(value: &Value, keys: &[&str]) -> Option<String> {
+    for key in keys {
+        if let Some(v) = value.get(*key)
+            && let Some(s) = v.as_str()
+        {
+            let trimmed = s.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_owned());
+            }
+        }
+    }
+    None
+}
+
+fn summarize_tool_use(name: &str, input: &Value) -> (AmpToolKind, AmpToolSummary) {
+    let key = tool_name_key(name);
+
+    if key == "bash" {
+        let command =
+            extract_string_field(input, &["command", "cmd"]).unwrap_or_else(|| "bash".to_owned());
+        return (
+            AmpToolKind::CommandExecution,
+            AmpToolSummary::Command { command },
+        );
+    }
+
+    if key == "web_search" {
+        let query =
+            extract_string_field(input, &["query", "q"]).unwrap_or_else(|| "web_search".to_owned());
+        return (AmpToolKind::WebSearch, AmpToolSummary::WebSearch { query });
+    }
+
+    if key == "edit_file" || key == "create_file" || key == "undo_edit" {
+        let path =
+            extract_string_field(input, &["path", "file_path", "filename"]).unwrap_or_default();
+        let kind = if key == "create_file" {
+            "add"
+        } else {
+            "update"
+        };
+        let changes = if path.is_empty() {
+            Vec::new()
+        } else {
+            vec![(path, kind.to_owned())]
+        };
+        return (
+            AmpToolKind::FileChange,
+            AmpToolSummary::FileChange { changes },
+        );
+    }
+
+    (AmpToolKind::McpToolCall, AmpToolSummary::None)
 }
 
 fn parse_amp_stream_json_line(
@@ -220,20 +303,79 @@ fn parse_amp_stream_json_line(
                             .unwrap_or("tool")
                             .to_owned();
                         let input = item.get("input").cloned().unwrap_or(Value::Null);
-                        state
-                            .tools
-                            .insert(id.clone(), (name.clone(), input.clone()));
-                        out.push(AgentThreadEvent::ItemStarted {
-                            item: AgentThreadItem::McpToolCall {
-                                id,
-                                server: "amp".to_owned(),
-                                tool: name,
-                                arguments: input,
-                                result: None,
-                                error: None,
-                                status: AgentMcpToolCallStatus::InProgress,
+                        let (kind, summary) = summarize_tool_use(&name, &input);
+                        state.tools.insert(
+                            id.clone(),
+                            AmpToolUse {
+                                name: name.clone(),
+                                input: input.clone(),
+                                kind,
+                                summary,
                             },
-                        });
+                        );
+
+                        match kind {
+                            AmpToolKind::CommandExecution => {
+                                let command = match state.tools.get(&id).map(|t| &t.summary) {
+                                    Some(AmpToolSummary::Command { command }) => command.clone(),
+                                    _ => "bash".to_owned(),
+                                };
+                                out.push(AgentThreadEvent::ItemStarted {
+                                    item: AgentThreadItem::CommandExecution {
+                                        id,
+                                        command,
+                                        aggregated_output: String::new(),
+                                        exit_code: None,
+                                        status: AgentCommandExecutionStatus::InProgress,
+                                    },
+                                });
+                            }
+                            AmpToolKind::WebSearch => {
+                                let query = match state.tools.get(&id).map(|t| &t.summary) {
+                                    Some(AmpToolSummary::WebSearch { query }) => query.clone(),
+                                    _ => String::new(),
+                                };
+                                out.push(AgentThreadEvent::ItemStarted {
+                                    item: AgentThreadItem::WebSearch { id, query },
+                                });
+                            }
+                            AmpToolKind::FileChange => {
+                                let changes = match state.tools.get(&id).map(|t| &t.summary) {
+                                    Some(AmpToolSummary::FileChange { changes }) => changes
+                                        .iter()
+                                        .map(|(path, kind)| AgentFileUpdateChange {
+                                            path: path.clone(),
+                                            kind: match kind.as_str() {
+                                                "add" => AgentPatchChangeKind::Add,
+                                                "delete" => AgentPatchChangeKind::Delete,
+                                                _ => AgentPatchChangeKind::Update,
+                                            },
+                                        })
+                                        .collect(),
+                                    _ => Vec::new(),
+                                };
+                                out.push(AgentThreadEvent::ItemStarted {
+                                    item: AgentThreadItem::FileChange {
+                                        id,
+                                        changes,
+                                        status: AgentPatchApplyStatus::InProgress,
+                                    },
+                                });
+                            }
+                            AmpToolKind::McpToolCall => {
+                                out.push(AgentThreadEvent::ItemStarted {
+                                    item: AgentThreadItem::McpToolCall {
+                                        id,
+                                        server: "amp".to_owned(),
+                                        tool: name,
+                                        arguments: input,
+                                        result: None,
+                                        error: None,
+                                        status: AgentMcpToolCallStatus::InProgress,
+                                    },
+                                });
+                            }
+                        }
                     }
                     _ => {}
                 }
@@ -265,35 +407,134 @@ fn parse_amp_stream_json_line(
                     .unwrap_or(false);
                 let content_value = item.get("content").cloned().unwrap_or(Value::Null);
 
-                let (tool, arguments) = state
-                    .tools
-                    .get(&tool_use_id)
-                    .cloned()
-                    .unwrap_or_else(|| ("tool".to_owned(), Value::Null));
-
                 let result = parse_tool_result_content(&content_value);
-                out.push(AgentThreadEvent::ItemCompleted {
-                    item: AgentThreadItem::McpToolCall {
-                        id: tool_use_id,
-                        server: "amp".to_owned(),
-                        tool,
-                        arguments,
-                        result: if is_error { None } else { Some(result.clone()) },
-                        error: if is_error {
-                            Some(AgentErrorMessage {
-                                message: value_as_string(&result)
-                                    .unwrap_or_else(|| result.to_string()),
-                            })
-                        } else {
-                            None
-                        },
-                        status: if is_error {
-                            AgentMcpToolCallStatus::Failed
-                        } else {
-                            AgentMcpToolCallStatus::Completed
-                        },
-                    },
+
+                let tool = state.tools.get(&tool_use_id).cloned().unwrap_or_else(|| {
+                    let (kind, summary) = summarize_tool_use("tool", &Value::Null);
+                    AmpToolUse {
+                        name: "tool".to_owned(),
+                        input: Value::Null,
+                        kind,
+                        summary,
+                    }
                 });
+
+                match tool.kind {
+                    AmpToolKind::CommandExecution => {
+                        let (aggregated_output, exit_code) = match result.as_object() {
+                            Some(obj) => {
+                                let stdout =
+                                    obj.get("stdout").and_then(Value::as_str).unwrap_or("");
+                                let stderr =
+                                    obj.get("stderr").and_then(Value::as_str).unwrap_or("");
+                                let output = if stdout.is_empty() && stderr.is_empty() {
+                                    value_as_string(&result).unwrap_or_default()
+                                } else if stderr.is_empty() {
+                                    stdout.to_owned()
+                                } else if stdout.is_empty() {
+                                    stderr.to_owned()
+                                } else {
+                                    format!("{stdout}\n{stderr}")
+                                };
+
+                                let exit_code = obj
+                                    .get("exitCode")
+                                    .or_else(|| obj.get("exit_code"))
+                                    .and_then(Value::as_i64)
+                                    .and_then(|v| i32::try_from(v).ok());
+
+                                (output, exit_code)
+                            }
+                            None => (
+                                value_as_string(&result).unwrap_or_else(|| result.to_string()),
+                                None,
+                            ),
+                        };
+
+                        let command = match tool.summary {
+                            AmpToolSummary::Command { command } => command,
+                            _ => "bash".to_owned(),
+                        };
+
+                        out.push(AgentThreadEvent::ItemCompleted {
+                            item: AgentThreadItem::CommandExecution {
+                                id: tool_use_id,
+                                command,
+                                aggregated_output,
+                                exit_code,
+                                status: if is_error {
+                                    AgentCommandExecutionStatus::Failed
+                                } else {
+                                    AgentCommandExecutionStatus::Completed
+                                },
+                            },
+                        });
+                    }
+                    AmpToolKind::WebSearch => {
+                        let query = match tool.summary {
+                            AmpToolSummary::WebSearch { query } => query,
+                            _ => String::new(),
+                        };
+                        out.push(AgentThreadEvent::ItemCompleted {
+                            item: AgentThreadItem::WebSearch {
+                                id: tool_use_id,
+                                query,
+                            },
+                        });
+                    }
+                    AmpToolKind::FileChange => {
+                        let changes = match tool.summary {
+                            AmpToolSummary::FileChange { changes } => changes
+                                .into_iter()
+                                .map(|(path, kind)| AgentFileUpdateChange {
+                                    path,
+                                    kind: match kind.as_str() {
+                                        "add" => AgentPatchChangeKind::Add,
+                                        "delete" => AgentPatchChangeKind::Delete,
+                                        _ => AgentPatchChangeKind::Update,
+                                    },
+                                })
+                                .collect(),
+                            _ => Vec::new(),
+                        };
+
+                        out.push(AgentThreadEvent::ItemCompleted {
+                            item: AgentThreadItem::FileChange {
+                                id: tool_use_id,
+                                changes,
+                                status: if is_error {
+                                    AgentPatchApplyStatus::Failed
+                                } else {
+                                    AgentPatchApplyStatus::Completed
+                                },
+                            },
+                        });
+                    }
+                    AmpToolKind::McpToolCall => {
+                        out.push(AgentThreadEvent::ItemCompleted {
+                            item: AgentThreadItem::McpToolCall {
+                                id: tool_use_id,
+                                server: "amp".to_owned(),
+                                tool: tool.name,
+                                arguments: tool.input,
+                                result: if is_error { None } else { Some(result.clone()) },
+                                error: if is_error {
+                                    Some(AgentErrorMessage {
+                                        message: value_as_string(&result)
+                                            .unwrap_or_else(|| result.to_string()),
+                                    })
+                                } else {
+                                    None
+                                },
+                                status: if is_error {
+                                    AgentMcpToolCallStatus::Failed
+                                } else {
+                                    AgentMcpToolCallStatus::Completed
+                                },
+                            },
+                        });
+                    }
+                }
             }
         }
         return Ok(out);
@@ -539,7 +780,7 @@ mod tests {
         .expect("parse ok");
         assert!(matches!(
             events.as_slice(),
-            [AgentThreadEvent::ItemStarted { item: AgentThreadItem::McpToolCall { id, .. } }] if id == "t1"
+            [AgentThreadEvent::ItemStarted { item: AgentThreadItem::CommandExecution { id, .. } }] if id == "t1"
         ));
 
         let events = parse_amp_stream_json_line(
@@ -549,7 +790,7 @@ mod tests {
         .expect("parse ok");
         assert!(matches!(
             events.as_slice(),
-            [AgentThreadEvent::ItemCompleted { item: AgentThreadItem::McpToolCall { id, status: AgentMcpToolCallStatus::Completed, .. } }] if id == "t1"
+            [AgentThreadEvent::ItemCompleted { item: AgentThreadItem::CommandExecution { id, status: AgentCommandExecutionStatus::Completed, .. } }] if id == "t1"
         ));
     }
 
