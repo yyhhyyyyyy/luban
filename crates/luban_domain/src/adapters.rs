@@ -1,5 +1,5 @@
 use crate::{
-    AttachmentRef, CodexThreadEvent, ContextItem, ConversationSnapshot, ConversationThreadMeta,
+    AgentThreadEvent, AttachmentRef, ContextItem, ConversationSnapshot, ConversationThreadMeta,
     PersistedAppState, QueuedPrompt, SystemTaskKind,
 };
 use std::collections::HashMap;
@@ -306,7 +306,7 @@ pub trait ProjectWorkspaceService: Send + Sync {
         &self,
         request: RunAgentTurnRequest,
         cancel: Arc<AtomicBool>,
-        on_event: Arc<dyn Fn(CodexThreadEvent) + Send + Sync>,
+        on_event: Arc<dyn Fn(AgentThreadEvent) + Send + Sync>,
     ) -> Result<(), String>;
 
     fn gh_is_authorized(&self) -> Result<bool, String>;

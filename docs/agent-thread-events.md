@@ -48,6 +48,7 @@ For server stability:
 Implemented:
 
 - `crates/luban_domain/src/agent_thread.rs`: exported `AgentThreadEvent` and related types.
+- `crates/luban_domain/src/adapters.rs`: `ProjectWorkspaceService::run_agent_turn_streamed` now streams `AgentThreadEvent`.
 - `crates/luban_backend/src/services/amp_cli.rs`: Amp `--stream-json` parser and runner.
 - `crates/luban_backend/src/services.rs`: backend runner selection via `LUBAN_AGENT_RUNNER=amp`.
 
@@ -86,3 +87,8 @@ Manual smoke steps:
 - Extend the Amp mapping to recognize common tools (bash/file edit/search) as dedicated activity
   kinds where possible.
 - Decide how to represent token usage for non-Codex runners.
+
+## Change Log
+
+- 2026-01-21: Introduced `AgentThreadEvent` and added Amp `--stream-json` normalization.
+- 2026-01-21: Updated `ProjectWorkspaceService` to stream `AgentThreadEvent`.

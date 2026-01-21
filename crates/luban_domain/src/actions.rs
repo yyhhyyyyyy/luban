@@ -1,5 +1,5 @@
 use crate::{
-    AppearanceTheme, AttachmentRef, ChatScrollAnchor, CodexThreadEvent, ContextTokenKind,
+    AgentThreadEvent, AppearanceTheme, AttachmentRef, ChatScrollAnchor, ContextTokenKind,
     ConversationSnapshot, ConversationThreadMeta, OpenTarget, PersistedAppState, ProjectId,
     SystemTaskKind, TaskIntentKind, ThinkingEffort, WorkspaceId, WorkspaceThreadId,
 };
@@ -196,7 +196,7 @@ pub enum Action {
         workspace_id: WorkspaceId,
         thread_id: WorkspaceThreadId,
         run_id: u64,
-        event: CodexThreadEvent,
+        event: AgentThreadEvent,
     },
     AgentRunStartedAt {
         workspace_id: WorkspaceId,

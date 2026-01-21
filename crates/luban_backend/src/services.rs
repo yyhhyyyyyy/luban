@@ -2,10 +2,10 @@ use anyhow::{Context as _, anyhow};
 use bip39::Language;
 use luban_domain::paths;
 use luban_domain::{
-    AttachmentKind, AttachmentRef, CodexConfigEntry, CodexConfigEntryKind, CodexThreadEvent,
-    CodexThreadItem, ContextImage, ConversationEntry, ConversationSnapshot, CreatedWorkspace,
-    OpenTarget, PersistedAppState, ProjectWorkspaceService, PullRequestCiState, PullRequestInfo,
-    PullRequestState, RunAgentTurnRequest, SystemTaskKind, TaskIntentKind,
+    AgentThreadEvent, AttachmentKind, AttachmentRef, CodexConfigEntry, CodexConfigEntryKind,
+    CodexThreadEvent, CodexThreadItem, ContextImage, ConversationEntry, ConversationSnapshot,
+    CreatedWorkspace, OpenTarget, PersistedAppState, ProjectWorkspaceService, PullRequestCiState,
+    PullRequestInfo, PullRequestState, RunAgentTurnRequest, SystemTaskKind, TaskIntentKind,
 };
 use rand::{Rng as _, rngs::OsRng};
 use std::{
@@ -1124,7 +1124,7 @@ impl ProjectWorkspaceService for GitWorkspaceService {
         &self,
         request: RunAgentTurnRequest,
         cancel: Arc<AtomicBool>,
-        on_event: Arc<dyn Fn(CodexThreadEvent) + Send + Sync>,
+        on_event: Arc<dyn Fn(AgentThreadEvent) + Send + Sync>,
     ) -> Result<(), String> {
         let RunAgentTurnRequest {
             project_slug,

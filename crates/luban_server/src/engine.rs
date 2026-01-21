@@ -2180,7 +2180,7 @@ impl Engine {
                 let services = self.services.clone();
                 let tx = self.tx.clone();
                 std::thread::spawn(move || {
-                    let on_event: Arc<dyn Fn(luban_domain::CodexThreadEvent) + Send + Sync> = {
+                    let on_event: Arc<dyn Fn(luban_domain::AgentThreadEvent) + Send + Sync> = {
                         let tx = tx.clone();
                         Arc::new(move |event| {
                             let _ = tx.blocking_send(EngineCommand::DispatchAction {
@@ -3641,7 +3641,7 @@ pub fn new_default_services() -> anyhow::Result<Arc<dyn ProjectWorkspaceService>
 mod tests {
     use super::*;
     use luban_domain::{
-        CodexCommandExecutionStatus, CodexThreadEvent, ContextImage, ContextItem,
+        CodexCommandExecutionStatus, ContextImage, ContextItem,
         ConversationSnapshot as DomainConversationSnapshot, ConversationThreadMeta,
         PersistedAppState, PersistedProject, PersistedWorkspace, WorkspaceStatus,
     };
@@ -3786,7 +3786,7 @@ mod tests {
             &self,
             _request: luban_domain::RunAgentTurnRequest,
             _cancel: Arc<AtomicBool>,
-            _on_event: Arc<dyn Fn(CodexThreadEvent) + Send + Sync>,
+            _on_event: Arc<dyn Fn(luban_domain::AgentThreadEvent) + Send + Sync>,
         ) -> Result<(), String> {
             Err("unimplemented".to_owned())
         }
@@ -3984,7 +3984,7 @@ mod tests {
             &self,
             _request: luban_domain::RunAgentTurnRequest,
             _cancel: Arc<AtomicBool>,
-            _on_event: Arc<dyn Fn(CodexThreadEvent) + Send + Sync>,
+            _on_event: Arc<dyn Fn(luban_domain::AgentThreadEvent) + Send + Sync>,
         ) -> Result<(), String> {
             Err("unimplemented".to_owned())
         }
@@ -4621,7 +4621,7 @@ mod tests {
             &self,
             _request: luban_domain::RunAgentTurnRequest,
             _cancel: Arc<AtomicBool>,
-            _on_event: Arc<dyn Fn(CodexThreadEvent) + Send + Sync>,
+            _on_event: Arc<dyn Fn(luban_domain::AgentThreadEvent) + Send + Sync>,
         ) -> Result<(), String> {
             Err("unimplemented".to_owned())
         }
@@ -4907,7 +4907,7 @@ mod tests {
             &self,
             _request: luban_domain::RunAgentTurnRequest,
             _cancel: Arc<AtomicBool>,
-            _on_event: Arc<dyn Fn(CodexThreadEvent) + Send + Sync>,
+            _on_event: Arc<dyn Fn(luban_domain::AgentThreadEvent) + Send + Sync>,
         ) -> Result<(), String> {
             Err("unimplemented".to_owned())
         }
@@ -5210,7 +5210,7 @@ mod tests {
             &self,
             request: luban_domain::RunAgentTurnRequest,
             _cancel: Arc<AtomicBool>,
-            _on_event: Arc<dyn Fn(CodexThreadEvent) + Send + Sync>,
+            _on_event: Arc<dyn Fn(luban_domain::AgentThreadEvent) + Send + Sync>,
         ) -> Result<(), String> {
             let _ = self.sender.send(request);
             Ok(())
@@ -5419,7 +5419,7 @@ mod tests {
             &self,
             _request: luban_domain::RunAgentTurnRequest,
             _cancel: Arc<AtomicBool>,
-            _on_event: Arc<dyn Fn(CodexThreadEvent) + Send + Sync>,
+            _on_event: Arc<dyn Fn(luban_domain::AgentThreadEvent) + Send + Sync>,
         ) -> Result<(), String> {
             Err("unimplemented".to_owned())
         }
