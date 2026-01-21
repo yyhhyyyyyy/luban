@@ -61,8 +61,58 @@ fn read_kv_file(path: &Path) -> Result<HashMap<String, String>> {
         let (k, v) = line
             .split_once('=')
             .with_context(|| format!("invalid key=value at {}:{}", path.display(), idx + 1))?;
-        out.insert(k.trim().to_owned(), v.trim().to_owned());
+        let key = k.trim().to_owned();
+        let value = expand_kv_value(v.trim(), &out)
+            .with_context(|| format!("expand value for {key} at {}:{}", path.display(), idx + 1))?;
+        out.insert(key, value);
     }
+    Ok(out)
+}
+
+fn expand_kv_value(raw: &str, kv: &HashMap<String, String>) -> Result<String> {
+    let mut current = raw.to_owned();
+    for _ in 0..16 {
+        if !current.contains("${") {
+            return Ok(current);
+        }
+        let expanded = expand_kv_value_once(&current, kv)?;
+        if expanded == current {
+            break;
+        }
+        current = expanded;
+    }
+    if current.contains("${") {
+        anyhow::bail!("unresolved variable reference: {current}");
+    }
+    Ok(current)
+}
+
+fn expand_kv_value_once(raw: &str, kv: &HashMap<String, String>) -> Result<String> {
+    let mut out = String::new();
+    let mut i = 0;
+    while let Some(pos) = raw[i..].find("${") {
+        let abs = i + pos;
+        out.push_str(&raw[i..abs]);
+        let var_start = abs + 2;
+        let Some(end_rel) = raw[var_start..].find('}') else {
+            anyhow::bail!("missing closing '}}' for variable reference");
+        };
+        let var_end = var_start + end_rel;
+        let var = raw[var_start..var_end].trim();
+        if var.is_empty() {
+            anyhow::bail!("empty variable name in reference");
+        }
+
+        let replacement = kv
+            .get(var)
+            .cloned()
+            .or_else(|| std::env::var(var).ok())
+            .with_context(|| format!("unknown variable: {var}"))?;
+
+        out.push_str(&replacement);
+        i = var_end + 1;
+    }
+    out.push_str(&raw[i..]);
     Ok(out)
 }
 
@@ -196,11 +246,31 @@ fn sign_archive(archive_path: &Path) -> Result<String> {
 }
 
 fn package_env_required() -> Result<()> {
-    let has_key = std::env::var("TAURI_PRIVATE_KEY").is_ok() || std::env::var("TAURI_PRIVATE_KEY_PATH").is_ok();
+    let has_key = std::env::var("TAURI_PRIVATE_KEY").is_ok()
+        || std::env::var("TAURI_PRIVATE_KEY_PATH").is_ok()
+        || std::env::var("TAURI_SIGNING_PRIVATE_KEY").is_ok();
     if !has_key {
-        anyhow::bail!("missing signing key; set TAURI_PRIVATE_KEY or TAURI_PRIVATE_KEY_PATH (and optional TAURI_PRIVATE_KEY_PASSWORD)");
+        anyhow::bail!(
+            "missing signing key; set TAURI_PRIVATE_KEY/TAURI_PRIVATE_KEY_PATH or TAURI_SIGNING_PRIVATE_KEY"
+        );
     }
     Ok(())
+}
+
+fn apply_updater_signing_env(cmd: &mut ProcessCommand) {
+    if env_var_opt("TAURI_SIGNING_PRIVATE_KEY").is_none() {
+        if let Some(value) = env_var_opt("TAURI_PRIVATE_KEY") {
+            cmd.env("TAURI_SIGNING_PRIVATE_KEY", value);
+        } else if let Some(value) = env_var_opt("TAURI_PRIVATE_KEY_PATH") {
+            cmd.env("TAURI_SIGNING_PRIVATE_KEY", value);
+        }
+    }
+
+    if env_var_opt("TAURI_SIGNING_PRIVATE_KEY_PASSWORD").is_none() {
+        if let Some(value) = env_var_opt("TAURI_PRIVATE_KEY_PASSWORD") {
+            cmd.env("TAURI_SIGNING_PRIVATE_KEY_PASSWORD", value);
+        }
+    }
 }
 
 fn run_package(target: String, profile: String, out_dir: PathBuf) -> Result<()> {
@@ -237,6 +307,7 @@ fn run_package(target: String, profile: String, out_dir: PathBuf) -> Result<()> 
         .args(build_flags)
         .arg("--target")
         .arg(target_triple);
+    apply_updater_signing_env(&mut tauri_build);
     run_cmd(tauri_build, "cargo tauri build")?;
 
     let version = resolve_luban_tauri_version()?;
@@ -454,5 +525,45 @@ async fn main() -> Result<()> {
     match cli.cmd {
         Command::Package { target, profile, out_dir } => run_package(target, profile, out_dir),
         Command::Upload { package_env } => run_upload(package_env).await,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn expand_kv_value_uses_prior_kv_entries() {
+        let kv = HashMap::from([("FOO".to_owned(), "bar".to_owned())]);
+        let expanded = expand_kv_value("prefix-${FOO}-suffix", &kv).expect("must expand");
+        assert_eq!(expanded, "prefix-bar-suffix");
+    }
+
+    #[test]
+    fn expand_kv_value_uses_process_env() {
+        let kv = HashMap::new();
+        let prev = std::env::var_os("LUBAN_TEST_ENV");
+        unsafe {
+            std::env::set_var("LUBAN_TEST_ENV", "value");
+        }
+        let expanded = expand_kv_value("${LUBAN_TEST_ENV}", &kv).expect("must expand");
+        assert_eq!(expanded, "value");
+        if let Some(v) = prev {
+            unsafe {
+                std::env::set_var("LUBAN_TEST_ENV", v);
+            }
+        } else {
+            unsafe {
+                std::env::remove_var("LUBAN_TEST_ENV");
+            }
+        }
+    }
+
+    #[test]
+    fn expand_kv_value_errors_on_unknown_variable() {
+        let kv = HashMap::new();
+        let err = expand_kv_value("${LUBAN_TEST_ENV_MISSING}", &kv)
+            .expect_err("must error on missing variable");
+        assert!(format!("{err:#}").contains("unknown variable"));
     }
 }

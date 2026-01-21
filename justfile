@@ -10,7 +10,7 @@ lint:
   cargo clippy --workspace --all-targets --all-features --no-deps -- -D warnings
 
 test:
-  sh -eu -c 'root="$(mktemp -d -t luban-test-XXXXXX)"; trap "rm -rf \"$root\"" EXIT; LUBAN_ROOT="$root" cargo test --workspace --all-targets --all-features'
+  sh -eu -c 'root="$(mktemp -d -t luban-test-XXXXXX)"; trap "rm -rf \"$root\"" EXIT; LUBAN_ROOT="$root" cargo test --workspace --all-targets --all-features; cargo test --manifest-path=dev/Cargo.toml'
 
 test-fast:
   sh -eu -c 'root="$(mktemp -d -t luban-test-XXXXXX)"; trap "rm -rf \"$root\"" EXIT; LUBAN_ROOT="$root" cargo test -p luban_domain'
