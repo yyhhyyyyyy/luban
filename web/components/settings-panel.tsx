@@ -1449,6 +1449,84 @@ function CodexSettings({
   )
 }
 
+function AgentRunnerSettings() {
+  const { app, setAgentRunner, setAgentAmpMode } = useLuban()
+  const runner = app?.agent?.default_runner ?? "codex"
+  const [ampModeDraft, setAmpModeDraft] = useState("smart")
+
+  useEffect(() => {
+    setAmpModeDraft(app?.agent?.amp_mode ?? "smart")
+  }, [app?.rev])
+
+  const isAmp = runner === "amp"
+
+  return (
+    <div className="rounded-lg border border-border bg-secondary/20 p-4 space-y-4">
+      <div className="flex items-start justify-between gap-4">
+        <div className="space-y-1">
+          <div className="text-sm font-medium">Default Runner</div>
+          <div className="text-xs text-muted-foreground">Used for new turns and queued prompts.</div>
+        </div>
+        <div className="inline-flex rounded-md border border-border overflow-hidden">
+          <button
+            data-testid="settings-agent-runner-codex"
+            onClick={() => setAgentRunner("codex")}
+            className={cn(
+              "px-3 py-1.5 text-xs font-medium transition-colors",
+              runner === "codex" ? "bg-primary/10 text-primary" : "hover:bg-accent text-muted-foreground",
+            )}
+          >
+            Codex
+          </button>
+          <button
+            data-testid="settings-agent-runner-amp"
+            onClick={() => setAgentRunner("amp")}
+            className={cn(
+              "px-3 py-1.5 text-xs font-medium transition-colors border-l border-border",
+              runner === "amp" ? "bg-primary/10 text-primary" : "hover:bg-accent text-muted-foreground",
+            )}
+          >
+            Amp
+          </button>
+        </div>
+      </div>
+
+      <div className={cn("flex items-start justify-between gap-4", !isAmp && "opacity-60")}>
+        <div className="space-y-1">
+          <div className="text-sm font-medium">Amp Mode</div>
+          <div className="text-xs text-muted-foreground">Example values: smart, rush.</div>
+        </div>
+        <input
+          data-testid="settings-agent-amp-mode"
+          type="text"
+          value={ampModeDraft}
+          maxLength={32}
+          disabled={!isAmp}
+          onChange={(e) => setAmpModeDraft(e.target.value)}
+          onBlur={() => setAgentAmpMode(ampModeDraft)}
+          onKeyDown={(e) => {
+            if (e.key !== "Enter") return
+            e.preventDefault()
+            setAgentAmpMode(ampModeDraft)
+            e.currentTarget.blur()
+          }}
+          className={cn(
+            "w-44 h-9 px-2.5 rounded-md border border-border bg-background text-sm",
+            "focus:outline-none focus:ring-2 focus:ring-primary/40",
+          )}
+        />
+      </div>
+
+      {isAmp && (
+        <div className="flex items-start gap-2 text-xs text-muted-foreground">
+          <AlertTriangle className="w-4 h-4 mt-0.5 text-amber-500" />
+          <div>Amp does not support image attachments yet.</div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function AllSettings({
   initialAgentId,
   initialAgentFilePath,
@@ -1545,6 +1623,7 @@ function AllSettings({
           Agent
         </h3>
         <div className="space-y-4">
+          <AgentRunnerSettings />
           <CodexSettings
             initialSelectedFilePath={initialAgentId === "codex" ? initialAgentFilePath : null}
             autoFocusEditor={initialAgentId === "codex" && initialAgentFilePath != null}

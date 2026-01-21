@@ -1134,6 +1134,8 @@ impl ProjectWorkspaceService for GitWorkspaceService {
             thread_id,
             prompt,
             attachments,
+            runner,
+            amp_mode,
             model,
             model_reasoning_effort,
         } = request;
@@ -1189,17 +1191,21 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                 .map(|a| blobs_dir.join(format!("{}.{}", a.id, a.extension)))
                 .collect::<Vec<_>>();
 
-            let agent_runner =
-                std::env::var("LUBAN_AGENT_RUNNER").unwrap_or_else(|_| "codex".to_owned());
-            let use_amp = agent_runner.trim().eq_ignore_ascii_case("amp");
+            let runner = std::env::var("LUBAN_AGENT_RUNNER")
+                .ok()
+                .as_deref()
+                .and_then(luban_domain::parse_agent_runner_kind)
+                .unwrap_or(runner);
+            let use_amp = runner == luban_domain::AgentRunnerKind::Amp;
             if use_amp && !image_paths.is_empty() {
                 return Err(anyhow!("amp runner does not support image attachments yet"));
             }
 
-            let amp_mode = std::env::var("LUBAN_AMP_MODE")
+            let env_amp_mode = std::env::var("LUBAN_AMP_MODE")
                 .ok()
                 .map(|v| v.trim().to_owned())
                 .filter(|v| !v.is_empty());
+            let resolved_amp_mode = env_amp_mode.or_else(|| amp_mode.clone());
 
             let mut turn_error: Option<String> = None;
             let mut transient_error_seq: u64 = 0;
@@ -1211,7 +1217,7 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                         thread_id: resolved_thread_id,
                         worktree_path: worktree_path.clone(),
                         prompt: prompt.clone(),
-                        mode: amp_mode.clone(),
+                        mode: resolved_amp_mode.clone(),
                     },
                     cancel.clone(),
                     |event| {
@@ -2764,6 +2770,8 @@ mod tests {
                     thread_id: None,
                     prompt: "Hello".to_owned(),
                     attachments: Vec::new(),
+                    runner: luban_domain::AgentRunnerKind::Codex,
+                    amp_mode: None,
                     model: None,
                     model_reasoning_effort: None,
                 },
@@ -3199,6 +3207,8 @@ mod tests {
             appearance_terminal_font: None,
             agent_default_model_id: None,
             agent_default_thinking_effort: None,
+            agent_default_runner: None,
+            agent_amp_mode: None,
             agent_codex_enabled: Some(true),
             last_open_workspace_id: None,
             open_button_selection: None,

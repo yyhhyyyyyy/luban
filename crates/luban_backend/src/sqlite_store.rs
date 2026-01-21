@@ -22,6 +22,8 @@ const OPEN_BUTTON_SELECTION_KEY: &str = "open_button_selection";
 const GLOBAL_ZOOM_PERCENT_KEY: &str = "global_zoom_percent";
 const AGENT_DEFAULT_MODEL_ID_KEY: &str = "agent_default_model_id";
 const AGENT_DEFAULT_THINKING_EFFORT_KEY: &str = "agent_default_thinking_effort";
+const AGENT_DEFAULT_RUNNER_KEY: &str = "agent_default_runner";
+const AGENT_AMP_MODE_KEY: &str = "agent_amp_mode";
 const AGENT_CODEX_ENABLED_KEY: &str = "agent_codex_enabled";
 const TASK_PROMPT_TEMPLATE_PREFIX: &str = "task_prompt_template_";
 const APPEARANCE_THEME_KEY: &str = "appearance_theme";
@@ -920,6 +922,26 @@ impl SqliteDatabase {
             .optional()
             .context("failed to load agent default thinking effort")?;
 
+        let agent_default_runner = self
+            .conn
+            .query_row(
+                "SELECT value FROM app_settings_text WHERE key = ?1",
+                params![AGENT_DEFAULT_RUNNER_KEY],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .context("failed to load agent default runner")?;
+
+        let agent_amp_mode = self
+            .conn
+            .query_row(
+                "SELECT value FROM app_settings_text WHERE key = ?1",
+                params![AGENT_AMP_MODE_KEY],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .context("failed to load agent amp mode")?;
+
         let agent_codex_enabled = self
             .conn
             .query_row(
@@ -962,6 +984,8 @@ impl SqliteDatabase {
                 appearance_terminal_font: None,
                 agent_default_model_id,
                 agent_default_thinking_effort,
+                agent_default_runner,
+                agent_amp_mode,
                 agent_codex_enabled,
                 last_open_workspace_id: None,
                 open_button_selection: None,
@@ -1315,6 +1339,8 @@ impl SqliteDatabase {
             appearance_terminal_font,
             agent_default_model_id,
             agent_default_thinking_effort,
+            agent_default_runner,
+            agent_amp_mode,
             agent_codex_enabled,
             last_open_workspace_id,
             open_button_selection,
@@ -1632,6 +1658,38 @@ impl SqliteDatabase {
             tx.execute(
                 "DELETE FROM app_settings_text WHERE key = ?1",
                 params![AGENT_DEFAULT_THINKING_EFFORT_KEY],
+            )?;
+        }
+
+        if let Some(value) = snapshot.agent_default_runner.as_deref() {
+            tx.execute(
+                "INSERT INTO app_settings_text (key, value, created_at, updated_at)
+                 VALUES (?1, ?2, COALESCE((SELECT created_at FROM app_settings_text WHERE key = ?1), ?3), ?3)
+                 ON CONFLICT(key) DO UPDATE SET
+                   value = excluded.value,
+                   updated_at = excluded.updated_at",
+                params![AGENT_DEFAULT_RUNNER_KEY, value, now],
+            )?;
+        } else {
+            tx.execute(
+                "DELETE FROM app_settings_text WHERE key = ?1",
+                params![AGENT_DEFAULT_RUNNER_KEY],
+            )?;
+        }
+
+        if let Some(value) = snapshot.agent_amp_mode.as_deref() {
+            tx.execute(
+                "INSERT INTO app_settings_text (key, value, created_at, updated_at)
+                 VALUES (?1, ?2, COALESCE((SELECT created_at FROM app_settings_text WHERE key = ?1), ?3), ?3)
+                 ON CONFLICT(key) DO UPDATE SET
+                   value = excluded.value,
+                   updated_at = excluded.updated_at",
+                params![AGENT_AMP_MODE_KEY, value, now],
+            )?;
+        } else {
+            tx.execute(
+                "DELETE FROM app_settings_text WHERE key = ?1",
+                params![AGENT_AMP_MODE_KEY],
             )?;
         }
 
@@ -2718,6 +2776,8 @@ mod tests {
             appearance_terminal_font: None,
             agent_default_model_id: None,
             agent_default_thinking_effort: None,
+            agent_default_runner: None,
+            agent_amp_mode: None,
             agent_codex_enabled: Some(true),
             last_open_workspace_id: None,
             open_button_selection: None,
@@ -2768,6 +2828,8 @@ mod tests {
             appearance_terminal_font: Some("Geist Mono".to_owned()),
             agent_default_model_id: Some("gpt-5.2-codex".to_owned()),
             agent_default_thinking_effort: Some("high".to_owned()),
+            agent_default_runner: Some("amp".to_owned()),
+            agent_amp_mode: Some("rush".to_owned()),
             agent_codex_enabled: Some(true),
             last_open_workspace_id: Some(10),
             open_button_selection: None,
@@ -2828,6 +2890,8 @@ mod tests {
             appearance_terminal_font: None,
             agent_default_model_id: None,
             agent_default_thinking_effort: None,
+            agent_default_runner: None,
+            agent_amp_mode: None,
             agent_codex_enabled: Some(true),
             last_open_workspace_id: None,
             open_button_selection: None,
@@ -2879,8 +2943,10 @@ mod tests {
                 text: "queued-a".to_owned(),
                 attachments: Vec::new(),
                 run_config: AgentRunConfig {
+                    runner: luban_domain::AgentRunnerKind::Codex,
                     model_id: "gpt-5.1-codex-mini".to_owned(),
                     thinking_effort: ThinkingEffort::Low,
+                    amp_mode: None,
                 },
             },
             QueuedPrompt {
@@ -2888,8 +2954,10 @@ mod tests {
                 text: "queued-b".to_owned(),
                 attachments: Vec::new(),
                 run_config: AgentRunConfig {
+                    runner: luban_domain::AgentRunnerKind::Codex,
                     model_id: "gpt-5.1-codex-mini".to_owned(),
                     thinking_effort: ThinkingEffort::Minimal,
+                    amp_mode: None,
                 },
             },
         ];
@@ -2986,6 +3054,8 @@ mod tests {
             appearance_terminal_font: None,
             agent_default_model_id: None,
             agent_default_thinking_effort: None,
+            agent_default_runner: None,
+            agent_amp_mode: None,
             agent_codex_enabled: Some(true),
             last_open_workspace_id: None,
             open_button_selection: None,
@@ -3090,6 +3160,8 @@ mod tests {
             appearance_terminal_font: None,
             agent_default_model_id: None,
             agent_default_thinking_effort: None,
+            agent_default_runner: None,
+            agent_amp_mode: None,
             agent_codex_enabled: Some(true),
             last_open_workspace_id: None,
             open_button_selection: None,
@@ -3150,6 +3222,8 @@ mod tests {
             appearance_terminal_font: None,
             agent_default_model_id: None,
             agent_default_thinking_effort: None,
+            agent_default_runner: None,
+            agent_amp_mode: None,
             agent_codex_enabled: Some(true),
             last_open_workspace_id: None,
             open_button_selection: None,
@@ -3209,6 +3283,8 @@ mod tests {
             appearance_terminal_font: None,
             agent_default_model_id: None,
             agent_default_thinking_effort: None,
+            agent_default_runner: None,
+            agent_amp_mode: None,
             agent_codex_enabled: Some(true),
             last_open_workspace_id: None,
             open_button_selection: None,
@@ -3253,6 +3329,8 @@ mod tests {
             appearance_terminal_font: None,
             agent_default_model_id: None,
             agent_default_thinking_effort: None,
+            agent_default_runner: None,
+            agent_amp_mode: None,
             agent_codex_enabled: Some(true),
             last_open_workspace_id: None,
             open_button_selection: None,

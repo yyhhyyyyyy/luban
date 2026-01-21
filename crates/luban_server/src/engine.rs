@@ -1821,7 +1821,7 @@ impl Engine {
                 run_id,
                 text,
                 attachments,
-                run_config: _,
+                run_config,
             } => {
                 let started_at_unix_ms = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -1872,8 +1872,10 @@ impl Engine {
                     thread_id: remote_thread_id,
                     prompt: text,
                     attachments,
-                    model: None,
-                    model_reasoning_effort: None,
+                    runner: run_config.runner,
+                    amp_mode: run_config.amp_mode.clone(),
+                    model: Some(run_config.model_id.clone()),
+                    model_reasoning_effort: Some(run_config.thinking_effort.as_str().to_owned()),
                 };
 
                 let cancel = Arc::new(AtomicBool::new(false));
@@ -2580,6 +2582,11 @@ impl Engine {
                     ThinkingEffort::High => luban_api::ThinkingEffort::High,
                     ThinkingEffort::XHigh => luban_api::ThinkingEffort::XHigh,
                 }),
+                default_runner: Some(match self.state.agent_default_runner() {
+                    luban_domain::AgentRunnerKind::Codex => luban_api::AgentRunnerKind::Codex,
+                    luban_domain::AgentRunnerKind::Amp => luban_api::AgentRunnerKind::Amp,
+                }),
+                amp_mode: Some(self.state.agent_amp_mode().to_owned()),
             },
             task: luban_api::TaskSettingsSnapshot {
                 prompt_templates: luban_domain::TaskIntentKind::ALL
@@ -3565,6 +3572,17 @@ fn map_client_action(action: luban_api::ClientAction) -> Option<Action> {
         luban_api::ClientAction::CodexEnabledChanged { enabled } => {
             Some(Action::AgentCodexEnabledChanged { enabled })
         }
+        luban_api::ClientAction::AgentRunnerChanged { runner } => {
+            Some(Action::AgentRunnerChanged {
+                runner: match runner {
+                    luban_api::AgentRunnerKind::Codex => luban_domain::AgentRunnerKind::Codex,
+                    luban_api::AgentRunnerKind::Amp => luban_domain::AgentRunnerKind::Amp,
+                },
+            })
+        }
+        luban_api::ClientAction::AgentAmpModeChanged { mode } => {
+            Some(Action::AgentAmpModeChanged { mode })
+        }
         luban_api::ClientAction::TaskPromptTemplateChanged {
             intent_kind,
             template,
@@ -3841,6 +3859,8 @@ mod tests {
                 appearance_terminal_font: None,
                 agent_default_model_id: None,
                 agent_default_thinking_effort: None,
+                agent_default_runner: None,
+                agent_amp_mode: None,
                 agent_codex_enabled: Some(true),
                 last_open_workspace_id: None,
                 open_button_selection: None,
@@ -4312,6 +4332,8 @@ mod tests {
             appearance_terminal_font: None,
             agent_default_model_id: None,
             agent_default_thinking_effort: None,
+            agent_default_runner: None,
+            agent_amp_mode: None,
             agent_codex_enabled: Some(true),
             last_open_workspace_id: Some(10),
             open_button_selection: None,
@@ -4474,6 +4496,8 @@ mod tests {
                 appearance_terminal_font: None,
                 agent_default_model_id: None,
                 agent_default_thinking_effort: None,
+                agent_default_runner: None,
+                agent_amp_mode: None,
                 agent_codex_enabled: Some(true),
                 last_open_workspace_id: None,
                 open_button_selection: None,
@@ -4748,6 +4772,8 @@ mod tests {
                 appearance_terminal_font: None,
                 agent_default_model_id: None,
                 agent_default_thinking_effort: None,
+                agent_default_runner: None,
+                agent_amp_mode: None,
                 agent_codex_enabled: Some(true),
                 last_open_workspace_id: None,
                 open_button_selection: None,
@@ -5067,6 +5093,8 @@ mod tests {
                 appearance_terminal_font: None,
                 agent_default_model_id: None,
                 agent_default_thinking_effort: None,
+                agent_default_runner: None,
+                agent_amp_mode: None,
                 agent_codex_enabled: Some(true),
                 last_open_workspace_id: None,
                 open_button_selection: None,
@@ -5275,6 +5303,8 @@ mod tests {
                 appearance_terminal_font: None,
                 agent_default_model_id: None,
                 agent_default_thinking_effort: None,
+                agent_default_runner: None,
+                agent_amp_mode: None,
                 agent_codex_enabled: Some(true),
                 last_open_workspace_id: None,
                 open_button_selection: None,
@@ -5574,7 +5604,9 @@ mod tests {
             .recv_timeout(std::time::Duration::from_secs(2))
             .expect("expected agent turn request");
 
-        assert!(request.model.is_none());
-        assert!(request.model_reasoning_effort.is_none());
+        assert_eq!(request.runner, luban_domain::AgentRunnerKind::Codex);
+        assert!(request.amp_mode.is_none());
+        assert_eq!(request.model.as_deref(), Some("not-a-real-model"));
+        assert_eq!(request.model_reasoning_effort.as_deref(), Some("medium"));
     }
 }

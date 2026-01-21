@@ -36,8 +36,9 @@ mod agent_settings;
 pub mod paths;
 mod task_prompts;
 pub use agent_settings::{
-    AgentModelSpec, ThinkingEffort, agent_model_label, agent_models, default_agent_model_id,
-    default_thinking_effort, normalize_thinking_effort, thinking_effort_supported,
+    AgentModelSpec, AgentRunnerKind, ThinkingEffort, agent_model_label, agent_models,
+    default_agent_model_id, default_agent_runner_kind, default_amp_mode, default_thinking_effort,
+    normalize_thinking_effort, parse_agent_runner_kind, thinking_effort_supported,
 };
 pub use task_prompts::{default_task_prompt_template, default_task_prompt_templates};
 mod system_prompts;

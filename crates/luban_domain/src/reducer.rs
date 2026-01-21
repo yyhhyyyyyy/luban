@@ -36,6 +36,8 @@ impl AppState {
             appearance_fonts: crate::AppearanceFonts::default(),
             agent_default_model_id: default_agent_model_id().to_owned(),
             agent_default_thinking_effort: default_thinking_effort(),
+            agent_default_runner: crate::default_agent_runner_kind(),
+            agent_amp_mode: crate::default_amp_mode().to_owned(),
             agent_codex_enabled: true,
             conversations: HashMap::new(),
             workspace_tabs: HashMap::new(),
@@ -555,6 +557,8 @@ impl AppState {
                 let tabs = self.ensure_workspace_tabs_mut(workspace_id);
                 tabs.activate(thread_id);
 
+                let runner = self.agent_default_runner;
+                let amp_mode = self.agent_amp_mode.clone();
                 let conversation = self.ensure_conversation_mut(workspace_id, thread_id);
                 conversation.draft.clear();
                 conversation.draft_attachments.clear();
@@ -567,8 +571,14 @@ impl AppState {
                 }
 
                 let run_config = AgentRunConfig {
+                    runner,
                     model_id: conversation.agent_model_id.clone(),
                     thinking_effort: conversation.thinking_effort,
+                    amp_mode: if runner == crate::AgentRunnerKind::Amp {
+                        Some(amp_mode)
+                    } else {
+                        None
+                    },
                 };
 
                 if conversation.run_status == OperationStatus::Running {
@@ -629,6 +639,8 @@ impl AppState {
                 let tabs = self.ensure_workspace_tabs_mut(workspace_id);
                 tabs.activate(thread_id);
 
+                let runner = self.agent_default_runner;
+                let amp_mode = self.agent_amp_mode.clone();
                 let conversation = self.ensure_conversation_mut(workspace_id, thread_id);
                 conversation.draft.clear();
                 conversation.draft_attachments.clear();
@@ -641,8 +653,14 @@ impl AppState {
                 }
 
                 let run_config = AgentRunConfig {
+                    runner,
                     model_id: conversation.agent_model_id.clone(),
                     thinking_effort: conversation.thinking_effort,
+                    amp_mode: if runner == crate::AgentRunnerKind::Amp {
+                        Some(amp_mode)
+                    } else {
+                        None
+                    },
                 };
 
                 let id = conversation.next_queued_prompt_id;
@@ -830,9 +848,13 @@ impl AppState {
                 let entry = conversation.pending_prompts.get_mut(pos).unwrap();
                 entry.text = trimmed;
                 entry.attachments = attachments;
+                let runner = entry.run_config.runner;
+                let amp_mode = entry.run_config.amp_mode.clone();
                 entry.run_config = AgentRunConfig {
+                    runner,
                     model_id,
                     thinking_effort: normalized_effort,
+                    amp_mode,
                 };
                 Vec::new()
             }
@@ -1275,6 +1297,29 @@ impl AppState {
                     return Vec::new();
                 }
                 self.agent_codex_enabled = enabled;
+                vec![Effect::SaveAppState]
+            }
+            Action::AgentRunnerChanged { runner } => {
+                if self.agent_default_runner == runner {
+                    return Vec::new();
+                }
+                self.agent_default_runner = runner;
+                vec![Effect::SaveAppState]
+            }
+            Action::AgentAmpModeChanged { mode } => {
+                let next = mode.trim();
+                let next = if next.is_empty() {
+                    crate::default_amp_mode().to_owned()
+                } else if next.len() <= 32 {
+                    next.to_owned()
+                } else {
+                    return Vec::new();
+                };
+
+                if self.agent_amp_mode == next {
+                    return Vec::new();
+                }
+                self.agent_amp_mode = next;
                 vec![Effect::SaveAppState]
             }
             Action::CodexDefaultsLoaded {
@@ -2425,6 +2470,8 @@ mod tests {
                 appearance_terminal_font: None,
                 agent_default_model_id: None,
                 agent_default_thinking_effort: None,
+                agent_default_runner: None,
+                agent_amp_mode: None,
                 agent_codex_enabled: Some(true),
                 last_open_workspace_id: None,
                 open_button_selection: None,
@@ -2466,6 +2513,8 @@ mod tests {
                 appearance_terminal_font: None,
                 agent_default_model_id: None,
                 agent_default_thinking_effort: None,
+                agent_default_runner: None,
+                agent_amp_mode: None,
                 agent_codex_enabled: Some(true),
                 last_open_workspace_id: None,
                 open_button_selection: None,
@@ -2507,6 +2556,8 @@ mod tests {
                 appearance_terminal_font: None,
                 agent_default_model_id: None,
                 agent_default_thinking_effort: None,
+                agent_default_runner: None,
+                agent_amp_mode: None,
                 agent_codex_enabled: Some(true),
                 last_open_workspace_id: None,
                 open_button_selection: None,
@@ -2550,6 +2601,8 @@ mod tests {
                 appearance_terminal_font: None,
                 agent_default_model_id: None,
                 agent_default_thinking_effort: None,
+                agent_default_runner: None,
+                agent_amp_mode: None,
                 agent_codex_enabled: Some(true),
                 last_open_workspace_id: None,
                 open_button_selection: None,
@@ -3445,8 +3498,10 @@ mod tests {
                     text: "Queued".to_owned(),
                     attachments: Vec::new(),
                     run_config: AgentRunConfig {
+                        runner: crate::AgentRunnerKind::Codex,
                         model_id: "gpt-5.1-codex-mini".to_owned(),
                         thinking_effort: ThinkingEffort::Low,
+                        amp_mode: None,
                     },
                 }],
                 queue_paused: true,

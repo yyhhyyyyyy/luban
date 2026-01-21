@@ -51,9 +51,12 @@ Implemented:
 - `crates/luban_domain/src/adapters.rs`: `ProjectWorkspaceService::run_agent_turn_streamed` now streams `AgentThreadEvent`.
 - `crates/luban_backend/src/services/amp_cli.rs`: Amp `--stream-json` parser and runner.
 - `crates/luban_backend/src/services/amp_cli.rs`: common Amp tools are normalized (bash/web_search/file edits).
-- `crates/luban_backend/src/services.rs`: backend runner selection via `LUBAN_AGENT_RUNNER=amp`.
+- `crates/luban_domain/src/state.rs`: persisted default runner and Amp mode (`agent_default_runner`, `agent_amp_mode`).
+- `crates/luban_backend/src/sqlite_store.rs`: stored default runner and Amp mode in `app_settings_text`.
+- `crates/luban_backend/src/services.rs`: runner selection driven by request config (with env overrides).
+- `web/components/settings-panel.tsx`: UI controls to select default runner and Amp mode.
 
-Environment variables:
+Environment variables (overrides):
 
 - `LUBAN_AGENT_RUNNER`: `codex` (default) or `amp`.
 - `LUBAN_AMP_BIN`: optional absolute path to the `amp` executable (defaults to `amp` on `PATH`).
@@ -77,15 +80,18 @@ Manual smoke steps:
 
 1. Start the server (existing workflow):
    - `just run-server`
-2. Set `LUBAN_AGENT_RUNNER=amp` and restart the server process.
-3. Open the web UI and send a message in a workspace thread.
-4. Confirm:
+2. Open the web UI, then open Settings.
+3. In Settings -> Agent:
+   - set Default Runner to Amp
+   - optionally set Amp Mode
+4. Send a message in a workspace thread.
+5. Confirm:
    - activities appear as tool calls / reasoning
    - a final assistant message is recorded
 
 ## Next Steps
 
-- Add a first-class "agent id" into run config and UI selector (align with `design/`).
+- Add per-thread runner selection (optional) without breaking persistence.
 - Extend the Amp mapping to recognize common tools (bash/file edit/search) as dedicated activity
   kinds where possible.
 - Decide how to represent token usage for non-Codex runners.
@@ -95,3 +101,4 @@ Manual smoke steps:
 - 2026-01-21: Introduced `AgentThreadEvent` and added Amp `--stream-json` normalization.
 - 2026-01-21: Updated `ProjectWorkspaceService` to stream `AgentThreadEvent`.
 - 2026-01-21: Mapped Amp tool_use/tool_result to richer items (bash/web_search/file changes).
+- 2026-01-21: Persisted default runner and Amp mode; added UI controls and request-driven runner selection.

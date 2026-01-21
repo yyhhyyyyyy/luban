@@ -1,12 +1,13 @@
-use crate::agent_settings::parse_thinking_effort;
+use crate::agent_settings::{parse_agent_runner_kind, parse_thinking_effort};
 use crate::{
     AppState, AppearanceFonts, AppearanceTheme, Effect, MainPane, OperationStatus,
     PersistedAppState, PersistedProject, PersistedWorkspace, Project, ProjectId, RightPane,
     Workspace, WorkspaceId, WorkspaceStatus, WorkspaceTabs, WorkspaceThreadId,
 };
 use crate::{
-    TaskIntentKind, default_agent_model_id, default_system_prompt_templates,
-    default_task_prompt_templates, default_thinking_effort, normalize_thinking_effort,
+    TaskIntentKind, default_agent_model_id, default_agent_runner_kind, default_amp_mode,
+    default_system_prompt_templates, default_task_prompt_templates, default_thinking_effort,
+    normalize_thinking_effort,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -54,8 +55,25 @@ pub(crate) fn apply_persisted_app_state(
     let agent_default_thinking_effort =
         normalize_thinking_effort(&agent_default_model_id, agent_default_thinking_effort);
 
+    let agent_default_runner = persisted
+        .agent_default_runner
+        .as_deref()
+        .and_then(parse_agent_runner_kind)
+        .unwrap_or_else(default_agent_runner_kind);
+
+    let agent_amp_mode = persisted
+        .agent_amp_mode
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .filter(|v| v.len() <= 32)
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| default_amp_mode().to_owned());
+
     state.agent_default_model_id = agent_default_model_id;
     state.agent_default_thinking_effort = agent_default_thinking_effort;
+    state.agent_default_runner = agent_default_runner;
+    state.agent_amp_mode = agent_amp_mode;
     state.agent_codex_enabled = persisted.agent_codex_enabled.unwrap_or(true);
 
     state.task_prompt_templates = default_task_prompt_templates();
@@ -276,6 +294,8 @@ pub(crate) fn to_persisted_app_state(state: &AppState) -> PersistedAppState {
         agent_default_thinking_effort: Some(
             state.agent_default_thinking_effort.as_str().to_owned(),
         ),
+        agent_default_runner: Some(state.agent_default_runner.as_str().to_owned()),
+        agent_amp_mode: Some(state.agent_amp_mode.clone()),
         agent_codex_enabled: Some(state.agent_codex_enabled),
         last_open_workspace_id: state.last_open_workspace_id.map(|id| id.0),
         open_button_selection: state.open_button_selection.clone(),

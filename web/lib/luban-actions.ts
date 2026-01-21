@@ -2,6 +2,7 @@
 
 import type {
   AgentRunConfigSnapshot,
+  AgentRunnerKind,
   AppearanceFontsSnapshot,
   AppearanceTheme,
   AttachmentRef,
@@ -15,11 +16,11 @@ import type {
   SystemTaskKind,
   TaskIntentKind,
   TaskDraft,
-	TaskExecuteMode,
-	TaskExecuteResult,
-	ThinkingEffort,
-	WorkspaceId,
-	WorkspaceThreadId,
+  TaskExecuteMode,
+  TaskExecuteResult,
+  ThinkingEffort,
+  WorkspaceId,
+  WorkspaceThreadId,
 } from "./luban-api"
 import { fetchConversation, fetchThreads } from "./luban-http"
 import type { LubanStore } from "./luban-store"
@@ -42,6 +43,8 @@ export type LubanActions = {
   archiveWorkspace: (workspaceId: number) => void
   toggleProjectExpanded: (projectId: ProjectId) => void
   setCodexEnabled: (enabled: boolean) => void
+  setAgentRunner: (runner: AgentRunnerKind) => void
+  setAgentAmpMode: (mode: string) => void
   setTaskPromptTemplate: (intentKind: TaskIntentKind, template: string) => void
   setSystemPromptTemplate: (kind: SystemTaskKind, template: string) => void
   checkCodex: () => Promise<{ ok: boolean; message: string | null }>
@@ -170,6 +173,14 @@ export function createLubanActions(args: {
 
   function setCodexEnabled(enabled: boolean) {
     args.sendAction({ type: "codex_enabled_changed", enabled })
+  }
+
+  function setAgentRunner(runner: AgentRunnerKind) {
+    args.sendAction({ type: "agent_runner_changed", runner })
+  }
+
+  function setAgentAmpMode(mode: string) {
+    args.sendAction({ type: "agent_amp_mode_changed", mode })
   }
 
   function setTaskPromptTemplate(intentKind: TaskIntentKind, template: string) {
@@ -661,6 +672,8 @@ export function createLubanActions(args: {
     archiveWorkspace,
     toggleProjectExpanded,
     setCodexEnabled,
+    setAgentRunner,
+    setAgentAmpMode,
     setTaskPromptTemplate,
     setSystemPromptTemplate,
     checkCodex,

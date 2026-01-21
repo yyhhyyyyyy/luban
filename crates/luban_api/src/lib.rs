@@ -56,6 +56,10 @@ pub struct AgentSettingsSnapshot {
     pub default_model_id: Option<String>,
     #[serde(default)]
     pub default_thinking_effort: Option<ThinkingEffort>,
+    #[serde(default)]
+    pub default_runner: Option<AgentRunnerKind>,
+    #[serde(default)]
+    pub amp_mode: Option<String>,
 }
 
 impl Default for AgentSettingsSnapshot {
@@ -64,8 +68,17 @@ impl Default for AgentSettingsSnapshot {
             codex_enabled: true,
             default_model_id: None,
             default_thinking_effort: None,
+            default_runner: None,
+            amp_mode: None,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentRunnerKind {
+    Codex,
+    Amp,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -717,6 +730,12 @@ pub enum ClientAction {
     },
     CodexEnabledChanged {
         enabled: bool,
+    },
+    AgentRunnerChanged {
+        runner: AgentRunnerKind,
+    },
+    AgentAmpModeChanged {
+        mode: String,
     },
     TaskPromptTemplateChanged {
         intent_kind: TaskIntentKind,

@@ -10,6 +10,7 @@ import type {
   AppearanceFontsSnapshot,
   AppearanceTheme,
   AttachmentRef,
+  AgentRunnerKind,
   AgentRunConfigSnapshot,
   CodexConfigEntrySnapshot,
   ConversationSnapshot,
@@ -117,6 +118,8 @@ type LubanContextValue = {
   setOpenButtonSelection: (selection: string) => void
 
   setCodexEnabled: (enabled: boolean) => void
+  setAgentRunner: (runner: AgentRunnerKind) => void
+  setAgentAmpMode: (mode: string) => void
   setTaskPromptTemplate: (intentKind: TaskIntentKind, template: string) => void
   setSystemPromptTemplate: (kind: SystemTaskKind, template: string) => void
   checkCodex: () => Promise<{ ok: boolean; message: string | null }>
@@ -287,6 +290,8 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     setGlobalZoom: actions.setGlobalZoom,
     setOpenButtonSelection: actions.setOpenButtonSelection,
     setCodexEnabled: actions.setCodexEnabled,
+    setAgentRunner: actions.setAgentRunner,
+    setAgentAmpMode: actions.setAgentAmpMode,
     setTaskPromptTemplate: actions.setTaskPromptTemplate,
     setSystemPromptTemplate: actions.setSystemPromptTemplate,
     checkCodex: actions.checkCodex,

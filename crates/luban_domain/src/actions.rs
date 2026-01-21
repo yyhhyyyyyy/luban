@@ -1,7 +1,7 @@
 use crate::{
-    AgentThreadEvent, AppearanceTheme, AttachmentRef, ChatScrollAnchor, ContextTokenKind,
-    ConversationSnapshot, ConversationThreadMeta, OpenTarget, PersistedAppState, ProjectId,
-    SystemTaskKind, TaskIntentKind, ThinkingEffort, WorkspaceId, WorkspaceThreadId,
+    AgentRunnerKind, AgentThreadEvent, AppearanceTheme, AttachmentRef, ChatScrollAnchor,
+    ContextTokenKind, ConversationSnapshot, ConversationThreadMeta, OpenTarget, PersistedAppState,
+    ProjectId, SystemTaskKind, TaskIntentKind, ThinkingEffort, WorkspaceId, WorkspaceThreadId,
 };
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -271,6 +271,12 @@ pub enum Action {
     },
     AgentCodexEnabledChanged {
         enabled: bool,
+    },
+    AgentRunnerChanged {
+        runner: AgentRunnerKind,
+    },
+    AgentAmpModeChanged {
+        mode: String,
     },
     CodexDefaultsLoaded {
         model_id: Option<String>,

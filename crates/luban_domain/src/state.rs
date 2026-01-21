@@ -516,8 +516,12 @@ mod tests {
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct AgentRunConfig {
+    #[serde(default = "crate::default_agent_runner_kind")]
+    pub runner: crate::AgentRunnerKind,
     pub model_id: String,
     pub thinking_effort: ThinkingEffort,
+    #[serde(default)]
+    pub amp_mode: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -567,6 +571,8 @@ pub struct AppState {
     pub appearance_fonts: AppearanceFonts,
     pub(crate) agent_default_model_id: String,
     pub(crate) agent_default_thinking_effort: ThinkingEffort,
+    pub(crate) agent_default_runner: crate::AgentRunnerKind,
+    pub(crate) agent_amp_mode: String,
     pub(crate) agent_codex_enabled: bool,
     pub conversations: HashMap<(WorkspaceId, WorkspaceThreadId), WorkspaceConversation>,
     pub workspace_tabs: HashMap<WorkspaceId, WorkspaceTabs>,
@@ -593,6 +599,14 @@ impl AppState {
     pub fn agent_default_thinking_effort(&self) -> ThinkingEffort {
         self.agent_default_thinking_effort
     }
+
+    pub fn agent_default_runner(&self) -> crate::AgentRunnerKind {
+        self.agent_default_runner
+    }
+
+    pub fn agent_amp_mode(&self) -> &str {
+        &self.agent_amp_mode
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -608,6 +622,8 @@ pub struct PersistedAppState {
     pub appearance_terminal_font: Option<String>,
     pub agent_default_model_id: Option<String>,
     pub agent_default_thinking_effort: Option<String>,
+    pub agent_default_runner: Option<String>,
+    pub agent_amp_mode: Option<String>,
     pub agent_codex_enabled: Option<bool>,
     pub last_open_workspace_id: Option<u64>,
     pub open_button_selection: Option<String>,

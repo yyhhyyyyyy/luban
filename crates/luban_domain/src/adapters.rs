@@ -1,6 +1,6 @@
 use crate::{
-    AgentThreadEvent, AttachmentRef, ContextItem, ConversationSnapshot, ConversationThreadMeta,
-    PersistedAppState, QueuedPrompt, SystemTaskKind,
+    AgentRunnerKind, AgentThreadEvent, AttachmentRef, ContextItem, ConversationSnapshot,
+    ConversationThreadMeta, PersistedAppState, QueuedPrompt, SystemTaskKind,
 };
 use std::collections::HashMap;
 use std::{path::PathBuf, sync::Arc, sync::atomic::AtomicBool};
@@ -56,6 +56,8 @@ pub struct RunAgentTurnRequest {
     pub thread_id: Option<String>,
     pub prompt: String,
     pub attachments: Vec<AttachmentRef>,
+    pub runner: AgentRunnerKind,
+    pub amp_mode: Option<String>,
     pub model: Option<String>,
     pub model_reasoning_effort: Option<String>,
 }

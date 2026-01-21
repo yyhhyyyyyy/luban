@@ -19,10 +19,14 @@ export type AppearanceSnapshot = {
   global_zoom: number
 }
 
+export type AgentRunnerKind = "codex" | "amp"
+
 export type AgentSettingsSnapshot = {
   codex_enabled: boolean
   default_model_id?: string
   default_thinking_effort?: ThinkingEffort
+  default_runner?: AgentRunnerKind
+  amp_mode?: string
 }
 
 export type TaskPromptTemplateSnapshot = {
@@ -391,6 +395,8 @@ export type ClientAction =
   | { type: "appearance_fonts_changed"; fonts: AppearanceFontsSnapshot }
   | { type: "appearance_global_zoom_changed"; zoom: number }
   | { type: "codex_enabled_changed"; enabled: boolean }
+  | { type: "agent_runner_changed"; runner: AgentRunnerKind }
+  | { type: "agent_amp_mode_changed"; mode: string }
   | { type: "task_prompt_template_changed"; intent_kind: TaskIntentKind; template: string }
   | { type: "system_prompt_template_changed"; kind: SystemTaskKind; template: string }
   | { type: "codex_check" }

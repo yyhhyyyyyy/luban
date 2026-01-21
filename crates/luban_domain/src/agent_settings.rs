@@ -8,6 +8,38 @@ pub enum ThinkingEffort {
     XHigh,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentRunnerKind {
+    Codex,
+    Amp,
+}
+
+impl AgentRunnerKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AgentRunnerKind::Codex => "codex",
+            AgentRunnerKind::Amp => "amp",
+        }
+    }
+}
+
+pub fn parse_agent_runner_kind(value: &str) -> Option<AgentRunnerKind> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "codex" => Some(AgentRunnerKind::Codex),
+        "amp" => Some(AgentRunnerKind::Amp),
+        _ => None,
+    }
+}
+
+pub fn default_agent_runner_kind() -> AgentRunnerKind {
+    AgentRunnerKind::Codex
+}
+
+pub fn default_amp_mode() -> &'static str {
+    "smart"
+}
+
 impl ThinkingEffort {
     pub const ALL: [ThinkingEffort; 5] = [
         ThinkingEffort::Minimal,
