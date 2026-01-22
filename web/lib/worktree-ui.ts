@@ -48,7 +48,7 @@ export function prStatusFromWorkspace(workspace: WorkspaceSnapshot): {
   }
 
   if (pr.merge_ready) return { status: "ready-to-merge", prNumber: pr.number, prState: pr.state }
-  return { status: "review-pending", prNumber: pr.number, prState: pr.state }
+  return { status: "ci-passed", prNumber: pr.number, prState: pr.state }
 }
 
 export function kanbanColumnForWorktree(args: { agentStatus: AgentStatus; prStatus: PRStatus }): KanbanColumn {
@@ -68,4 +68,3 @@ export function kanbanColumnForWorktree(args: { agentStatus: AgentStatus; prStat
       return "backlog"
   }
 }
-

@@ -668,6 +668,36 @@ fn discover_codex_from_login_shell() -> Option<PathBuf> {
     None
 }
 
+fn pull_request_ci_state_from_check_buckets<'a>(
+    buckets: impl IntoIterator<Item = &'a str>,
+) -> Option<PullRequestCiState> {
+    let mut any_pending = false;
+    let mut any_fail = false;
+    let mut any_pass = false;
+    let mut any_skip = false;
+
+    for bucket in buckets {
+        match bucket {
+            "fail" | "cancel" => any_fail = true,
+            "pending" => any_pending = true,
+            "pass" => any_pass = true,
+            "skipping" => any_skip = true,
+            _ => {}
+        }
+    }
+
+    if any_fail {
+        return Some(PullRequestCiState::Failure);
+    }
+    if any_pending {
+        return Some(PullRequestCiState::Pending);
+    }
+    if any_pass || any_skip {
+        return Some(PullRequestCiState::Success);
+    }
+    None
+}
+
 impl ProjectWorkspaceService for GitWorkspaceService {
     fn load_app_state(&self) -> Result<PersistedAppState, String> {
         self.load_app_state_internal().map_err(|e| format!("{e:#}"))
@@ -1801,7 +1831,7 @@ impl ProjectWorkspaceService for GitWorkspaceService {
         &self,
         worktree_path: PathBuf,
     ) -> Result<Option<PullRequestInfo>, String> {
-        #[derive(serde::Deserialize)]
+        #[derive(Clone, serde::Deserialize)]
         struct GhPullRequestCheck {
             #[serde(default)]
             bucket: String,
@@ -1818,31 +1848,6 @@ impl ProjectWorkspaceService for GitWorkspaceService {
             merge_state_status: String,
             #[serde(default, rename = "reviewDecision")]
             review_decision: String,
-        }
-
-        fn checks_ci_state(checks: &[GhPullRequestCheck]) -> Option<PullRequestCiState> {
-            let mut any_pending = false;
-            let mut any_fail = false;
-            let mut any_pass = false;
-            for check in checks {
-                match check.bucket.as_str() {
-                    "fail" => any_fail = true,
-                    "pending" => any_pending = true,
-                    "pass" => any_pass = true,
-                    _ => {}
-                }
-            }
-
-            if any_fail {
-                return Some(PullRequestCiState::Failure);
-            }
-            if any_pending {
-                return Some(PullRequestCiState::Pending);
-            }
-            if any_pass {
-                return Some(PullRequestCiState::Success);
-            }
-            None
         }
 
         fn is_merge_ready(
@@ -1895,26 +1900,41 @@ impl ProjectWorkspaceService for GitWorkspaceService {
             _ => PullRequestState::Open,
         };
 
-        let checks_output = Command::new("gh")
+        fn parse_checks(output: &std::process::Output) -> Option<Vec<GhPullRequestCheck>> {
+            serde_json::from_slice::<Vec<GhPullRequestCheck>>(&output.stdout).ok()
+        }
+
+        let required_checks_output = Command::new("gh")
             .args(["pr", "checks", "--required", "--json", "bucket"])
             .current_dir(&worktree_path)
             .output();
+        let required_checks_parsed = required_checks_output.as_ref().ok().and_then(parse_checks);
 
-        let (checks_known, checks) = match checks_output {
-            Ok(output) if output.status.success() => (
-                true,
-                serde_json::from_slice::<Vec<GhPullRequestCheck>>(&output.stdout)
-                    .unwrap_or_default(),
-            ),
-            _ => (false, Vec::new()),
+        let mut all_checks_parsed: Option<Vec<GhPullRequestCheck>> = None;
+        let checks = if required_checks_parsed
+            .as_ref()
+            .is_some_and(|checks| !checks.is_empty())
+        {
+            required_checks_parsed.clone().unwrap_or_default()
+        } else {
+            let all_checks_output = Command::new("gh")
+                .args(["pr", "checks", "--json", "bucket"])
+                .current_dir(&worktree_path)
+                .output();
+            all_checks_parsed = all_checks_output.as_ref().ok().and_then(parse_checks);
+            all_checks_parsed.clone().unwrap_or_default()
         };
+
+        let checks_known = required_checks_parsed.is_some() || all_checks_parsed.is_some();
 
         let ci_state = if !checks_known {
             None
         } else if checks.is_empty() {
             Some(PullRequestCiState::Success)
         } else {
-            checks_ci_state(&checks)
+            pull_request_ci_state_from_check_buckets(
+                checks.iter().map(|check| check.bucket.as_str()),
+            )
         };
         let merge_ready = is_merge_ready(
             state,
@@ -1970,14 +1990,33 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                 .output()
                 .context("failed to run 'gh pr checks'")?;
 
-            let checks = serde_json::from_slice::<Vec<GhPullRequestCheck>>(&output.stdout)
+            fn failing_check_url(checks: &[GhPullRequestCheck]) -> Option<&str> {
+                checks
+                    .iter()
+                    .find(|check| {
+                        (check.bucket == "fail" || check.bucket == "cancel")
+                            && !check.link.is_empty()
+                    })
+                    .map(|check| check.link.as_str())
+            }
+
+            let required_checks = serde_json::from_slice::<Vec<GhPullRequestCheck>>(&output.stdout)
                 .unwrap_or_default();
-            if let Some(url) = checks
-                .iter()
-                .find(|check| check.bucket == "fail" && !check.link.is_empty())
-                .map(|check| check.link.as_str())
-            {
+            if let Some(url) = failing_check_url(&required_checks) {
                 return self.open_url(url);
+            }
+
+            if required_checks.is_empty() {
+                let output = Command::new("gh")
+                    .args(["pr", "checks", "--json", "bucket,link"])
+                    .current_dir(&worktree_path)
+                    .output()
+                    .context("failed to run 'gh pr checks'")?;
+                let checks = serde_json::from_slice::<Vec<GhPullRequestCheck>>(&output.stdout)
+                    .unwrap_or_default();
+                if let Some(url) = failing_check_url(&checks) {
+                    return self.open_url(url);
+                }
             }
 
             let output = Command::new("gh")
@@ -2996,6 +3035,31 @@ mod tests {
         assert!(formatted.contains("- image.png: /tmp/image.png\n"));
         assert!(!formatted.contains("@/tmp/notes.txt"));
         assert!(!formatted.contains("@/tmp/image.png"));
+    }
+
+    #[test]
+    fn gh_pr_check_bucket_ci_state_mapping() {
+        assert_eq!(
+            pull_request_ci_state_from_check_buckets(["pass"]),
+            Some(PullRequestCiState::Success)
+        );
+        assert_eq!(
+            pull_request_ci_state_from_check_buckets(["skipping"]),
+            Some(PullRequestCiState::Success)
+        );
+        assert_eq!(
+            pull_request_ci_state_from_check_buckets(["pending", "pass"]),
+            Some(PullRequestCiState::Pending)
+        );
+        assert_eq!(
+            pull_request_ci_state_from_check_buckets(["cancel"]),
+            Some(PullRequestCiState::Failure)
+        );
+        assert_eq!(
+            pull_request_ci_state_from_check_buckets(["fail", "pending", "pass"]),
+            Some(PullRequestCiState::Failure)
+        );
+        assert_eq!(pull_request_ci_state_from_check_buckets(["unknown"]), None);
     }
 
     #[test]
