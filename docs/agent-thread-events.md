@@ -67,7 +67,7 @@ Implemented:
 - `crates/luban_domain/src/state.rs`: persisted default runner and Amp mode (`agent_default_runner`, `agent_amp_mode`).
 - `crates/luban_backend/src/sqlite_store.rs`: stored default runner and Amp mode in `app_settings_text`.
 - `crates/luban_backend/src/services.rs`: runner selection driven by request config (with env overrides).
-- `web/components/settings-panel.tsx`: UI controls to select default runner and Amp mode.
+- `web/components/settings-panel.tsx`: UI controls to select default runner; Amp mode is configured in the Amp panel.
 - `crates/luban_backend/src/services.rs`: Amp config root resolution and file operations (`amp_check`, `amp_config_*`).
 - `crates/luban_api/src/lib.rs`: Amp config protocol (`AmpConfigEntrySnapshot` and request/ready events).
 - `crates/luban_server/src/engine.rs`: Amp config action routing over WebSocket.
@@ -82,7 +82,7 @@ Environment variables (overrides):
 
 - `LUBAN_AGENT_RUNNER`: `codex` (default) or `amp`.
 - `LUBAN_AMP_BIN`: optional absolute path to the `amp` executable (defaults to `amp` on `PATH`).
-- `LUBAN_AMP_MODE`: optional Amp mode value passed via `--mode` (e.g., `smart`, `free`).
+- `LUBAN_AMP_MODE`: optional Amp mode value passed via `--mode` (configured in Settings -> Agent -> Amp).
 - `LUBAN_AMP_ROOT`: optional override for the Amp config root directory.
 
 Known limitations:
@@ -106,9 +106,9 @@ Manual smoke steps:
 2. Open the web UI, then open Settings.
 3. In Settings -> Agent:
    - set Default Runner to Amp
-   - optionally set Amp Mode
 4. In Settings -> Agent:
    - expand Amp settings
+   - set Amp Mode
    - click "Check" to validate `amp --version`
    - open and edit a config file, confirm it is saved
 5. Send a message in a workspace thread.
@@ -135,3 +135,4 @@ Manual smoke steps:
 - 2026-01-22: Added Amp config APIs mirroring the Codex config module.
 - 2026-01-22: Added Amp config settings UI mirroring the Codex config editor.
 - 2026-01-22: Added feedback modal aligned to design; "Fix it" uses the default agent in the active thread.
+- 2026-01-22: Moved Amp mode control into the Amp settings panel.
