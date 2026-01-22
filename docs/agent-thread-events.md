@@ -64,10 +64,11 @@ Implemented:
 - `crates/luban_domain/src/adapters.rs`: `ProjectWorkspaceService::run_agent_turn_streamed` now streams `AgentThreadEvent`.
 - `crates/luban_backend/src/services/amp_cli.rs`: Amp `--stream-json` parser and runner.
 - `crates/luban_backend/src/services/amp_cli.rs`: common Amp tools are normalized (bash/web_search/file edits).
-- `crates/luban_domain/src/state.rs`: persisted default runner and Amp mode (`agent_default_runner`, `agent_amp_mode`).
-- `crates/luban_backend/src/sqlite_store.rs`: stored default runner and Amp mode in `app_settings_text`.
+- `crates/luban_domain/src/state.rs`: persisted default runner (`agent_default_runner`); `agent_amp_mode` is legacy and no longer drives default mode.
+- `crates/luban_backend/src/sqlite_store.rs`: stored agent defaults in `app_settings_text` (default runner is used; Amp mode is resolved from config files).
 - `crates/luban_backend/src/services.rs`: runner selection driven by request config (with env overrides).
-- `web/components/settings-panel.tsx`: UI controls to select default runner; Amp mode is configured in the Amp panel.
+- `web/components/settings-panel.tsx`: UI controls to select the default runner.
+- `web/components/shared/agent-selector.tsx`: agent picker supports selecting Amp and overriding mode (`smart` / `rush`) per turn.
 - `crates/luban_backend/src/services.rs`: Amp config root resolution and file operations (`amp_check`, `amp_config_*`).
 - `crates/luban_api/src/lib.rs`: Amp config protocol (`AmpConfigEntrySnapshot` and request/ready events).
 - `crates/luban_server/src/engine.rs`: Amp config action routing over WebSocket.
@@ -82,7 +83,7 @@ Environment variables (overrides):
 
 - `LUBAN_AGENT_RUNNER`: `codex` (default) or `amp`.
 - `LUBAN_AMP_BIN`: optional absolute path to the `amp` executable (defaults to `amp` on `PATH`).
-- `LUBAN_AMP_MODE`: optional Amp mode value passed via `--mode` (configured in Settings -> Agent -> Amp).
+- `LUBAN_AMP_MODE`: optional Amp mode value passed via `--mode` (overrides all other sources).
 - `LUBAN_AMP_ROOT`: optional override for the Amp config root directory.
 
 Known limitations:
@@ -103,19 +104,15 @@ Manual smoke steps:
 
 1. Start the server (existing workflow):
    - `just run-server`
-2. Open the web UI, then open Settings.
-3. In Settings -> Agent:
-   - set Default Runner to Amp
-4. In Settings -> Agent:
-   - expand Amp settings
-   - set Amp Mode
-   - click "Check" to validate `amp --version`
-   - open and edit a config file, confirm it is saved
-5. Send a message in a workspace thread.
-6. Confirm:
+2. Open the web UI, then open Settings -> Agent.
+3. Set Default Runner to Amp (optional).
+4. Send a message in a workspace thread, then use the agent picker to:
+   - select Amp
+   - select mode: Default / Smart / Rush
+5. Confirm:
    - activities appear as tool calls / reasoning
    - a final assistant message is recorded
-7. Open the feedback modal from the sidebar, paste an image, click "Fix it", and confirm a new agent run starts in the active thread.
+6. Open the feedback modal from the sidebar, paste an image, click "Fix it", and confirm a new agent run starts in the active thread.
 
 ## Next Steps
 
@@ -135,4 +132,4 @@ Manual smoke steps:
 - 2026-01-22: Added Amp config APIs mirroring the Codex config module.
 - 2026-01-22: Added Amp config settings UI mirroring the Codex config editor.
 - 2026-01-22: Added feedback modal aligned to design; "Fix it" uses the default agent in the active thread.
-- 2026-01-22: Moved Amp mode control into the Amp settings panel.
+- 2026-01-22: Resolved Amp default mode from the Amp config files; agent picker can override (`smart` / `rush`) per turn.

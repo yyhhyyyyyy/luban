@@ -553,12 +553,13 @@ impl AppState {
                 thread_id,
                 text,
                 attachments,
+                runner,
+                amp_mode,
             } => {
                 let tabs = self.ensure_workspace_tabs_mut(workspace_id);
                 tabs.activate(thread_id);
 
-                let runner = self.agent_default_runner;
-                let amp_mode = self.agent_amp_mode.clone();
+                let runner = runner.unwrap_or(self.agent_default_runner);
                 let conversation = self.ensure_conversation_mut(workspace_id, thread_id);
                 conversation.draft.clear();
                 conversation.draft_attachments.clear();
@@ -575,7 +576,7 @@ impl AppState {
                     model_id: conversation.agent_model_id.clone(),
                     thinking_effort: conversation.thinking_effort,
                     amp_mode: if runner == crate::AgentRunnerKind::Amp {
-                        Some(amp_mode)
+                        amp_mode
                     } else {
                         None
                     },
@@ -635,12 +636,13 @@ impl AppState {
                 thread_id,
                 text,
                 attachments,
+                runner,
+                amp_mode,
             } => {
                 let tabs = self.ensure_workspace_tabs_mut(workspace_id);
                 tabs.activate(thread_id);
 
-                let runner = self.agent_default_runner;
-                let amp_mode = self.agent_amp_mode.clone();
+                let runner = runner.unwrap_or(self.agent_default_runner);
                 let conversation = self.ensure_conversation_mut(workspace_id, thread_id);
                 conversation.draft.clear();
                 conversation.draft_attachments.clear();
@@ -657,7 +659,7 @@ impl AppState {
                     model_id: conversation.agent_model_id.clone(),
                     thinking_effort: conversation.thinking_effort,
                     amp_mode: if runner == crate::AgentRunnerKind::Amp {
-                        Some(amp_mode)
+                        amp_mode
                     } else {
                         None
                     },
@@ -2127,6 +2129,8 @@ mod tests {
             thread_id,
             text: "hi".to_owned(),
             attachments: Vec::new(),
+            runner: None,
+            amp_mode: None,
         });
         assert_eq!(effects.len(), 1);
         let (sent_model_id, sent_effort) = match &effects[0] {
@@ -2192,6 +2196,8 @@ mod tests {
             thread_id,
             text: "first".to_owned(),
             attachments: Vec::new(),
+            runner: None,
+            amp_mode: None,
         });
 
         state.apply(Action::ChatModelChanged {
@@ -2209,6 +2215,8 @@ mod tests {
             thread_id,
             text: "second".to_owned(),
             attachments: Vec::new(),
+            runner: None,
+            amp_mode: None,
         });
 
         let conversation = state
@@ -2276,6 +2284,8 @@ mod tests {
             thread_id,
             text: "Implement feature X".to_owned(),
             attachments: Vec::new(),
+            runner: None,
+            amp_mode: None,
         });
 
         assert_eq!(effects.len(), 1);
@@ -2886,6 +2896,8 @@ mod tests {
             thread_id,
             text: "Test".to_owned(),
             attachments: Vec::new(),
+            runner: None,
+            amp_mode: None,
         });
         let run_id = state
             .workspace_thread_conversation(workspace_id, thread_id)
@@ -3311,6 +3323,8 @@ mod tests {
             thread_id,
             text: "Hello".to_owned(),
             attachments: Vec::new(),
+            runner: None,
+            amp_mode: None,
         });
         let run_id = state
             .workspace_thread_conversation(workspace_id, thread_id)
@@ -3382,6 +3396,8 @@ mod tests {
             thread_id,
             text: "Hello".to_owned(),
             attachments: Vec::new(),
+            runner: None,
+            amp_mode: None,
         });
         state.apply(Action::AgentEventReceived {
             workspace_id,
@@ -3528,6 +3544,8 @@ mod tests {
             thread_id,
             text: "Hello".to_owned(),
             attachments: Vec::new(),
+            runner: None,
+            amp_mode: None,
         });
         let run_id = state
             .workspace_thread_conversation(workspace_id, thread_id)
@@ -3567,6 +3585,8 @@ mod tests {
             thread_id,
             text: "Hello".to_owned(),
             attachments: Vec::new(),
+            runner: None,
+            amp_mode: None,
         });
         assert_eq!(effects.len(), 1);
         assert!(matches!(
@@ -3604,6 +3624,8 @@ mod tests {
             thread_id,
             text: "Hello".to_owned(),
             attachments: Vec::new(),
+            runner: None,
+            amp_mode: None,
         });
         let run_id = state
             .workspace_thread_conversation(workspace_id, thread_id)
@@ -3649,6 +3671,8 @@ mod tests {
             thread_id,
             text: "Hello".to_owned(),
             attachments: Vec::new(),
+            runner: None,
+            amp_mode: None,
         });
         let run_id = state
             .workspace_thread_conversation(workspace_id, thread_id)
@@ -3700,6 +3724,8 @@ mod tests {
             thread_id,
             text: "Hello".to_owned(),
             attachments: Vec::new(),
+            runner: None,
+            amp_mode: None,
         });
 
         let effects = state.apply(Action::CancelAgentTurn {
@@ -3729,12 +3755,16 @@ mod tests {
             thread_id,
             text: "First".to_owned(),
             attachments: Vec::new(),
+            runner: None,
+            amp_mode: None,
         });
         let effects = state.apply(Action::SendAgentMessage {
             workspace_id,
             thread_id,
             text: "Second".to_owned(),
             attachments: Vec::new(),
+            runner: None,
+            amp_mode: None,
         });
         assert!(effects.is_empty());
 
@@ -3757,18 +3787,24 @@ mod tests {
             thread_id,
             text: "First".to_owned(),
             attachments: Vec::new(),
+            runner: None,
+            amp_mode: None,
         });
         state.apply(Action::SendAgentMessage {
             workspace_id,
             thread_id,
             text: "Second".to_owned(),
             attachments: Vec::new(),
+            runner: None,
+            amp_mode: None,
         });
         state.apply(Action::SendAgentMessage {
             workspace_id,
             thread_id,
             text: "Third".to_owned(),
             attachments: Vec::new(),
+            runner: None,
+            amp_mode: None,
         });
 
         let conversation = state.workspace_conversation(workspace_id).unwrap();
@@ -3822,12 +3858,16 @@ mod tests {
             thread_id,
             text: "First".to_owned(),
             attachments: Vec::new(),
+            runner: None,
+            amp_mode: None,
         });
         state.apply(Action::SendAgentMessage {
             workspace_id,
             thread_id,
             text: "Second".to_owned(),
             attachments: Vec::new(),
+            runner: None,
+            amp_mode: None,
         });
 
         let run_id = state
@@ -3887,12 +3927,16 @@ mod tests {
             thread_id,
             text: "First".to_owned(),
             attachments: Vec::new(),
+            runner: None,
+            amp_mode: None,
         });
         state.apply(Action::SendAgentMessage {
             workspace_id,
             thread_id,
             text: "Second".to_owned(),
             attachments: Vec::new(),
+            runner: None,
+            amp_mode: None,
         });
 
         let run_id = state
@@ -3949,6 +3993,8 @@ mod tests {
             thread_id,
             text: "First".to_owned(),
             attachments: Vec::new(),
+            runner: None,
+            amp_mode: None,
         });
         let run_id_a = state
             .workspace_thread_conversation(workspace_id, thread_id)
@@ -3966,6 +4012,8 @@ mod tests {
             thread_id,
             text: "Second".to_owned(),
             attachments: Vec::new(),
+            runner: None,
+            amp_mode: None,
         });
         let run_id_b = state
             .workspace_thread_conversation(workspace_id, thread_id)

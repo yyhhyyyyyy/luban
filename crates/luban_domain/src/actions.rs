@@ -119,12 +119,16 @@ pub enum Action {
         thread_id: WorkspaceThreadId,
         text: String,
         attachments: Vec<AttachmentRef>,
+        runner: Option<AgentRunnerKind>,
+        amp_mode: Option<String>,
     },
     QueueAgentMessage {
         workspace_id: WorkspaceId,
         thread_id: WorkspaceThreadId,
         text: String,
         attachments: Vec<AttachmentRef>,
+        runner: Option<AgentRunnerKind>,
+        amp_mode: Option<String>,
     },
     ChatModelChanged {
         workspace_id: WorkspaceId,

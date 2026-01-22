@@ -392,15 +392,17 @@ impl Engine {
         })
         .await;
 
-        if mode == luban_api::TaskExecuteMode::Start {
-            self.process_action_queue(Action::SendAgentMessage {
-                workspace_id,
-                thread_id,
-                text: draft.prompt.clone(),
-                attachments: Vec::new(),
-            })
-            .await;
-        }
+	        if mode == luban_api::TaskExecuteMode::Start {
+	            self.process_action_queue(Action::SendAgentMessage {
+	                workspace_id,
+	                thread_id,
+	                text: draft.prompt.clone(),
+	                attachments: Vec::new(),
+	                runner: None,
+	                amp_mode: None,
+	            })
+	            .await;
+	        }
 
         let worktree_path = self
             .state
@@ -1355,6 +1357,8 @@ impl Engine {
                         thread_id,
                         text,
                         attachments,
+                        runner,
+                        amp_mode,
                     } => {
                         let wid = WorkspaceId::from_u64(workspace_id.0);
                         let tid = WorkspaceThreadId::from_u64(thread_id.0);
@@ -1363,6 +1367,11 @@ impl Engine {
                             thread_id: tid,
                         })
                         .await;
+	                        let runner = runner.map(map_api_agent_runner_kind);
+                        let amp_mode = match runner {
+                            Some(luban_domain::AgentRunnerKind::Codex) => None,
+                            _ => amp_mode.clone(),
+                        };
                         self.process_action_queue(Action::SendAgentMessage {
                             workspace_id: wid,
                             thread_id: tid,
@@ -1372,6 +1381,8 @@ impl Engine {
                                 .cloned()
                                 .map(map_api_attachment)
                                 .collect(),
+                            runner,
+                            amp_mode,
                         })
                         .await;
                         let _ = reply.send(Ok(self.rev));
@@ -3653,11 +3664,15 @@ fn map_client_action(action: luban_api::ClientAction) -> Option<Action> {
             thread_id,
             text,
             attachments,
+            runner,
+            amp_mode,
         } => Some(Action::SendAgentMessage {
             workspace_id: WorkspaceId::from_u64(workspace_id.0),
             thread_id: WorkspaceThreadId::from_u64(thread_id.0),
             text,
             attachments: attachments.into_iter().map(map_api_attachment).collect(),
+            runner: runner.map(map_api_agent_runner_kind),
+            amp_mode,
         }),
         luban_api::ClientAction::CancelAndSendAgentMessage { .. } => None,
         luban_api::ClientAction::QueueAgentMessage {
@@ -3665,11 +3680,15 @@ fn map_client_action(action: luban_api::ClientAction) -> Option<Action> {
             thread_id,
             text,
             attachments,
+            runner,
+            amp_mode,
         } => Some(Action::QueueAgentMessage {
             workspace_id: WorkspaceId::from_u64(workspace_id.0),
             thread_id: WorkspaceThreadId::from_u64(thread_id.0),
             text,
             attachments: attachments.into_iter().map(map_api_attachment).collect(),
+            runner: runner.map(map_api_agent_runner_kind),
+            amp_mode,
         }),
         luban_api::ClientAction::RemoveQueuedPrompt {
             workspace_id,
@@ -3874,6 +3893,13 @@ fn map_api_attachment(att: luban_api::AttachmentRef) -> AttachmentRef {
         extension: att.extension,
         mime: att.mime,
         byte_len: att.byte_len,
+    }
+}
+
+fn map_api_agent_runner_kind(kind: luban_api::AgentRunnerKind) -> luban_domain::AgentRunnerKind {
+    match kind {
+        luban_api::AgentRunnerKind::Codex => luban_domain::AgentRunnerKind::Codex,
+        luban_api::AgentRunnerKind::Amp => luban_domain::AgentRunnerKind::Amp,
     }
 }
 
@@ -4422,6 +4448,8 @@ mod tests {
             thread_id,
             text: "seed".to_owned(),
             attachments: Vec::new(),
+            runner: None,
+            amp_mode: None,
         });
 
         let key = (workspace_id, thread_id);
@@ -5826,6 +5854,8 @@ mod tests {
                 thread_id,
                 text: "hello".to_owned(),
                 attachments: Vec::new(),
+                runner: None,
+                amp_mode: None,
             })
             .await;
 

@@ -319,6 +319,92 @@ fn resolve_amp_root() -> anyhow::Result<PathBuf> {
     Ok(PathBuf::from(home).join(".config").join("amp"))
 }
 
+fn parse_amp_mode_from_config_text(contents: &str) -> Option<String> {
+    for raw_line in contents.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line.starts_with('#') || line.starts_with("//") {
+            continue;
+        }
+
+        let lowered = line.to_ascii_lowercase();
+
+        let value = if let Some(rest) = lowered.strip_prefix("mode") {
+            let rest = rest.trim_start();
+            let rest = rest.strip_prefix(':').or_else(|| rest.strip_prefix('='));
+            rest.map(str::trim)
+        } else if let Some(rest) = lowered.strip_prefix("\"mode\"") {
+            let rest = rest.trim_start();
+            let rest = rest.strip_prefix(':');
+            rest.map(str::trim)
+        } else {
+            None
+        };
+
+        let Some(value) = value else {
+            continue;
+        };
+
+        let value = value
+            .trim_matches('"')
+            .trim_matches('\'')
+            .split(|c: char| c.is_whitespace() || c == ',' || c == '#')
+            .next()
+            .unwrap_or("")
+            .trim();
+        if value.is_empty() {
+            continue;
+        }
+
+        if value == "smart" || value == "rush" {
+            return Some(value.to_owned());
+        }
+    }
+    None
+}
+
+fn detect_amp_mode_from_config_root(root: &Path) -> Option<String> {
+    let candidates = [
+        "config.toml",
+        "config.yaml",
+        "config.yml",
+        "config.json",
+        "amp.toml",
+        "amp.yaml",
+        "amp.yml",
+        "amp.json",
+        "settings.toml",
+        "settings.yaml",
+        "settings.yml",
+        "settings.json",
+    ];
+
+    for rel in candidates {
+        let path = root.join(rel);
+        let meta = match std::fs::metadata(&path) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if !meta.is_file() {
+            continue;
+        }
+        if meta.len() > 2 * 1024 * 1024 {
+            continue;
+        }
+        let contents = match std::fs::read_to_string(&path) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if let Some(mode) = parse_amp_mode_from_config_text(&contents) {
+            return Some(mode);
+        }
+    }
+
+    None
+}
+
 #[derive(Clone)]
 pub struct GitWorkspaceService {
     worktrees_root: PathBuf,
@@ -1308,7 +1394,16 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                 .ok()
                 .map(|v| v.trim().to_owned())
                 .filter(|v| !v.is_empty());
-            let resolved_amp_mode = env_amp_mode.or_else(|| amp_mode.clone());
+            let resolved_amp_mode = if use_amp {
+                let amp_root = resolve_amp_root().ok();
+                env_amp_mode.or_else(|| amp_mode.clone()).or_else(|| {
+                    amp_root
+                        .as_deref()
+                        .and_then(detect_amp_mode_from_config_root)
+                })
+            } else {
+                None
+            };
 
             let mut turn_error: Option<String> = None;
             let mut transient_error_seq: u64 = 0;
@@ -3152,6 +3247,43 @@ mod tests {
 
         drop(service);
         let _ = std::fs::remove_dir_all(&base_dir);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn amp_mode_is_detected_from_config_files() {
+        let _guard = lock_env();
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be valid")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "luban-amp-mode-config-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&root).expect("temp dir should be created");
+
+        std::fs::write(root.join("config.toml"), "mode = \"rush\"\n").expect("write config");
+        assert_eq!(
+            detect_amp_mode_from_config_root(&root).as_deref(),
+            Some("rush")
+        );
+
+        std::fs::write(root.join("config.toml"), "mode = \"smart\"\n").expect("write config");
+        assert_eq!(
+            detect_amp_mode_from_config_root(&root).as_deref(),
+            Some("smart")
+        );
+
+        std::fs::write(root.join("config.yaml"), "mode: rush\n").expect("write config");
+        assert_eq!(
+            detect_amp_mode_from_config_root(&root).as_deref(),
+            Some("smart"),
+            "config.toml takes precedence when present"
+        );
+
         let _ = std::fs::remove_dir_all(&root);
     }
 

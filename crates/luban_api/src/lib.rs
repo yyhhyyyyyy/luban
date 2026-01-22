@@ -667,18 +667,30 @@ pub enum ClientAction {
         thread_id: WorkspaceThreadId,
         text: String,
         attachments: Vec<AttachmentRef>,
+        #[serde(default)]
+        runner: Option<AgentRunnerKind>,
+        #[serde(default)]
+        amp_mode: Option<String>,
     },
     CancelAndSendAgentMessage {
         workspace_id: WorkspaceId,
         thread_id: WorkspaceThreadId,
         text: String,
         attachments: Vec<AttachmentRef>,
+        #[serde(default)]
+        runner: Option<AgentRunnerKind>,
+        #[serde(default)]
+        amp_mode: Option<String>,
     },
     QueueAgentMessage {
         workspace_id: WorkspaceId,
         thread_id: WorkspaceThreadId,
         text: String,
         attachments: Vec<AttachmentRef>,
+        #[serde(default)]
+        runner: Option<AgentRunnerKind>,
+        #[serde(default)]
+        amp_mode: Option<String>,
     },
     RemoveQueuedPrompt {
         workspace_id: WorkspaceId,
