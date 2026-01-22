@@ -78,7 +78,9 @@ export async function ensureWorkspace(page: Page) {
 
   const branches = projectContainer.getByTestId("worktree-branch-name")
   if ((await branches.count()) === 0) {
+    await projectContainer.hover()
     const addWorktree = projectContainer.getByTitle("Add worktree")
+    await addWorktree.waitFor({ state: "visible", timeout: 10_000 })
     if (!(await addWorktree.isDisabled())) {
       await addWorktree.click()
     }

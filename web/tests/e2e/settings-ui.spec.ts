@@ -130,7 +130,7 @@ test("agent selector defaults come from Codex config", async ({ page }) => {
     })
     .toBe("gpt-5.2-codex")
 
-  const selector = page.getByTestId("codex-agent-selector")
+  const selector = page.getByTestId("agent-selector")
   await selector.click()
 
   const menu = page
@@ -150,7 +150,7 @@ test("agent selector defaults come from Codex config", async ({ page }) => {
 test("default selector button opens Codex config editor", async ({ page }) => {
   await ensureWorkspace(page)
 
-  const selector = page.getByTestId("codex-agent-selector")
+  const selector = page.getByTestId("agent-selector")
   await selector.click()
 
   const menu = page
@@ -163,7 +163,7 @@ test("default selector button opens Codex config editor", async ({ page }) => {
   const defaultModel = menu.getByRole("button", { name: "GPT-5.2-Codex", exact: true })
   await defaultModel.hover()
 
-  const openDefaults = menu.getByTitle("Edit Codex defaults").first()
+  const openDefaults = defaultModel.locator("..").getByTitle("Edit Codex defaults")
   await openDefaults.click()
 
   await expect(page.getByTestId("settings-panel")).toBeVisible({ timeout: 10_000 })

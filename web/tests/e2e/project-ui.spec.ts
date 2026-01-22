@@ -24,7 +24,7 @@ test("project can be deleted via sidebar confirmation dialog", async ({ page }) 
 
   const root = requireEnv("LUBAN_E2E_ROOT")
 
-  const tmpBase = path.join(os.tmpdir(), "luban-e2e-delete-project-")
+  const tmpBase = path.join(os.tmpdir(), "luban-e2e-delete-project-with-a-very-very-long-name-")
   const projectDir = fs.mkdtempSync(tmpBase)
   ensureEmptyDir(projectDir)
 
@@ -59,6 +59,13 @@ test("project can be deleted via sidebar confirmation dialog", async ({ page }) 
   const projectContainer = projectToggle.locator("..").locator("..")
 
   await projectContainer.hover()
+  await expect(projectContainer.getByTestId("project-delete-button")).toBeVisible()
+  const sidebarBox = await page.getByTestId("left-sidebar").boundingBox()
+  const deleteButtonBox = await projectContainer.getByTestId("project-delete-button").boundingBox()
+  if (!sidebarBox) throw new Error("left sidebar bounding box not found")
+  if (!deleteButtonBox) throw new Error("delete button bounding box not found")
+  expect(deleteButtonBox.x).toBeGreaterThanOrEqual(sidebarBox.x - 1)
+  expect(deleteButtonBox.x + deleteButtonBox.width).toBeLessThanOrEqual(sidebarBox.x + sidebarBox.width + 1)
   await projectContainer.getByTestId("project-delete-button").click()
 
   await expect(page.getByTestId("project-delete-dialog")).toBeVisible({ timeout: 10_000 })

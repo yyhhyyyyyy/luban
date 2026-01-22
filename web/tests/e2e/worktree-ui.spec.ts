@@ -316,6 +316,7 @@ test("creating a worktree auto-opens its conversation", async ({ page }) => {
   const projectContainer = projectToggle.locator("..").locator("..")
 
   const addWorktree = projectContainer.getByTitle("Add worktree")
+  await projectContainer.hover()
   await addWorktree.click()
 
   await expect
@@ -534,7 +535,7 @@ test("settings panel exposes Codex agent settings", async ({ page }) => {
   await expect(page.getByTestId("settings-panel")).toBeVisible({ timeout: 10_000 })
 
   await page.getByRole("button", { name: "Agent", exact: true }).click()
-  await expect(page.getByText("Codex", { exact: true })).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByTestId("settings-agent-runner-codex")).toBeVisible({ timeout: 10_000 })
   await expect(page.getByTestId("settings-codex-toggle")).toBeVisible({ timeout: 10_000 })
 })
 
