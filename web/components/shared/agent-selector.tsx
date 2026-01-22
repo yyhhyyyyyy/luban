@@ -251,34 +251,27 @@ export function AgentSelector({
   ampModeOverride: AmpModeOverride
   onChangeAmpModeOverride: (mode: AmpModeOverride) => void
 }) {
-  const effectiveRunner: AgentRunnerKind = runnerOverride ?? defaultRunner ?? "codex"
-  const isAmp = effectiveRunner === "amp"
-
-  const defaultRunnerLabel = useMemo(() => {
-    return `Default (${(defaultRunner ?? "codex") === "amp" ? "Amp" : "Codex"})`
-  }, [defaultRunner])
-
-  const modeLabel = useMemo(() => {
-    if (!isAmp) return null
-    if (ampModeOverride == null) return "Default"
-    return ampModeOverride === "rush" ? "Rush" : "Smart"
-  }, [ampModeOverride, isAmp])
+  const resolvedDefaultRunner: AgentRunnerKind = defaultRunner ?? "codex"
+  const resolvedRunner: AgentRunnerKind = runnerOverride ?? resolvedDefaultRunner
+  const isAmp = resolvedRunner === "amp"
 
   const displayName = useMemo(() => {
     if (isAmp) {
-      return modeLabel ? `Amp · ${modeLabel}` : "Amp"
+      if (ampModeOverride === "rush") return "Amp · Rush"
+      if (ampModeOverride === "smart") return "Amp · Smart"
+      return "Amp"
     }
     const model = agentModelLabel(modelId)
     const effort = thinkingEffortLabel(thinkingEffort)
     if (model === "Model" || effort === "Effort") return "Codex"
-    if (runnerOverride == null) return `${model} · ${effort}`
     return `${model} · ${effort}`
-  }, [isAmp, modeLabel, modelId, runnerOverride, thinkingEffort])
+  }, [ampModeOverride, isAmp, modelId, thinkingEffort])
 
   const icon = isAmp ? <Zap className="w-3.5 h-3.5" /> : <OpenAIIcon className="w-3.5 h-3.5" />
 
   const [open, setOpen] = useState(false)
   const [tempModelId, setTempModelId] = useState<string | null>(null)
+  const [tempRunner, setTempRunner] = useState<AgentRunnerKind>(resolvedRunner)
 
   const currentModelId = modelId ?? ""
   const currentEffort = thinkingEffort ?? null
@@ -289,12 +282,28 @@ export function AgentSelector({
   const close = () => {
     setOpen(false)
     setTempModelId(null)
+    setTempRunner(resolvedRunner)
   }
 
   const apply = (nextModelId: string, nextEffort: ThinkingEffort) => {
     if (nextModelId && nextModelId !== currentModelId) onChangeModelId(nextModelId)
     if (nextEffort !== currentEffort && nextEffort != null) onChangeThinkingEffort(nextEffort)
     close()
+  }
+
+  const selectRunner = (next: AgentRunnerKind) => {
+    setTempRunner(next)
+    setTempModelId(null)
+
+    if (next === resolvedDefaultRunner) {
+      onChangeRunnerOverride(null)
+    } else {
+      onChangeRunnerOverride(next)
+    }
+
+    if (next !== "amp") {
+      onChangeAmpModeOverride(null)
+    }
   }
 
   return (
@@ -304,8 +313,12 @@ export function AgentSelector({
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => {
           if (disabled) return
-          setOpen((prev) => !prev)
-          setTempModelId(null)
+          const nextOpen = !open
+          setOpen(nextOpen)
+          if (nextOpen) {
+            setTempRunner(resolvedRunner)
+            setTempModelId(null)
+          }
         }}
         disabled={disabled}
         className={cn(
@@ -320,138 +333,39 @@ export function AgentSelector({
         <ChevronDown className={cn("w-3 h-3 transition-transform", open && "rotate-180")} />
       </button>
 
-      {open && (
+      {open && !disabled && (
         <>
-          <div className="fixed inset-0 z-40" onMouseDown={close} />
+          <div className="fixed inset-0 z-40" onClick={() => close()} />
           <div
             className={cn(
-              "absolute z-50 w-80 rounded-lg border border-border bg-popover shadow-lg p-2",
-              dropdownPosition === "top" ? "bottom-full mb-2" : "top-full mt-2",
-              "left-0",
+              "absolute left-0 bg-popover border border-border rounded-lg shadow-xl z-50 overflow-hidden",
+              dropdownPosition === "top" ? "bottom-full mb-1" : "top-full mt-1",
             )}
           >
-            <div className="p-1">
-              <div className="px-2.5 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-                Runner
-              </div>
-              {([
-                { id: null, label: defaultRunnerLabel },
-                { id: "codex" as const, label: "Codex" },
-                { id: "amp" as const, label: "Amp" },
-              ] as const).map((opt) => {
-                const selected = opt.id === runnerOverride
-                return (
-                  <button
-                    key={opt.label}
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => {
-                      onChangeRunnerOverride(opt.id)
-                      if (opt.id !== "amp") onChangeAmpModeOverride(null)
-                    }}
-                    className={cn(
-                      "w-full flex items-center px-2.5 py-1.5 text-left text-xs transition-colors rounded-md whitespace-nowrap",
-                      selected ? "bg-primary/10 text-primary" : "text-foreground hover:bg-accent",
-                    )}
-                  >
-                    <span>{opt.label}</span>
-                  </button>
-                )
-              })}
-            </div>
-
-            {isAmp ? (
-              <div className="p-1 border-t border-border">
-                <div className="px-2.5 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-                  Mode
-                </div>
-                {([
-                  { id: null, label: "Default (from Amp config)" },
-                  { id: "smart" as const, label: "Smart" },
-                  { id: "rush" as const, label: "Rush" },
-                ] as const).map((opt) => {
-                  const selected = opt.id === ampModeOverride
-                  return (
-                    <button
-                      key={opt.label}
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => {
-                        onChangeAmpModeOverride(opt.id)
-                        close()
-                      }}
-                      className={cn(
-                        "w-full flex items-center px-2.5 py-1.5 text-left text-xs transition-colors rounded-md whitespace-nowrap",
-                        selected ? "bg-primary/10 text-primary" : "text-foreground hover:bg-accent",
-                      )}
-                    >
-                      <span>{opt.label}</span>
-                    </button>
-                  )
-                })}
-              </div>
-            ) : (
-              <div className="p-1 border-t border-border">
-                <div className="px-2.5 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-                  Model
-                </div>
-                {AGENT_MODELS.map((m) => {
-                  const selected = m.id === panelModelId
-                  const isDefault = defaultModelId != null && m.id === defaultModelId
-                  return (
-                    <div key={m.id} className="relative group">
-                      <button
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => setTempModelId(m.id)}
-                        className={cn(
-                          "w-full flex items-center px-2.5 py-1.5 text-left text-xs transition-colors rounded-md whitespace-nowrap",
-                          selected ? "bg-primary/10 text-primary" : "text-foreground hover:bg-accent",
-                        )}
-                      >
-                        <span className="pr-10">{m.label}</span>
-                      </button>
-                      {isDefault && (
-                        <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1 px-1.5 py-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity bg-popover/95 rounded">
-                          <span className="text-[10px] text-muted-foreground pointer-events-none select-none">default</span>
-                          {onOpenAgentSettings && (
-                            <button
-                              onMouseDown={(e) => e.preventDefault()}
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                close()
-                                onOpenAgentSettings("codex", "config.toml")
-                              }}
-                              className="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-                              title="Edit Codex defaults"
-                            >
-                              <Settings className="w-3 h-3" />
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-
-            {!isAmp && (
+            <div className="flex divide-x divide-border">
               <div className="p-1">
                 <div className="px-2.5 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-                  Reasoning
+                  Agent
                 </div>
-                {effortOptions.map((effort) => {
-                  const selected = effort === (currentEffort ?? "")
-                  const isDefault = defaultThinkingEffort != null && effort === defaultThinkingEffort
+
+                {([
+                  { id: "codex" as const, label: "Codex", icon: <OpenAIIcon className="w-3.5 h-3.5 flex-shrink-0" /> },
+                  { id: "amp" as const, label: "Amp", icon: <Zap className="w-3.5 h-3.5 flex-shrink-0" /> },
+                ] as const).map((opt) => {
+                  const selected = opt.id === tempRunner
+                  const isDefault = opt.id === resolvedDefaultRunner
                   return (
-                    <div key={effort} className="relative group">
+                    <div key={opt.id} className="relative group">
                       <button
                         onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => apply(panelModelId, effort)}
+                        onClick={() => selectRunner(opt.id)}
                         className={cn(
-                          "w-full flex items-center px-2.5 py-1.5 text-left text-xs transition-colors rounded-md whitespace-nowrap",
+                          "w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-xs transition-colors rounded-md whitespace-nowrap",
                           selected ? "bg-primary/10 text-primary" : "text-foreground hover:bg-accent",
                         )}
                       >
-                        <span className="pr-10">{thinkingEffortLabel(effort)}</span>
+                        {opt.icon}
+                        <span className="pr-10">{opt.label}</span>
                       </button>
                       {isDefault && (
                         <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1 px-1.5 py-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity bg-popover/95 rounded">
@@ -462,10 +376,10 @@ export function AgentSelector({
                               onClick={(e) => {
                                 e.stopPropagation()
                                 close()
-                                onOpenAgentSettings("codex", "config.toml")
+                                onOpenAgentSettings(resolvedDefaultRunner)
                               }}
                               className="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-                              title="Edit Codex defaults"
+                              title="Edit default agent"
                             >
                               <Settings className="w-3 h-3" />
                             </button>
@@ -476,7 +390,130 @@ export function AgentSelector({
                   )
                 })}
               </div>
-            )}
+
+              {tempRunner === "codex" ? (
+                <>
+                  <div className="p-1">
+                    <div className="px-2.5 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+                      Model
+                    </div>
+                    {AGENT_MODELS.map((m) => {
+                      const selected = m.id === panelModelId || (panelModelId === "" && m.id === currentModelId)
+                      const isDefault = defaultModelId != null && m.id === defaultModelId
+                      return (
+                        <div key={m.id} className="relative group">
+                          <button
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => setTempModelId(m.id)}
+                            className={cn(
+                              "w-full flex items-center px-2.5 py-1.5 text-left text-xs transition-colors rounded-md whitespace-nowrap",
+                              selected ? "bg-primary/10 text-primary" : "text-foreground hover:bg-accent",
+                            )}
+                          >
+                            <span className="pr-10">{m.label}</span>
+                          </button>
+                          {isDefault && (
+                            <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1 px-1.5 py-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity bg-popover/95 rounded">
+                              <span className="text-[10px] text-muted-foreground pointer-events-none select-none">
+                                default
+                              </span>
+                              {onOpenAgentSettings && (
+                                <button
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    close()
+                                    onOpenAgentSettings("codex", "config.toml")
+                                  }}
+                                  className="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                                  title="Edit Codex defaults"
+                                >
+                                  <Settings className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  <div className="p-1">
+                    <div className="px-2.5 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+                      Reasoning
+                    </div>
+                    {effortOptions.map((effort) => {
+                      const selected = effort === (currentEffort ?? "")
+                      const isDefault = defaultThinkingEffort != null && effort === defaultThinkingEffort
+                      return (
+                        <div key={effort} className="relative group">
+                          <button
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => apply(panelModelId, effort)}
+                            className={cn(
+                              "w-full flex items-center px-2.5 py-1.5 text-left text-xs transition-colors rounded-md whitespace-nowrap",
+                              selected ? "bg-primary/10 text-primary" : "text-foreground hover:bg-accent",
+                            )}
+                          >
+                            <span className="pr-10">{thinkingEffortLabel(effort)}</span>
+                          </button>
+                          {isDefault && (
+                            <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1 px-1.5 py-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity bg-popover/95 rounded">
+                              <span className="text-[10px] text-muted-foreground pointer-events-none select-none">
+                                default
+                              </span>
+                              {onOpenAgentSettings && (
+                                <button
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    close()
+                                    onOpenAgentSettings("codex", "config.toml")
+                                  }}
+                                  className="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                                  title="Edit Codex defaults"
+                                >
+                                  <Settings className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </>
+              ) : (
+                <div className="p-1">
+                  <div className="px-2.5 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+                    Mode
+                  </div>
+                  {([
+                    { id: null, label: "Default" },
+                    { id: "smart" as const, label: "Smart" },
+                    { id: "rush" as const, label: "Rush" },
+                  ] as const).map((opt) => {
+                    const selected = opt.id === ampModeOverride
+                    return (
+                      <button
+                        key={opt.label}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          onChangeAmpModeOverride(opt.id)
+                          close()
+                        }}
+                        className={cn(
+                          "w-full flex items-center px-2.5 py-1.5 text-left text-xs transition-colors rounded-md whitespace-nowrap",
+                          selected ? "bg-primary/10 text-primary" : "text-foreground hover:bg-accent",
+                        )}
+                      >
+                        <span>{opt.label}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         </>
       )}
