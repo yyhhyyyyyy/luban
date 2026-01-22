@@ -586,7 +586,7 @@ export function AgentSelector({ className, dropdownPosition = "bottom", onOpenAg
                         <span className="pr-10">{agent.name}</span>
                       </button>
                       {isDefault && (
-                        <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1 px-1.5 py-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity bg-popover/95 rounded">
+                        <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1 px-1.5 py-0.5 opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity bg-popover/95 rounded">
                           <span className="text-[10px] text-muted-foreground pointer-events-none select-none">default</span>
                           {onOpenAgentSettings && (
                             <button
@@ -596,7 +596,7 @@ export function AgentSelector({ className, dropdownPosition = "bottom", onOpenAg
                                 closeSelector()
                                 onOpenAgentSettings(agent.id)
                               }}
-                              className="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                              className="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors pointer-events-auto"
                               title={`Edit ${agent.name} defaults`}
                             >
                               <Settings className="w-3 h-3" />
@@ -643,8 +643,8 @@ export function AgentSelector({ className, dropdownPosition = "bottom", onOpenAg
                           
                           {/* 默认值: hover 时在右侧浮层显示 default + 设置图标 */}
                           {isDefault && (
-                            <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1 px-1.5 py-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-popover/95 rounded">
-                              <span className="text-[10px] text-muted-foreground">default</span>
+                            <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1 px-1.5 py-0.5 opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity bg-popover/95 rounded">
+                              <span className="text-[10px] text-muted-foreground pointer-events-none select-none">default</span>
                               {onOpenAgentSettings && (
                                 <button
                                   onMouseDown={(e) => e.preventDefault()}
@@ -653,7 +653,7 @@ export function AgentSelector({ className, dropdownPosition = "bottom", onOpenAg
                                     closeSelector()
                                     onOpenAgentSettings(currentAgentId)
                                   }}
-                                  className="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                                  className="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors pointer-events-auto"
                                   title={`Edit ${panelAgent.name} config`}
                                 >
                                   <Settings className="w-3 h-3" />
