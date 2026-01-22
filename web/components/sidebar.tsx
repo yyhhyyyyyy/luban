@@ -14,6 +14,7 @@ import {
   Loader2,
   Home,
   Trash2,
+  MessageCircleQuestion,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useLuban } from "@/lib/luban-context"
@@ -22,6 +23,7 @@ import { buildSidebarProjects } from "@/lib/sidebar-view-model"
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { NewTaskModal } from "./new-task-modal"
+import { FeedbackModal } from "./feedback-modal"
 import { AgentStatusIcon, PRBadge } from "./shared/status-indicator"
 import { focusChatInput } from "@/lib/focus-chat-input"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
@@ -69,6 +71,7 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
   const [deletingProjectId, setDeletingProjectId] = useState<ProjectId | null>(null)
   const [projectToDelete, setProjectToDelete] = useState<{ id: ProjectId; name: string } | null>(null)
   const [newTaskOpen, setNewTaskOpen] = useState(false)
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsInitialSectionId, setSettingsInitialSectionId] = useState<SettingsSectionId | null>(null)
   const [settingsInitialAgentId, setSettingsInitialAgentId] = useState<string | null>(null)
@@ -544,6 +547,14 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
           New Task
         </button>
         <button
+          data-testid="sidebar-open-feedback"
+          onClick={() => setFeedbackOpen(true)}
+          className="p-2 text-muted-foreground hover:text-foreground hover:bg-sidebar-accent rounded transition-colors"
+          title="Send Feedback"
+        >
+          <MessageCircleQuestion className="w-4 h-4" />
+        </button>
+        <button
           data-testid="sidebar-open-settings"
           onClick={() => {
             setSettingsInitialSectionId(null)
@@ -559,6 +570,7 @@ export function Sidebar({ viewMode, onViewModeChange, widthPx }: SidebarProps) {
       </div>
 
       <NewTaskModal open={newTaskOpen} onOpenChange={setNewTaskOpen} />
+      <FeedbackModal open={feedbackOpen} onOpenChange={setFeedbackOpen} />
       <SettingsPanel
         open={settingsOpen}
         onOpenChange={(open) => {

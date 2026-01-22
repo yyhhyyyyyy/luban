@@ -7,6 +7,9 @@ import type {
   AttachmentRef,
   ClientAction,
   CodexConfigEntrySnapshot,
+  FeedbackSubmitAction,
+  FeedbackSubmitResult,
+  FeedbackType,
   OpenTarget,
   ProjectId,
   SystemTaskKind,
@@ -49,6 +52,13 @@ export type LubanActions = {
 
   previewTask: (input: string) => Promise<TaskDraft>
   executeTask: (draft: TaskDraft, mode: TaskExecuteMode) => Promise<TaskExecuteResult>
+  submitFeedback: (args: {
+    title: string
+    body: string
+    labels: string[]
+    feedbackType: FeedbackType
+    action: FeedbackSubmitAction
+  }) => Promise<FeedbackSubmitResult>
 
   openWorkspace: (workspaceId: WorkspaceId) => Promise<void>
   selectThread: (threadId: number) => Promise<void>
@@ -249,6 +259,23 @@ export function createLubanActions(args: {
 
   function executeTask(draft: TaskDraft, mode: TaskExecuteMode): Promise<TaskExecuteResult> {
     return args.request<TaskExecuteResult>({ type: "task_execute", draft, mode })
+  }
+
+  function submitFeedback(args2: {
+    title: string
+    body: string
+    labels: string[]
+    feedbackType: FeedbackType
+    action: FeedbackSubmitAction
+  }): Promise<FeedbackSubmitResult> {
+    return args.request<FeedbackSubmitResult>({
+      type: "feedback_submit",
+      title: args2.title,
+      body: args2.body,
+      labels: args2.labels,
+      feedback_type: args2.feedbackType,
+      action: args2.action,
+    })
   }
 
   async function selectThreadInWorkspace(workspaceId: WorkspaceId, threadId: number) {
@@ -643,6 +670,7 @@ export function createLubanActions(args: {
     writeCodexConfigFile,
     previewTask,
     executeTask,
+    submitFeedback,
     openWorkspace,
     selectThread,
     loadConversationBefore,

@@ -231,6 +231,15 @@ export type TaskIssueInfo = {
   url: string
 }
 
+export type FeedbackType = "bug" | "feature" | "question"
+
+export type FeedbackSubmitAction = "create_issue" | "fix_it"
+
+export type FeedbackSubmitResult = {
+  issue: TaskIssueInfo
+  task: TaskExecuteResult | null
+}
+
 export type TaskPullRequestInfo = {
   number: number
   title: string
@@ -306,6 +315,14 @@ export type ClientAction =
   | { type: "add_project_and_open"; path: string }
   | { type: "task_preview"; input: string }
   | { type: "task_execute"; draft: TaskDraft; mode: TaskExecuteMode }
+  | {
+      type: "feedback_submit"
+      title: string
+      body: string
+      labels: string[]
+      feedback_type: FeedbackType
+      action: FeedbackSubmitAction
+    }
   | { type: "delete_project"; project_id: ProjectId }
   | { type: "toggle_project_expanded"; project_id: ProjectId }
   | { type: "create_workspace"; project_id: ProjectId }
@@ -391,6 +408,7 @@ export type ServerEvent =
   | { type: "add_project_and_open_ready"; request_id: string; project_id: ProjectId; workspace_id: WorkspaceId }
   | { type: "task_preview_ready"; request_id: string; draft: TaskDraft }
   | { type: "task_executed"; request_id: string; result: TaskExecuteResult }
+  | { type: "feedback_submitted"; request_id: string; result: FeedbackSubmitResult }
   | { type: "codex_check_ready"; request_id: string; ok: boolean; message: string | null }
   | { type: "codex_config_tree_ready"; request_id: string; tree: CodexConfigEntrySnapshot[] }
   | {

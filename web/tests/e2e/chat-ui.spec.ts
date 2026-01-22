@@ -623,6 +623,24 @@ test("Escape closes foreground modal before triggering chat cancel", async ({ pa
   await page.getByTestId("agent-running-input").press("Escape")
 })
 
+test("feedback modal supports two-stage polish flow", async ({ page }) => {
+  await ensureWorkspace(page)
+
+  await page.getByTestId("sidebar-open-feedback").click()
+  const modal = page.getByTestId("feedback-modal")
+  await expect(modal).toBeVisible({ timeout: 10_000 })
+
+  await modal.getByPlaceholder("Describe the bug or feature you'd like...").fill("The sidebar status is stuck.")
+  await modal.getByRole("button", { name: "Polish", exact: true }).click()
+
+  await expect(modal.getByRole("heading", { name: "Review Issue" })).toBeVisible({ timeout: 10_000 })
+  await expect(modal.getByPlaceholder("Issue title...")).toBeVisible()
+  await expect(modal.getByPlaceholder("Issue body...")).toBeVisible()
+
+  await page.keyboard.press("Escape")
+  await expect(modal).toHaveCount(0, { timeout: 10_000 })
+})
+
 test("esc cancel hint auto-hides when countdown ends", async ({ page }) => {
   await ensureWorkspace(page)
 

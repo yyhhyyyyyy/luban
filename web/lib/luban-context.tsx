@@ -13,6 +13,9 @@ import type {
   AgentRunConfigSnapshot,
   CodexConfigEntrySnapshot,
   ConversationSnapshot,
+  FeedbackSubmitAction,
+  FeedbackSubmitResult,
+  FeedbackType,
   ProjectId,
   ServerEvent,
   SystemTaskKind,
@@ -64,6 +67,13 @@ type LubanContextValue = {
 
   previewTask: (input: string) => Promise<TaskDraft>
   executeTask: (draft: TaskDraft, mode: TaskExecuteMode) => Promise<TaskExecuteResult>
+  submitFeedback: (args: {
+    title: string
+    body: string
+    labels: string[]
+    feedbackType: FeedbackType
+    action: FeedbackSubmitAction
+  }) => Promise<FeedbackSubmitResult>
 
   openWorkspace: (workspaceId: WorkspaceId) => Promise<void>
   selectThread: (threadId: number) => Promise<void>
@@ -253,6 +263,7 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     toggleProjectExpanded: actions.toggleProjectExpanded,
     previewTask: actions.previewTask,
     executeTask: actions.executeTask,
+    submitFeedback: actions.submitFeedback,
     openWorkspace: actions.openWorkspace,
     selectThread: actions.selectThread,
     loadConversationBefore: actions.loadConversationBefore,
