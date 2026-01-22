@@ -12,6 +12,14 @@ Verification: Mock=yes, Provider=yes, CI=no
 
 List thread metadata and tab state for a workspace.
 
+Thread titles are user-facing and should be short:
+
+- Default title is `"Thread {thread_id}"`.
+- After the first user message, the provider may update the title based on:
+  - A deterministic first-line derivation (immediate).
+  - An asynchronous AI-generated title (may arrive later).
+- Titles should be limited to `40` Unicode scalar values.
+
 ## Parameters
 
 - `workspace_id`: integer path parameter

@@ -8,17 +8,8 @@ async function activeThreadId(page: import("@playwright/test").Page, workspaceId
   return Number(snapshot.tabs.active_tab)
 }
 
-async function threadTitle(page: import("@playwright/test").Page, workspaceId: number, threadId: number): Promise<string> {
-  const res = await page.request.get(`/api/workspaces/${workspaceId}/threads`)
-  expect(res.ok()).toBeTruthy()
-  const snapshot = (await res.json()) as { threads?: { thread_id: number; title: string }[] }
-  const found = snapshot.threads?.find((t) => Number(t.thread_id) === threadId)?.title
-  return found ?? `Thread ${threadId}`
-}
-
-async function clickThreadTab(page: import("@playwright/test").Page, title: string) {
-  const label = page.getByTestId("thread-tab-title").filter({ hasText: title }).first()
-  const tab = label.locator("..")
+async function clickThreadTab(page: import("@playwright/test").Page, threadId: number) {
+  const tab = page.getByTestId(`thread-tab-${threadId}`)
   await tab.scrollIntoViewIfNeeded()
   await tab.click()
 }
@@ -514,9 +505,7 @@ test("agent running timer survives switching tabs", async ({ page }) => {
   const secondThreadId = await createThreadViaUi(page, workspaceId)
   expect(secondThreadId).toBeGreaterThan(0)
 
-  const firstTitle = await threadTitle(page, workspaceId, firstThreadId)
-  const secondTitle = await threadTitle(page, workspaceId, secondThreadId)
-  await clickThreadTab(page, firstTitle)
+  await clickThreadTab(page, firstThreadId)
 
   const runId = Math.random().toString(16).slice(2)
   const seed = `e2e-cancel-tab-switch-${runId}`
@@ -539,10 +528,10 @@ test("agent running timer survives switching tabs", async ({ page }) => {
     .not.toBe("00:00")
   const initial = (await timer.textContent())?.trim() ?? ""
 
-  await clickThreadTab(page, secondTitle)
+  await clickThreadTab(page, secondThreadId)
   await expect(page.getByTestId("agent-running-timer")).toHaveCount(0, { timeout: 20_000 })
 
-  await clickThreadTab(page, firstTitle)
+  await clickThreadTab(page, firstThreadId)
   await expect(timer).toBeVisible({ timeout: 20_000 })
   await expect(timer).not.toHaveText("00:00")
   await expect

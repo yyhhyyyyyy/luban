@@ -57,3 +57,5 @@ pub use state::*;
 
 mod reducer;
 pub use reducer::derive_thread_title;
+
+pub const THREAD_TITLE_MAX_CHARS: usize = 40;

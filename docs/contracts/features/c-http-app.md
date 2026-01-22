@@ -12,6 +12,14 @@ Verification: Mock=yes, Provider=yes, CI=no
 
 Hydrate the UI with the latest `AppSnapshot`.
 
+This includes Task settings:
+
+- `task.system_prompt_templates[]` / `task.default_system_prompt_templates[]`
+  - `kind` is a `SystemTaskKind` string, currently:
+    - `infer-type`
+    - `rename-branch`
+    - `auto-title-thread`
+
 ## Response
 
 - `200 OK`

@@ -231,16 +231,30 @@ test("archived tabs list does not hide older threads", async ({ page }) => {
 
   const workspaceId = await activeWorkspaceId(page)
 
+  let firstClosedThreadId: number | null = null
   for (let i = 0; i < 21; i++) {
-    const threadId = i + 2
     await sendWsAction(page, { type: "create_workspace_thread", workspace_id: workspaceId })
-    await sendWsAction(page, { type: "close_workspace_thread_tab", workspace_id: workspaceId, thread_id: threadId })
+
+    const res = await page.request.get(`/api/workspaces/${workspaceId}/threads`)
+    expect(res.ok()).toBeTruthy()
+    const snapshot = (await res.json()) as { tabs?: { active_tab?: number } }
+    const createdThreadId = Number(snapshot?.tabs?.active_tab ?? NaN)
+    expect(Number.isFinite(createdThreadId)).toBeTruthy()
+    expect(createdThreadId).toBeGreaterThan(0)
+
+    if (firstClosedThreadId == null) firstClosedThreadId = createdThreadId
+    await sendWsAction(page, {
+      type: "close_workspace_thread_tab",
+      workspace_id: workspaceId,
+      thread_id: createdThreadId,
+    })
   }
 
   await page.getByTitle("All tabs").click()
 
   const closedSection = page.getByText("Recently Closed", { exact: true }).locator("..").locator("..")
-  await expect(closedSection.getByRole("button", { name: /^Thread 2$/ })).toHaveCount(1)
+  expect(firstClosedThreadId).not.toBeNull()
+  await expect(closedSection.getByRole("button", { name: new RegExp(`^Thread ${firstClosedThreadId}$`) })).toHaveCount(1)
 })
 
 test("thread tabs persist across reload", async ({ page }) => {

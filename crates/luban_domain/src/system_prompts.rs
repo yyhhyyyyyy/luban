@@ -4,15 +4,21 @@ use std::collections::HashMap;
 pub enum SystemTaskKind {
     InferType,
     RenameBranch,
+    AutoTitleThread,
 }
 
 impl SystemTaskKind {
-    pub const ALL: [SystemTaskKind; 2] = [SystemTaskKind::InferType, SystemTaskKind::RenameBranch];
+    pub const ALL: [SystemTaskKind; 3] = [
+        SystemTaskKind::InferType,
+        SystemTaskKind::RenameBranch,
+        SystemTaskKind::AutoTitleThread,
+    ];
 
     pub fn as_key(self) -> &'static str {
         match self {
             SystemTaskKind::InferType => "infer-type",
             SystemTaskKind::RenameBranch => "rename-branch",
+            SystemTaskKind::AutoTitleThread => "auto-title-thread",
         }
     }
 
@@ -20,6 +26,7 @@ impl SystemTaskKind {
         match self {
             SystemTaskKind::InferType => "Infer Type",
             SystemTaskKind::RenameBranch => "Rename Branch",
+            SystemTaskKind::AutoTitleThread => "Auto Title Thread",
         }
     }
 }
@@ -88,5 +95,26 @@ Retrieved context:
 {{context_json}}
 "#
         .to_owned(),
+        SystemTaskKind::AutoTitleThread => {
+            r#"You are generating a short, user-friendly conversation thread title.
+
+Rules:
+- Do NOT run commands.
+- Do NOT modify files.
+- Output ONLY a single line, no markdown, no extra text.
+- Do NOT include quotes, code fences, or surrounding punctuation.
+- Do NOT include any personally identifying information.
+- Do NOT invent facts beyond the input.
+- Keep the title short and readable. Enforce the max length from context_json.max_chars.
+- Always output something. If the input is too vague, output "Thread".
+
+Input:
+{{task_input}}
+
+Context (JSON):
+{{context_json}}
+"#
+            .to_owned()
+        }
     }
 }

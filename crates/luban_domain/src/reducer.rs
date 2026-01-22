@@ -564,10 +564,19 @@ impl AppState {
                 conversation.draft.clear();
                 conversation.draft_attachments.clear();
 
-                if conversation.entries.is_empty() && conversation.title.starts_with("Thread ") {
+                let should_auto_title =
+                    conversation.entries.is_empty() && conversation.title.starts_with("Thread ");
+                let input_for_auto_title = if should_auto_title {
+                    text.clone()
+                } else {
+                    String::new()
+                };
+                let mut expected_current_title = conversation.title.clone();
+                if should_auto_title {
                     let title = derive_thread_title(&text);
                     if !title.is_empty() {
-                        conversation.title = title;
+                        conversation.title = title.clone();
+                        expected_current_title = title;
                     }
                 }
 
@@ -608,7 +617,7 @@ impl AppState {
 
                 if conversation.pending_prompts.is_empty() {
                     conversation.queue_paused = false;
-                    return vec![start_agent_run(
+                    let mut effects = vec![start_agent_run(
                         conversation,
                         workspace_id,
                         thread_id,
@@ -616,6 +625,18 @@ impl AppState {
                         attachments,
                         run_config,
                     )];
+                    if should_auto_title {
+                        effects.push(Effect::LoadWorkspaceThreads { workspace_id });
+                        if self.agent_codex_enabled {
+                            effects.push(Effect::AiAutoTitleThread {
+                                workspace_id,
+                                thread_id,
+                                input: input_for_auto_title,
+                                expected_current_title,
+                            });
+                        }
+                    }
+                    return effects;
                 }
 
                 let id = conversation.next_queued_prompt_id;
@@ -1858,7 +1879,7 @@ pub fn derive_thread_title(text: &str) -> String {
         return String::new();
     }
     let mut out = String::new();
-    for ch in first_line.chars().take(48) {
+    for ch in first_line.chars().take(crate::THREAD_TITLE_MAX_CHARS) {
         out.push(ch);
     }
     out
@@ -2132,13 +2153,15 @@ mod tests {
             runner: None,
             amp_mode: None,
         });
-        assert_eq!(effects.len(), 1);
-        let (sent_model_id, sent_effort) = match &effects[0] {
-            Effect::RunAgentTurn { run_config, .. } => {
-                (run_config.model_id.as_str(), run_config.thinking_effort)
-            }
-            other => panic!("unexpected effect: {other:?}"),
-        };
+        let (sent_model_id, sent_effort) = effects
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::RunAgentTurn { run_config, .. } => {
+                    Some((run_config.model_id.as_str(), run_config.thinking_effort))
+                }
+                _ => None,
+            })
+            .expect("missing RunAgentTurn effect");
         assert_eq!(sent_model_id, "gpt-5.2-codex");
         assert_eq!(sent_effort, ThinkingEffort::High);
 
@@ -2288,11 +2311,16 @@ mod tests {
             amp_mode: None,
         });
 
-        assert_eq!(effects.len(), 1);
-        assert!(matches!(
-            effects[0],
-            Effect::RunAgentTurn { workspace_id: wid, .. } if wid == workspace_id
-        ));
+        assert!(
+            effects.iter().any(|e| matches!(e, Effect::RunAgentTurn { workspace_id: wid, .. } if *wid == workspace_id)),
+            "missing RunAgentTurn effect"
+        );
+        assert!(
+            !effects
+                .iter()
+                .any(|e| matches!(e, Effect::AiRenameWorkspaceBranch { .. })),
+            "unexpected AiRenameWorkspaceBranch effect"
+        );
     }
 
     #[test]
@@ -3588,9 +3616,12 @@ mod tests {
             runner: None,
             amp_mode: None,
         });
-        assert_eq!(effects.len(), 1);
+        let run_effect = effects
+            .iter()
+            .find(|e| matches!(e, Effect::RunAgentTurn { .. }))
+            .expect("missing RunAgentTurn effect");
         assert!(matches!(
-            &effects[0],
+            run_effect,
             Effect::RunAgentTurn {
                 workspace_id: wid,
                 thread_id: tid,

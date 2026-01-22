@@ -2261,6 +2261,29 @@ impl ProjectWorkspaceService for GitWorkspaceService {
         task::task_suggest_branch_name(self, draft).map_err(|e| format!("{e:#}"))
     }
 
+    fn task_suggest_thread_title(&self, input: String) -> Result<String, String> {
+        task::task_suggest_thread_title(self, input).map_err(|e| format!("{e:#}"))
+    }
+
+    fn conversation_update_title_if_matches(
+        &self,
+        project_slug: String,
+        workspace_name: String,
+        thread_id: u64,
+        expected_current_title: String,
+        new_title: String,
+    ) -> Result<bool, String> {
+        self.sqlite
+            .update_conversation_title_if_matches(
+                project_slug,
+                workspace_name,
+                thread_id,
+                expected_current_title,
+                new_title,
+            )
+            .map_err(|e| format!("{e:#}"))
+    }
+
     fn codex_check(&self) -> Result<(), String> {
         let result: anyhow::Result<()> = (|| {
             let codex = self.codex_executable();

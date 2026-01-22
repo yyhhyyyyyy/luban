@@ -81,6 +81,12 @@ pub enum Effect {
         workspace_id: WorkspaceId,
         input: String,
     },
+    AiAutoTitleThread {
+        workspace_id: WorkspaceId,
+        thread_id: WorkspaceThreadId,
+        input: String,
+        expected_current_title: String,
+    },
 
     LoadWorkspaceThreads {
         workspace_id: WorkspaceId,

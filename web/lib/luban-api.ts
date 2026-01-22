@@ -34,7 +34,7 @@ export type TaskPromptTemplateSnapshot = {
   template: string
 }
 
-export type SystemTaskKind = "infer-type" | "rename-branch"
+export type SystemTaskKind = "infer-type" | "rename-branch" | "auto-title-thread"
 
 export type SystemPromptTemplateSnapshot = {
   kind: SystemTaskKind

@@ -104,6 +104,7 @@ pub struct TaskPromptTemplateSnapshot {
 pub enum SystemTaskKind {
     InferType,
     RenameBranch,
+    AutoTitleThread,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

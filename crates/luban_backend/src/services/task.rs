@@ -2,8 +2,9 @@ use crate::services::GitWorkspaceService;
 use anyhow::{Context as _, anyhow};
 use luban_domain::ProjectWorkspaceService;
 use luban_domain::{
-    SystemTaskKind, TaskDraft, TaskIntentKind, TaskIssueInfo, TaskProjectSpec, TaskPullRequestInfo,
-    TaskRepoInfo, default_system_prompt_template,
+    SystemTaskKind, THREAD_TITLE_MAX_CHARS, TaskDraft, TaskIntentKind, TaskIssueInfo,
+    TaskProjectSpec, TaskPullRequestInfo, TaskRepoInfo, default_system_prompt_template,
+    derive_thread_title,
 };
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -855,6 +856,77 @@ pub(super) fn task_suggest_branch_name(
         .unwrap_or_else(|| "luban/misc".to_owned());
 
     Ok(branch_name)
+}
+
+pub(super) fn task_suggest_thread_title(
+    service: &GitWorkspaceService,
+    input: String,
+) -> anyhow::Result<String> {
+    let input_trimmed = input.trim();
+    let fallback = derive_thread_title(input_trimmed);
+    if input_trimmed.is_empty() {
+        return Ok("Thread".to_owned());
+    }
+
+    let context_json = serde_json::json!({
+        "max_chars": THREAD_TITLE_MAX_CHARS,
+    })
+    .to_string();
+
+    let prompt = system_prompt_for_task(
+        service,
+        SystemTaskKind::AutoTitleThread,
+        input_trimmed,
+        &context_json,
+    );
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    let mut agent_messages: Vec<String> = Vec::new();
+    service.run_codex_turn_streamed_via_cli(
+        super::CodexTurnParams {
+            thread_id: None,
+            worktree_path: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            prompt,
+            image_paths: Vec::new(),
+            model: Some("gpt-5.1-codex-mini".to_owned()),
+            model_reasoning_effort: Some("low".to_owned()),
+            sandbox_mode: Some("read-only".to_owned()),
+        },
+        cancel,
+        |event| {
+            if let luban_domain::CodexThreadEvent::ItemCompleted {
+                item: luban_domain::CodexThreadItem::AgentMessage { text, .. },
+            } = event
+            {
+                agent_messages.push(text);
+            }
+            Ok(())
+        },
+    )?;
+
+    let raw = agent_messages
+        .into_iter()
+        .rev()
+        .find(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| fallback.clone());
+
+    let mut candidate = raw.trim().to_owned();
+    if (candidate.starts_with('"') && candidate.ends_with('"') && candidate.len() >= 2)
+        || (candidate.starts_with('\'') && candidate.ends_with('\'') && candidate.len() >= 2)
+    {
+        candidate = candidate[1..candidate.len().saturating_sub(1)]
+            .trim()
+            .to_owned();
+    }
+
+    let title = derive_thread_title(&candidate);
+    if !title.is_empty() {
+        return Ok(title);
+    }
+    if !fallback.is_empty() {
+        return Ok(fallback);
+    }
+    Ok("Thread".to_owned())
 }
 
 pub(super) fn task_prepare_project(

@@ -27,6 +27,7 @@ export function ThreadTabsBar(props: {
         {props.tabs.map((tab) => (
           <div
             key={tab.id}
+            data-testid={`thread-tab-${tab.id}`}
             onClick={() => props.onTabClick(tab.id)}
             className={cn(
               "group relative flex items-center gap-2 h-10 px-3 cursor-pointer transition-colors min-w-0 max-w-[180px]",

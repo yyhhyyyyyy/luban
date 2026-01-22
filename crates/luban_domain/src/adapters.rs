@@ -393,6 +393,21 @@ pub trait ProjectWorkspaceService: Send + Sync {
         Err("unimplemented".to_owned())
     }
 
+    fn task_suggest_thread_title(&self, _input: String) -> Result<String, String> {
+        Err("unimplemented".to_owned())
+    }
+
+    fn conversation_update_title_if_matches(
+        &self,
+        _project_slug: String,
+        _workspace_name: String,
+        _thread_id: u64,
+        _expected_current_title: String,
+        _new_title: String,
+    ) -> Result<bool, String> {
+        Ok(false)
+    }
+
     fn codex_check(&self) -> Result<(), String> {
         Err("unimplemented".to_owned())
     }

@@ -36,6 +36,15 @@ See `crates/luban_api`:
   - The web UI must be able to run without a real WebSocket by directly executing `ClientAction`
     against an in-process mock runtime and emitting `ServerEvent` snapshots.
 
+## Enumerations (tracked)
+
+These enums are part of the wire surface. Adding/removing variants must update this contract.
+
+- `SystemTaskKind`:
+  - `infer-type`
+  - `rename-branch`
+  - `auto-title-thread`
+
 ## Web usage
 
 - `web/lib/luban-transport.ts` `useLubanTransport()`

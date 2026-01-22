@@ -1973,6 +1973,95 @@ impl Engine {
 
                 Ok(VecDeque::new())
             }
+            Effect::AiAutoTitleThread {
+                workspace_id,
+                thread_id,
+                input,
+                expected_current_title,
+            } => {
+                let Some(scope) = workspace_scope(&self.state, workspace_id) else {
+                    return Ok(VecDeque::new());
+                };
+
+                let use_fake_agent = std::env::var_os("LUBAN_E2E_ROOT").is_some()
+                    && std::env::var("LUBAN_CODEX_BIN")
+                        .ok()
+                        .is_some_and(|bin| bin == "/usr/bin/false");
+
+                let services = self.services.clone();
+                let tx = self.tx.clone();
+                let project_slug = scope.project_slug;
+                let workspace_name = scope.workspace_name;
+                let thread_local_id = thread_id.as_u64();
+                tokio::spawn(async move {
+                    let services_for_suggest = services.clone();
+                    let project_slug_for_update = project_slug.clone();
+                    let workspace_name_for_update = workspace_name.clone();
+                    let result = tokio::task::spawn_blocking(move || {
+                        let suggested = if use_fake_agent {
+                            let derived = luban_domain::derive_thread_title(&input);
+                            if derived.is_empty() {
+                                "Thread".to_owned()
+                            } else {
+                                derived
+                            }
+                        } else {
+                            services_for_suggest.task_suggest_thread_title(input)?
+                        };
+
+                        let suggested = luban_domain::derive_thread_title(&suggested);
+                        if suggested.is_empty() {
+                            return Ok::<_, String>(false);
+                        }
+
+                        services_for_suggest.conversation_update_title_if_matches(
+                            project_slug_for_update,
+                            workspace_name_for_update,
+                            thread_local_id,
+                            expected_current_title,
+                            suggested,
+                        )
+                    })
+                    .await
+                    .ok()
+                    .unwrap_or_else(|| Err("failed to join auto title thread task".to_owned()));
+
+                    let Ok(updated) = result else {
+                        return;
+                    };
+                    if !updated {
+                        return;
+                    }
+
+                    let services_for_list = services.clone();
+                    let project_slug_for_list = project_slug.clone();
+                    let workspace_name_for_list = workspace_name.clone();
+                    let result = tokio::task::spawn_blocking(move || {
+                        services_for_list.list_conversation_threads(
+                            project_slug_for_list,
+                            workspace_name_for_list,
+                        )
+                    })
+                    .await
+                    .ok()
+                    .unwrap_or_else(|| Err("failed to join list threads task".to_owned()));
+
+                    let Ok(threads) = result else {
+                        return;
+                    };
+
+                    let _ = tx
+                        .send(EngineCommand::DispatchAction {
+                            action: Box::new(Action::WorkspaceThreadsLoaded {
+                                workspace_id,
+                                threads,
+                            }),
+                        })
+                        .await;
+                });
+
+                Ok(VecDeque::new())
+            }
             Effect::LoadWorkspaceThreads { workspace_id } => {
                 let Some(scope) = workspace_scope(&self.state, workspace_id) else {
                     return Ok(VecDeque::new());
@@ -3035,6 +3124,7 @@ fn map_system_task_kind(kind: luban_domain::SystemTaskKind) -> luban_api::System
     match kind {
         luban_domain::SystemTaskKind::InferType => luban_api::SystemTaskKind::InferType,
         luban_domain::SystemTaskKind::RenameBranch => luban_api::SystemTaskKind::RenameBranch,
+        luban_domain::SystemTaskKind::AutoTitleThread => luban_api::SystemTaskKind::AutoTitleThread,
     }
 }
 
@@ -3845,6 +3935,9 @@ fn map_client_action(action: luban_api::ClientAction) -> Option<Action> {
                     luban_api::SystemTaskKind::InferType => luban_domain::SystemTaskKind::InferType,
                     luban_api::SystemTaskKind::RenameBranch => {
                         luban_domain::SystemTaskKind::RenameBranch
+                    }
+                    luban_api::SystemTaskKind::AutoTitleThread => {
+                        luban_domain::SystemTaskKind::AutoTitleThread
                     }
                 },
                 template,

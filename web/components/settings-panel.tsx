@@ -131,6 +131,7 @@ type TaskType = TaskIntentKind | SystemTaskKind
 const systemTaskTypes: TaskTypeConfig[] = [
   { id: "infer-type", label: "Infer Type", icon: Sparkle, description: "Infer task type from the input" },
   { id: "rename-branch", label: "Rename Branch", icon: GitBranch, description: "Generate a branch name from the task" },
+  { id: "auto-title-thread", label: "Auto Title Thread", icon: Type, description: "Generate a short thread title from the first user message" },
 ]
 
 const taskTypes: TaskTypeConfig[] = [
@@ -162,6 +163,7 @@ const templateVariables: TemplateVariable[] = [
 const variablesByTaskType: Record<string, string[]> = {
   "infer-type": ["task_input", "context_json"],
   "rename-branch": ["task_input", "context_json"],
+  "auto-title-thread": ["task_input", "context_json"],
   fix: ["repo", "issue", "task_input", "intent_label", "known_context"],
   implement: ["repo", "issue", "task_input", "intent_label", "known_context"],
   review: ["repo", "pr", "task_input", "intent_label", "known_context"],
@@ -257,7 +259,7 @@ function TaskPromptEditor({
   )
 
   const isSystemTask = (taskType: TaskType): taskType is SystemTaskKind =>
-    taskType === "infer-type" || taskType === "rename-branch"
+    taskType === "infer-type" || taskType === "rename-branch" || taskType === "auto-title-thread"
 
   const [selectedType, setSelectedType] = useState<TaskType>("infer-type")
   const [typePrompts, setTypePrompts] = useState<Record<string, string>>(() => {

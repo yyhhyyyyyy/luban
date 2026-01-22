@@ -6,6 +6,9 @@ This document tracks all current web/server interaction surfaces and their contr
 
 - If you change `crates/luban_server/src/server.rs` routes, update this file in the same change.
 - If you add/change `ClientAction` / `ServerEvent` behavior, update `docs/contracts/features/c-ws-events.md`.
+- If you add/change `SystemTaskKind` variants, update:
+  - `docs/contracts/features/c-http-app.md`
+  - `docs/contracts/features/c-ws-events.md`
 
 ## Local checks
 

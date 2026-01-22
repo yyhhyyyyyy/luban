@@ -206,6 +206,14 @@ enum DbCommand {
         entries: Vec<ConversationEntry>,
         reply: mpsc::Sender<anyhow::Result<()>>,
     },
+    UpdateConversationTitleIfMatches {
+        project_slug: String,
+        workspace_name: String,
+        thread_local_id: u64,
+        expected_current_title: String,
+        new_title: String,
+        reply: mpsc::Sender<anyhow::Result<bool>>,
+    },
     LoadConversation {
         project_slug: String,
         workspace_name: String,
@@ -366,6 +374,25 @@ impl SqliteStore {
                                 &workspace_name,
                                 thread_local_id,
                                 &entries,
+                            ));
+                        }
+                        (
+                            Ok(db),
+                            DbCommand::UpdateConversationTitleIfMatches {
+                                project_slug,
+                                workspace_name,
+                                thread_local_id,
+                                expected_current_title,
+                                new_title,
+                                reply,
+                            },
+                        ) => {
+                            let _ = reply.send(db.update_conversation_title_if_matches(
+                                &project_slug,
+                                &workspace_name,
+                                thread_local_id,
+                                &expected_current_title,
+                                &new_title,
                             ));
                         }
                         (
@@ -637,6 +664,28 @@ impl SqliteStore {
         reply_rx.recv().context("sqlite worker terminated")?
     }
 
+    pub fn update_conversation_title_if_matches(
+        &self,
+        project_slug: String,
+        workspace_name: String,
+        thread_local_id: u64,
+        expected_current_title: String,
+        new_title: String,
+    ) -> anyhow::Result<bool> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.tx
+            .send(DbCommand::UpdateConversationTitleIfMatches {
+                project_slug,
+                workspace_name,
+                thread_local_id,
+                expected_current_title,
+                new_title,
+                reply: reply_tx,
+            })
+            .context("sqlite worker is not running")?;
+        reply_rx.recv().context("sqlite worker terminated")?
+    }
+
     pub fn load_conversation(
         &self,
         project_slug: String,
@@ -790,6 +839,9 @@ fn respond_db_open_error(err: &anyhow::Error, cmd: DbCommand) {
             let _ = reply.send(Err(anyhow!(message)));
         }
         DbCommand::ReplaceConversationEntries { reply, .. } => {
+            let _ = reply.send(Err(anyhow!(message)));
+        }
+        DbCommand::UpdateConversationTitleIfMatches { reply, .. } => {
             let _ = reply.send(Err(anyhow!(message)));
         }
         DbCommand::LoadConversation { reply, .. } => {
@@ -2179,6 +2231,37 @@ impl SqliteDatabase {
         Ok(())
     }
 
+    fn update_conversation_title_if_matches(
+        &mut self,
+        project_slug: &str,
+        workspace_name: &str,
+        thread_local_id: u64,
+        expected_current_title: &str,
+        new_title: &str,
+    ) -> anyhow::Result<bool> {
+        self.ensure_conversation(project_slug, workspace_name, thread_local_id)?;
+        let new_title = new_title.trim();
+        if new_title.is_empty() {
+            return Ok(false);
+        }
+
+        let updated = self.conn.execute(
+            "UPDATE conversations
+             SET title = ?5
+             WHERE project_slug = ?1 AND workspace_name = ?2 AND thread_local_id = ?3
+               AND (title IS NULL OR title LIKE 'Thread %' OR title = ?4)
+               AND COALESCE(title, '') <> ?5",
+            params![
+                project_slug,
+                workspace_name,
+                thread_local_id as i64,
+                expected_current_title,
+                new_title
+            ],
+        )?;
+        Ok(updated > 0)
+    }
+
     fn load_conversation(
         &mut self,
         project_slug: &str,
@@ -2928,6 +3011,34 @@ mod tests {
             .filter(|e| matches!(e, ConversationEntry::CodexItem { .. }))
             .count();
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn conversation_title_update_is_conditionally_applied() {
+        let path = temp_db_path("conversation_title_update_is_conditionally_applied");
+        let mut db = open_db(&path);
+
+        db.ensure_conversation("p", "w", 1).unwrap();
+
+        let updated = db
+            .update_conversation_title_if_matches("p", "w", 1, "Derived", "AI Title")
+            .unwrap();
+        assert!(updated);
+
+        let updated = db
+            .update_conversation_title_if_matches("p", "w", 1, "Derived", "Other")
+            .unwrap();
+        assert!(!updated);
+
+        let updated = db
+            .update_conversation_title_if_matches("p", "w", 1, "AI Title", "Better")
+            .unwrap();
+        assert!(updated);
+
+        let updated = db
+            .update_conversation_title_if_matches("p", "w", 1, "Better", "Better")
+            .unwrap();
+        assert!(!updated);
     }
 
     #[test]
