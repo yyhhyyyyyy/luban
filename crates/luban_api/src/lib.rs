@@ -340,6 +340,27 @@ pub struct TaskIssueInfo {
     pub url: String,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FeedbackType {
+    Bug,
+    Feature,
+    Question,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FeedbackSubmitAction {
+    CreateIssue,
+    FixIt,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FeedbackSubmitResult {
+    pub issue: TaskIssueInfo,
+    pub task: Option<TaskExecuteResult>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TaskPullRequestInfo {
     pub number: u64,
@@ -563,6 +584,14 @@ pub enum ClientAction {
         draft: Box<TaskDraft>,
         mode: TaskExecuteMode,
     },
+    FeedbackSubmit {
+        title: String,
+        body: String,
+        #[serde(default)]
+        labels: Vec<String>,
+        feedback_type: FeedbackType,
+        action: FeedbackSubmitAction,
+    },
     DeleteProject {
         project_id: ProjectId,
     },
@@ -746,6 +775,10 @@ pub enum ServerEvent {
     TaskExecuted {
         request_id: String,
         result: TaskExecuteResult,
+    },
+    FeedbackSubmitted {
+        request_id: String,
+        result: FeedbackSubmitResult,
     },
     CodexCheckReady {
         request_id: String,

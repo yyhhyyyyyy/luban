@@ -24,6 +24,7 @@ use crate::sqlite_store::{SqliteStore, SqliteStoreOptions};
 mod codex_cli;
 mod context_blobs;
 mod conversations;
+mod feedback;
 mod git;
 mod task;
 use codex_cli::CodexTurnParams;
@@ -1615,6 +1616,23 @@ impl ProjectWorkspaceService for GitWorkspaceService {
 
     fn task_prepare_project(&self, spec: luban_domain::TaskProjectSpec) -> Result<PathBuf, String> {
         task::task_prepare_project(self, spec).map_err(|e| format!("{e:#}"))
+    }
+
+    fn feedback_create_issue(
+        &self,
+        title: String,
+        body: String,
+        labels: Vec<String>,
+    ) -> Result<luban_domain::TaskIssueInfo, String> {
+        feedback::feedback_create_issue(title, body, labels).map_err(|e| format!("{e:#}"))
+    }
+
+    fn feedback_task_draft(
+        &self,
+        issue: luban_domain::TaskIssueInfo,
+        intent_kind: TaskIntentKind,
+    ) -> Result<luban_domain::TaskDraft, String> {
+        feedback::feedback_task_draft(self, issue, intent_kind).map_err(|e| format!("{e:#}"))
     }
 
     fn task_prompt_templates_load(

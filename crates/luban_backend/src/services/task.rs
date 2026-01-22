@@ -313,7 +313,7 @@ fn project_label(spec: &TaskProjectSpec) -> String {
     }
 }
 
-fn compose_task_summary(
+pub(super) fn compose_task_summary(
     intent_kind: TaskIntentKind,
     project: &TaskProjectSpec,
     repo: &Option<TaskRepoInfo>,
@@ -342,7 +342,7 @@ fn compose_task_summary(
     lines.join("\n")
 }
 
-fn render_known_context(
+pub(super) fn render_known_context(
     project: &TaskProjectSpec,
     repo: &Option<TaskRepoInfo>,
     issue: &Option<TaskIssueInfo>,
@@ -381,7 +381,7 @@ fn render_known_context(
     out
 }
 
-fn render_task_prompt_template(
+pub(super) fn render_task_prompt_template(
     template: &str,
     task_input: &str,
     intent_label: &str,

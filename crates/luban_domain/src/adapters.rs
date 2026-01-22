@@ -324,6 +324,23 @@ pub trait ProjectWorkspaceService: Send + Sync {
 
     fn task_prepare_project(&self, spec: TaskProjectSpec) -> Result<PathBuf, String>;
 
+    fn feedback_create_issue(
+        &self,
+        _title: String,
+        _body: String,
+        _labels: Vec<String>,
+    ) -> Result<TaskIssueInfo, String> {
+        Err("unimplemented".to_owned())
+    }
+
+    fn feedback_task_draft(
+        &self,
+        _issue: TaskIssueInfo,
+        _intent_kind: TaskIntentKind,
+    ) -> Result<TaskDraft, String> {
+        Err("unimplemented".to_owned())
+    }
+
     fn task_prompt_templates_load(&self) -> Result<HashMap<TaskIntentKind, String>, String> {
         Ok(HashMap::new())
     }
