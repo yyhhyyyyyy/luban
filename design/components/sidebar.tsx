@@ -15,6 +15,7 @@ import {
   Loader2,
   Home,
   Trash2,
+  MessageCircleQuestion,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { NewTaskModal } from "./new-task-modal"
@@ -23,6 +24,7 @@ import type { Worktree } from "./shared/worktree"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { SettingsPanel } from "./settings-panel"
+import { FeedbackModal } from "./feedback-modal"
 
 interface Project {
   name: string
@@ -244,6 +246,7 @@ export function Sidebar({ viewMode, onViewModeChange }: SidebarProps) {
   >({ type: "worktree", projectPath: "/Users/xuanwo/Code/xuanwo/luban", worktreeId: "lb02" })
   const [newTaskOpen, setNewTaskOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
   const folderInputRef = useRef<HTMLInputElement>(null)
 
   // Compute display names for projects with conflicting basenames
@@ -598,6 +601,13 @@ export function Sidebar({ viewMode, onViewModeChange }: SidebarProps) {
           New Task
         </button>
         <button
+          onClick={() => setFeedbackOpen(true)}
+          className="p-2 text-muted-foreground hover:text-foreground hover:bg-sidebar-accent rounded transition-colors"
+          title="Send Feedback"
+        >
+          <MessageCircleQuestion className="w-4 h-4" />
+        </button>
+        <button
           onClick={() => setSettingsOpen(true)}
           className="p-2 text-muted-foreground hover:text-foreground hover:bg-sidebar-accent rounded transition-colors"
         >
@@ -608,6 +618,8 @@ export function Sidebar({ viewMode, onViewModeChange }: SidebarProps) {
       <NewTaskModal open={newTaskOpen} onOpenChange={setNewTaskOpen} />
 
       <SettingsPanel open={settingsOpen} onOpenChange={setSettingsOpen} />
+
+      <FeedbackModal open={feedbackOpen} onOpenChange={setFeedbackOpen} />
 
       {/* Delete Project Confirmation Dialog */}
       <Dialog open={projectToDelete !== null} onOpenChange={(open) => !open && setProjectToDelete(null)}>
