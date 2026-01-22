@@ -595,6 +595,91 @@ Provides automated code review capabilities.
   },
 ]
 
+const mockAmpConfigTree: ConfigFile[] = [
+  {
+    id: "config-yaml",
+    name: "config.yaml",
+    type: "file",
+    icon: FileCode,
+    iconColor: "text-orange-500",
+    content: `model: claude-3.5-sonnet
+temperature: 0.2
+max_tokens: 4096
+
+tools:
+  allow:
+    - bash
+    - edit_file
+    - web_search
+`,
+  },
+  {
+    id: "rules-md",
+    name: "rules.md",
+    type: "file",
+    icon: FileText,
+    iconColor: "text-blue-500",
+    content: `# Amp Rules
+
+- Keep changes small and reviewable.
+- Prefer existing repo workflows.
+- Add tests for functional changes.
+`,
+  },
+  {
+    id: "prompts",
+    name: "prompts",
+    type: "folder",
+    icon: Folder,
+    iconColor: "text-yellow-500",
+    children: [
+      {
+        id: "prompt-default-md",
+        name: "default.md",
+        type: "file",
+        icon: FileText,
+        iconColor: "text-blue-400",
+        content: `# Default Prompt
+
+You are a helpful coding assistant.
+`,
+      },
+      {
+        id: "prompt-review-md",
+        name: "review.md",
+        type: "file",
+        icon: FileText,
+        iconColor: "text-blue-400",
+        content: `# Review Prompt
+
+- Prioritize correctness and safety.
+- Suggest tests and verification steps.
+`,
+      },
+    ],
+  },
+  {
+    id: "profiles",
+    name: "profiles",
+    type: "folder",
+    icon: Folder,
+    iconColor: "text-yellow-500",
+    children: [
+      {
+        id: "profile-work-md",
+        name: "work.md",
+        type: "file",
+        icon: FileText,
+        iconColor: "text-blue-400",
+        content: `# Work Profile
+
+Focus on backend tasks and keep output concise.
+`,
+      },
+    ],
+  },
+]
+
 function ConfigFileTree({
   files,
   level = 0,
@@ -977,6 +1062,262 @@ function CodexSettings() {
   )
 }
 
+function AmpSettings() {
+  const [enabled, setEnabled] = useState(true)
+  const [checkStatus, setCheckStatus] = useState<CheckStatus>("idle")
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle")
+  const [selectedFile, setSelectedFile] = useState<ConfigFile | null>(null)
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(["prompts"]))
+  const [fileContents, setFileContents] = useState<Record<string, string>>({})
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const editorRef = useRef<HTMLTextAreaElement>(null)
+  const highlightRef = useRef<HTMLDivElement>(null)
+  const highlighter = useShikiHighlighter()
+
+  const handleEditorScroll = () => {
+    if (!editorRef.current || !highlightRef.current) return
+    highlightRef.current.scrollTop = editorRef.current.scrollTop
+    highlightRef.current.scrollLeft = editorRef.current.scrollLeft
+  }
+
+  const getFileLanguage = (fileName: string): string => {
+    if (fileName.endsWith(".md")) return "markdown"
+    if (fileName.endsWith(".toml")) return "toml"
+    if (fileName.endsWith(".yaml") || fileName.endsWith(".yml")) return "yaml"
+    if (fileName.endsWith(".json")) return "json"
+    return "markdown"
+  }
+
+  const handleCheck = () => {
+    setCheckStatus("checking")
+    setTimeout(() => {
+      setCheckStatus(Math.random() > 0.3 ? "success" : "error")
+    }, 1500)
+  }
+
+  const handleEditInLuban = () => {
+    alert("Adding ~/.config/amp as a project in Luban...")
+  }
+
+  const handleToggleFolder = (id: string) => {
+    setExpandedFolders((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return next
+    })
+  }
+
+  const handleSelectFile = (file: ConfigFile) => {
+    if (file.type === "file") {
+      setSelectedFile(file)
+      if (file.content && !fileContents[file.id]) {
+        setFileContents((prev) => ({ ...prev, [file.id]: file.content || "" }))
+      }
+    }
+  }
+
+  const handleContentChange = (content: string) => {
+    if (!selectedFile) return
+
+    setFileContents((prev) => ({ ...prev, [selectedFile.id]: content }))
+    setSaveStatus("unsaved")
+
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current)
+    }
+
+    saveTimeoutRef.current = setTimeout(() => {
+      setSaveStatus("saving")
+      setTimeout(() => {
+        setSaveStatus("saved")
+        setTimeout(() => {
+          setSaveStatus("idle")
+        }, 1500)
+      }, 500)
+    }, 800)
+  }
+
+  const currentContent = selectedFile
+    ? (fileContents[selectedFile.id] ?? selectedFile.content ?? "")
+    : ""
+
+  return (
+    <div
+      className={cn(
+        "rounded-xl border border-border bg-card overflow-hidden shadow-sm",
+        !enabled && "w-44"
+      )}
+    >
+      <div className={cn("flex", enabled ? "h-[320px]" : "h-11")}>
+        <div
+          className={cn(
+            "w-44 flex flex-col bg-sidebar",
+            enabled && "border-r border-border",
+            !enabled && "opacity-60"
+          )}
+        >
+          <div
+            className={cn(
+              "flex items-center justify-between h-11 px-3",
+              enabled && "border-b border-border"
+            )}
+          >
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-primary" />
+              <span className="text-sm font-medium">Amp</span>
+            </div>
+            <button
+              onClick={() => setEnabled(!enabled)}
+              className={cn(
+                "relative w-9 h-5 rounded-full transition-colors",
+                enabled ? "bg-primary" : "bg-muted"
+              )}
+            >
+              <div
+                className={cn(
+                  "absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform",
+                  enabled ? "translate-x-4" : "translate-x-0.5"
+                )}
+              />
+            </button>
+          </div>
+          {enabled && (
+            <div className="flex-1 overflow-y-auto py-1.5">
+              <ConfigFileTree
+                files={mockAmpConfigTree}
+                selectedFile={selectedFile?.id || null}
+                expandedFolders={expandedFolders}
+                onSelectFile={handleSelectFile}
+                onToggleFolder={handleToggleFolder}
+              />
+            </div>
+          )}
+        </div>
+
+        {enabled && (
+          <div className="flex-1 flex flex-col min-w-0 bg-background">
+            <div className="flex items-center justify-between h-11 px-3 border-b border-border">
+              <div className="flex items-center gap-2">
+                {selectedFile ? (
+                  <>
+                    <selectedFile.icon
+                      className={cn(
+                        "w-4 h-4",
+                        selectedFile.iconColor || "text-muted-foreground"
+                      )}
+                    />
+                    <span className="text-sm font-medium">{selectedFile.name}</span>
+                  </>
+                ) : (
+                  <span className="text-sm text-muted-foreground">Select a file</span>
+                )}
+                {saveStatus !== "idle" && (
+                  <span
+                    className={cn(
+                      "flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px]",
+                      saveStatus === "saved"
+                        ? "bg-green-500/10 text-green-600 dark:text-green-400"
+                        : "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                    )}
+                  >
+                    {saveStatus === "saving" && (
+                      <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                    )}
+                    {saveStatus === "saved" && <CheckCircle2 className="w-2.5 h-2.5" />}
+                    {saveStatus === "saving"
+                      ? "Saving..."
+                      : saveStatus === "unsaved"
+                        ? "Unsaved"
+                        : "Saved"}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={handleCheck}
+                  disabled={checkStatus === "checking"}
+                  className={cn(
+                    "flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-all",
+                    checkStatus === "checking"
+                      ? "text-muted-foreground cursor-not-allowed"
+                      : "text-muted-foreground hover:text-foreground hover:bg-accent"
+                  )}
+                >
+                  {checkStatus === "checking" ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      Checking...
+                    </>
+                  ) : checkStatus === "success" ? (
+                    <>
+                      <CheckCircle2 className="w-3.5 h-3.5 text-green-600 dark:text-green-400" />
+                      Connected
+                    </>
+                  ) : checkStatus === "error" ? (
+                    <>
+                      <XCircle className="w-3.5 h-3.5 text-red-600 dark:text-red-400" />
+                      Failed
+                    </>
+                  ) : (
+                    <>
+                      <Play className="w-3.5 h-3.5" />
+                      Check
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={handleEditInLuban}
+                  className="flex items-center gap-1.5 px-2 py-1 rounded text-xs bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                  Edit in Luban
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 relative overflow-hidden">
+              {selectedFile ? (
+                <>
+                  <div
+                    ref={highlightRef}
+                    className="absolute inset-0 p-4 text-sm font-mono leading-relaxed whitespace-pre-wrap break-words overflow-hidden pointer-events-none"
+                    aria-hidden="true"
+                  >
+                    <MarkdownHighlight
+                      text={currentContent}
+                      highlighter={highlighter}
+                      lang={getFileLanguage(selectedFile.name)}
+                    />
+                  </div>
+                  <textarea
+                    ref={editorRef}
+                    value={currentContent}
+                    onChange={(e) => handleContentChange(e.target.value)}
+                    onScroll={handleEditorScroll}
+                    className="absolute inset-0 p-4 bg-transparent text-sm font-mono text-transparent caret-foreground leading-relaxed resize-none focus:outline-none"
+                    spellCheck={false}
+                  />
+                </>
+              ) : (
+                <div className="flex-1 h-full flex items-center justify-center text-muted-foreground">
+                  <div className="text-center">
+                    <FileText className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                    <p className="text-xs">Select a file to edit</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ============ Task Prompt Editor ============
 
 type TaskType = "fix" | "implement" | "review" | "discuss" | "other" | "infer-type" | "rename-branch"
@@ -1192,7 +1533,7 @@ function getHighlighter() {
   if (!highlighterPromise) {
     highlighterPromise = createHighlighter({
       themes: ["github-light", "github-dark"],
-      langs: ["markdown", "toml"],
+      langs: ["markdown", "toml", "yaml", "json"],
     })
   }
   return highlighterPromise
@@ -1593,6 +1934,7 @@ function AllSettings() {
         <div className="space-y-4">
           <DefaultAgentSelector />
           <CodexSettings />
+          <AmpSettings />
         </div>
       </section>
 
