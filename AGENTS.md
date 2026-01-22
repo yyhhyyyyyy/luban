@@ -15,18 +15,41 @@ This document constrains and guides how AI agents (and human contributors) shoul
 - Keep changes small and reviewable. For functional changes, add or update tests.
 - After finishing a task, run the relevant checks, then commit and push.
 
-## 0.0 Design-first UI workflow (required)
+## 0.0 Mock-first UI workflow + contract-driven integration (required)
 
-The `design/` project is the high-fidelity interaction reference. For UI/UX work, the workflow is:
+The UI source of truth is `web/` in mock mode, and the web/server boundary is governed by explicit
+consumer-driven contracts (CDC) under `docs/contracts/`.
 
-- **Design first**: implement and commit changes in `design/` before changing `web/`.
-- **Align by diff**: use the `design` commit diff as the alignment checklist for `web/` implementation.
-- **Two-commit rule (preferred)**:
-  - Commit 1: `design/**` only
-  - Commit 2: `web/**` only, and the message MUST reference the design commit hash
-- **Exceptions**: backend-only or non-UI changes MAY skip `design/`, but the PR description MUST explicitly state why.
+See:
 
-## 0.1 Postmortems (required)
+- `docs/migrations/2026-01-22-web-mock-mode-contracts.md`
+- `docs/contracts/README.md`
+- `docs/contracts/progress.md`
+
+For UI/UX work, the workflow is:
+
+- **Mock first**: iterate interaction and UI behavior in `web/` mock mode without requiring the Rust server.
+- **Contract first**: when UI changes require new backend capabilities, update contracts before (or together with) server changes.
+- **Provider verified**: the Rust server must be validated against contracts via automated checks (contract tests in CI).
+
+## 0.1 Contract alignment rules (hard requirement)
+
+Any change that affects the web/server interaction surface must be aligned with contracts:
+
+- HTTP: `/api/*`
+- WebSocket: `/api/events`, `/api/pty/*`
+- Message schemas: `WsClientMessage`, `WsServerMessage`, `ClientAction`, `ServerEvent`
+
+Alignment means, at minimum:
+
+1. Update the relevant contract documents under `docs/contracts/features/`.
+2. Update `docs/contracts/progress.md` to reflect the new/changed surface and verification status.
+
+For functional changes (non-refactor) that touch these surfaces, also:
+
+3. Add or update provider-side contract tests so the Rust server is enforced against the contract in CI.
+
+## 0.2 Postmortems (required)
 
 This repository treats postmortems as a first-class engineering artifact.
 
@@ -42,7 +65,7 @@ This repository treats postmortems as a first-class engineering artifact.
      - reproduction and verification steps
      - prevention/action items
 
-## 0.2 User-Facing Prompt Templates (required)
+## 0.3 User-Facing Prompt Templates (required)
 
 Luban ships prompt templates as a user-facing feature for tasks across *any* repository.
 
@@ -176,9 +199,9 @@ Every delivery must include at least:
 3) Manual verification steps (3–7 steps)
 4) Risk points and rollback approach (if applicable)
 
-For any UI/UX changes in `web/`, also include:
-5) The design commit hash used as the source-of-truth
-6) A short alignment checklist derived from the `design` diff (what changed and where it was applied)
+For any changes that affect the web/server integration surface, also include:
+5) The contract(s) updated (`docs/contracts/features/*` and `docs/contracts/progress.md`)
+6) The contract verification status (what is mocked, what the provider implements, and what CI enforces)
 
 ## 10. Prohibited items (hard prohibitions)
 - Do not bypass the `just` workflow by writing a pile of cargo commands (unless the justfile does not cover it, and you explain why)

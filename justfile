@@ -36,8 +36,26 @@ web cmd profile="debug":
     else \
       cargo run -p luban_server --profile "{{profile}}"; \
     fi; \
+  elif [ "{{cmd}}" = "dev" ]; then \
+    if ! command -v pnpm >/dev/null 2>&1; then \
+      echo "pnpm not found; install pnpm to run the web dev server"; \
+      exit 1; \
+    fi; \
+    if [ ! -d web/node_modules ]; then \
+      (cd web && pnpm install); \
+    fi; \
+    (cd web && pnpm dev); \
+  elif [ "{{cmd}}" = "dev-mock" ]; then \
+    if ! command -v pnpm >/dev/null 2>&1; then \
+      echo "pnpm not found; install pnpm to run the web dev server"; \
+      exit 1; \
+    fi; \
+    if [ ! -d web/node_modules ]; then \
+      (cd web && pnpm install); \
+    fi; \
+    (cd web && NEXT_PUBLIC_LUBAN_MODE=mock pnpm dev); \
   else \
-    echo "usage: just web {build|run} [release]"; \
+    echo "usage: just web {build|run|dev|dev-mock} [release]"; \
     exit 2; \
   fi
 

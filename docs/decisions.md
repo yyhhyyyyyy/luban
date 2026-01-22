@@ -30,6 +30,9 @@ See `docs/cs-web-architecture.md`.
 
 See `docs/ui-design-parity.md`.
 
+Note: A migration is in progress to remove `design/` and adopt contract-driven integration. See
+`docs/migrations/2026-01-22-web-mock-mode-contracts.md`.
+
 ## UI state: durable vs device-local
 
 Luban splits "UI state" into two categories:

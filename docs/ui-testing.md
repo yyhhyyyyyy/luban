@@ -12,7 +12,8 @@ prioritize stability over pixel-perfect diffs.
 
 ## Selectors
 
-- Prefer stable `title=` attributes and structural selectors aligned with `design/`.
+- Prefer stable `title=` attributes and structural selectors aligned with the UI contracts and
+  documented interaction expectations.
 - Avoid selectors derived from transient values (timestamps, random ids, etc.).
 
 ## Recommended checks

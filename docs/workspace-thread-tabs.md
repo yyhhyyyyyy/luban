@@ -129,4 +129,4 @@ Persisted app state includes:
   - Restoring an archived tab returns it to `open_tabs`.
   - Concurrent turns are isolated per thread.
 - UI tests (Playwright):
-  - Tab strip ordering and restore behavior match `design/`.
+  - Tab strip ordering and restore behavior match this document and the tracked contracts.

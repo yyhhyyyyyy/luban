@@ -1,5 +1,9 @@
 # UI Design Parity (Source of Truth)
 
+Status: Legacy (current implementation). A migration is in progress to make `web/` mock mode the only
+high-fidelity UI environment and to replace design parity with contract-driven integration. See
+`docs/migrations/2026-01-22-web-mock-mode-contracts.md`.
+
 The UI source of truth is maintained in `Xuanwo/luban-design`.
 
 This repository must keep the browser UI **visually and structurally consistent** with that design project.

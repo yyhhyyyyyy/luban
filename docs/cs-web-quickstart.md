@@ -12,6 +12,23 @@ This repo contains a local Rust server (`luban_server`) and a browser UI (`web/`
 `just web run` builds `web/` (requires `pnpm`) and starts `luban_server`, which serves
 the built assets from `/`.
 
+## Run (mock mode, UI-first preview)
+
+Mock mode runs the browser UI without starting the Rust server. This is the preferred workflow for
+fast interaction iteration.
+
+1. Run:
+   - `just web dev-mock`
+2. Open:
+   - `http://localhost:3000/` (Next.js dev server)
+
+Notes:
+
+- Mock mode is controlled by `NEXT_PUBLIC_LUBAN_MODE=mock`.
+- Integration with the Rust server is tracked and enforced via contracts under `docs/contracts/`.
+- See `docs/migrations/2026-01-22-web-mock-mode-contracts.md` for the migration plan.
+- Terminal PTY streaming is mocked locally in mock mode (no server required, limited shell behavior).
+
 ## Run (Tauri shell)
 
 1. Run:
@@ -24,7 +41,7 @@ The Tauri app starts the same local `luban_server` in-process and loads it in a 
 1. Start the Rust server:
    - `just run-server`
 2. Start the web dev server:
-   - `cd web && pnpm install && pnpm dev`
+   - `just web dev`
 3. Open:
    - `http://localhost:3000/` (Next.js)
 
@@ -44,6 +61,7 @@ prefer `just web run` (single process, same-origin `/api/*`).
 
 - Rust: `just fmt && just lint && just test`
 - Web: `cd web && pnpm run typecheck && pnpm run build`
+- Contracts: `just test` (enforces basic contract coverage for server routes)
 
 ## Notes
 
