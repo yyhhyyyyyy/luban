@@ -84,13 +84,22 @@ type LubanContextValue = {
   closeThreadTab: (threadId: number) => Promise<void>
   restoreThreadTab: (threadId: number) => Promise<void>
 
-  sendAgentMessage: (text: string, attachments?: AttachmentRef[]) => void
-  queueAgentMessage: (text: string, attachments?: AttachmentRef[]) => void
+  sendAgentMessage: (
+    text: string,
+    attachments?: AttachmentRef[],
+    runConfig?: { runner?: AgentRunnerKind | null; amp_mode?: string | null },
+  ) => void
+  queueAgentMessage: (
+    text: string,
+    attachments?: AttachmentRef[],
+    runConfig?: { runner?: AgentRunnerKind | null; amp_mode?: string | null },
+  ) => void
   sendAgentMessageTo: (
     workspaceId: WorkspaceId,
     threadId: number,
     text: string,
     attachments?: AttachmentRef[],
+    runConfig?: { runner?: AgentRunnerKind | null; amp_mode?: string | null },
   ) => void
   removeQueuedPrompt: (workspaceId: WorkspaceId, threadId: WorkspaceThreadId, promptId: number) => void
   reorderQueuedPrompt: (
@@ -106,7 +115,11 @@ type LubanContextValue = {
     args: { text: string; attachments: AttachmentRef[]; runConfig: AgentRunConfigSnapshot },
   ) => void
   cancelAgentTurn: () => void
-  cancelAndSendAgentMessage: (text: string, attachments?: AttachmentRef[]) => void
+  cancelAndSendAgentMessage: (
+    text: string,
+    attachments?: AttachmentRef[],
+    runConfig?: { runner?: AgentRunnerKind | null; amp_mode?: string | null },
+  ) => void
 
   renameWorkspaceBranch: (workspaceId: WorkspaceId, branchName: string) => void
   aiRenameWorkspaceBranch: (workspaceId: WorkspaceId, threadId: WorkspaceThreadId) => void

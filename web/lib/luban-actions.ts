@@ -76,13 +76,22 @@ export type LubanActions = {
   closeThreadTab: (threadId: number) => Promise<void>
   restoreThreadTab: (threadId: number) => Promise<void>
 
-  sendAgentMessage: (text: string, attachments?: AttachmentRef[]) => void
-  queueAgentMessage: (text: string, attachments?: AttachmentRef[]) => void
+  sendAgentMessage: (
+    text: string,
+    attachments?: AttachmentRef[],
+    runConfig?: { runner?: AgentRunnerKind | null; amp_mode?: string | null },
+  ) => void
+  queueAgentMessage: (
+    text: string,
+    attachments?: AttachmentRef[],
+    runConfig?: { runner?: AgentRunnerKind | null; amp_mode?: string | null },
+  ) => void
   sendAgentMessageTo: (
     workspaceId: WorkspaceId,
     threadId: number,
     text: string,
     attachments?: AttachmentRef[],
+    runConfig?: { runner?: AgentRunnerKind | null; amp_mode?: string | null },
   ) => void
   removeQueuedPrompt: (workspaceId: WorkspaceId, threadId: WorkspaceThreadId, promptId: number) => void
   reorderQueuedPrompt: (
@@ -98,7 +107,11 @@ export type LubanActions = {
     args: { text: string; attachments: AttachmentRef[]; runConfig: AgentRunConfigSnapshot },
   ) => void
   cancelAgentTurn: () => void
-  cancelAndSendAgentMessage: (text: string, attachments?: AttachmentRef[]) => void
+  cancelAndSendAgentMessage: (
+    text: string,
+    attachments?: AttachmentRef[],
+    runConfig?: { runner?: AgentRunnerKind | null; amp_mode?: string | null },
+  ) => void
 
   renameWorkspaceBranch: (workspaceId: WorkspaceId, branchName: string) => void
   aiRenameWorkspaceBranch: (workspaceId: WorkspaceId, threadId: WorkspaceThreadId) => void
@@ -519,7 +532,11 @@ export function createLubanActions(args: {
     return { workspaceId: wid, threadId: tid }
   }
 
-  function sendAgentMessage(text: string, attachments: AttachmentRef[] = []) {
+  function sendAgentMessage(
+    text: string,
+    attachments: AttachmentRef[] = [],
+    runConfig?: { runner?: AgentRunnerKind | null; amp_mode?: string | null },
+  ) {
     const ids = activeWorkspaceThread()
     if (!ids) return
     args.sendAction({
@@ -528,10 +545,16 @@ export function createLubanActions(args: {
       thread_id: ids.threadId,
       text,
       attachments,
+      ...(runConfig?.runner != null ? { runner: runConfig.runner } : {}),
+      ...(runConfig?.amp_mode != null ? { amp_mode: runConfig.amp_mode } : {}),
     })
   }
 
-  function queueAgentMessage(text: string, attachments: AttachmentRef[] = []) {
+  function queueAgentMessage(
+    text: string,
+    attachments: AttachmentRef[] = [],
+    runConfig?: { runner?: AgentRunnerKind | null; amp_mode?: string | null },
+  ) {
     const ids = activeWorkspaceThread()
     if (!ids) return
     args.sendAction({
@@ -540,6 +563,8 @@ export function createLubanActions(args: {
       thread_id: ids.threadId,
       text,
       attachments,
+      ...(runConfig?.runner != null ? { runner: runConfig.runner } : {}),
+      ...(runConfig?.amp_mode != null ? { amp_mode: runConfig.amp_mode } : {}),
     })
   }
 
@@ -548,6 +573,7 @@ export function createLubanActions(args: {
     threadId: number,
     text: string,
     attachments: AttachmentRef[] = [],
+    runConfig?: { runner?: AgentRunnerKind | null; amp_mode?: string | null },
   ) {
     args.sendAction({
       type: "send_agent_message",
@@ -555,6 +581,8 @@ export function createLubanActions(args: {
       thread_id: threadId,
       text,
       attachments,
+      ...(runConfig?.runner != null ? { runner: runConfig.runner } : {}),
+      ...(runConfig?.amp_mode != null ? { amp_mode: runConfig.amp_mode } : {}),
     })
   }
 
@@ -629,7 +657,11 @@ export function createLubanActions(args: {
     args.sendAction({ type: "cancel_agent_turn", workspace_id: ids.workspaceId, thread_id: ids.threadId })
   }
 
-  function cancelAndSendAgentMessage(text: string, attachments: AttachmentRef[] = []) {
+  function cancelAndSendAgentMessage(
+    text: string,
+    attachments: AttachmentRef[] = [],
+    runConfig?: { runner?: AgentRunnerKind | null; amp_mode?: string | null },
+  ) {
     const ids = activeWorkspaceThread()
     if (!ids) return
     args.sendAction({
@@ -638,6 +670,8 @@ export function createLubanActions(args: {
       thread_id: ids.threadId,
       text,
       attachments,
+      ...(runConfig?.runner != null ? { runner: runConfig.runner } : {}),
+      ...(runConfig?.amp_mode != null ? { amp_mode: runConfig.amp_mode } : {}),
     })
   }
 

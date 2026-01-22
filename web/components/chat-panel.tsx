@@ -42,6 +42,7 @@ import { EscCancelHint } from "@/components/esc-cancel-hint"
 import { ChatComposer } from "@/components/chat-composer"
 import { WorkspaceChatHeader } from "@/components/workspace-chat-header"
 import { getActiveProjectInfo } from "@/lib/active-project-info"
+import type { AgentRunnerOverride, AmpModeOverride } from "@/components/shared/agent-selector"
 
 type ComposerAttachment = EditorComposerAttachment
 
@@ -93,6 +94,8 @@ export function ChatPanel({
   } = useLuban()
 
   const [draftText, setDraftText] = useState("")
+  const [runnerOverride, setRunnerOverride] = useState<AgentRunnerOverride>(null)
+  const [ampModeOverride, setAmpModeOverride] = useState<AmpModeOverride>(null)
   const [followTail, setFollowTail] = useState(true)
   const programmaticScrollRef = useRef(false)
   const pinToBottomRef = useRef<{ epoch: number; until: number; raf: number | null } | null>(null)
@@ -165,6 +168,8 @@ export function ChatPanel({
     setAgentOverrideStatus(null)
     setAgentEditorValue("")
     setAgentEditorAttachments([])
+    setRunnerOverride(null)
+    setAmpModeOverride(null)
     setAgentRunNowMs(Date.now())
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeWorkspaceId, activeThreadId])
@@ -535,10 +540,17 @@ export function ChatPanel({
     const hasUploading = attachments.some((a) => a.status === "uploading")
     if (hasUploading) return
     if (text.length === 0 && ready.length === 0) return
+
+    const defaultRunner = app?.agent?.default_runner ?? "codex"
+    const effectiveRunner = runnerOverride ?? defaultRunner
+    const runConfig = {
+      runner: runnerOverride,
+      amp_mode: effectiveRunner === "amp" && ampModeOverride != null ? ampModeOverride : null,
+    }
     if (queuePaused && queuedPrompts.length > 0) {
-      queueAgentMessage(text, ready)
+      queueAgentMessage(text, ready, runConfig)
     } else {
-      sendAgentMessage(text, ready)
+      sendAgentMessage(text, ready, runConfig)
     }
     setDraftText("")
     persistDraft("")
@@ -645,10 +657,17 @@ export function ChatPanel({
       .map((a) => a.attachment!)
     if (text.length === 0 && ready.length === 0) return
 
+    const defaultRunner = app?.agent?.default_runner ?? "codex"
+    const effectiveRunner = runnerOverride ?? defaultRunner
+    const runConfig = {
+      runner: runnerOverride,
+      amp_mode: effectiveRunner === "amp" && ampModeOverride != null ? ampModeOverride : null,
+    }
+
     if (agentOverrideStatus === "cancelling") {
-      cancelAndSendAgentMessage(text, ready)
+      cancelAndSendAgentMessage(text, ready, runConfig)
     } else if (agentOverrideStatus === "resuming") {
-      sendAgentMessage(text, ready)
+      sendAgentMessage(text, ready, runConfig)
     }
 
     setAgentOverrideStatus(null)
@@ -1214,6 +1233,11 @@ export function ChatPanel({
                   agentThinkingEffort={conversation?.thinking_effort}
                   defaultModelId={app?.agent.default_model_id ?? null}
                   defaultThinkingEffort={app?.agent.default_thinking_effort ?? null}
+                  defaultRunner={app?.agent.default_runner ?? null}
+                  runnerOverride={runnerOverride}
+                  ampModeOverride={ampModeOverride}
+                  onChangeRunnerOverride={setRunnerOverride}
+                  onChangeAmpModeOverride={setAmpModeOverride}
                   onOpenAgentSettings={(agentId, agentFilePath) => openSettingsPanel("agent", { agentId, agentFilePath })}
                   onChangeModelId={(modelId) => {
                     if (activeWorkspaceId == null || activeThreadId == null) return

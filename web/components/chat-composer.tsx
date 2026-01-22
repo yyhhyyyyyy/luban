@@ -4,9 +4,9 @@ import type React from "react"
 
 import { Send } from "lucide-react"
 
-import { CodexAgentSelector } from "@/components/shared/agent-selector"
+import { AgentSelector, type AgentRunnerOverride, type AmpModeOverride } from "@/components/shared/agent-selector"
 import { MessageEditor, type ComposerAttachment } from "@/components/shared/message-editor"
-import type { AttachmentRef, CodexCustomPromptSnapshot, ThinkingEffort } from "@/lib/luban-api"
+import type { AgentRunnerKind, AttachmentRef, CodexCustomPromptSnapshot, ThinkingEffort } from "@/lib/luban-api"
 
 export function ChatComposer({
   value,
@@ -28,6 +28,11 @@ export function ChatComposer({
   onOpenAgentSettings,
   onChangeModelId,
   onChangeThinkingEffort,
+  defaultRunner,
+  runnerOverride,
+  ampModeOverride,
+  onChangeRunnerOverride,
+  onChangeAmpModeOverride,
   onSend,
   canSend,
 }: {
@@ -50,6 +55,11 @@ export function ChatComposer({
   onOpenAgentSettings: (agentId: string, agentFilePath?: string) => void
   onChangeModelId: (modelId: string) => void
   onChangeThinkingEffort: (effort: ThinkingEffort) => void
+  defaultRunner: AgentRunnerKind | null
+  runnerOverride: AgentRunnerOverride
+  ampModeOverride: AmpModeOverride
+  onChangeRunnerOverride: (runner: AgentRunnerOverride) => void
+  onChangeAmpModeOverride: (mode: AmpModeOverride) => void
   onSend: () => void
   canSend: boolean
 }) {
@@ -71,7 +81,7 @@ export function ChatComposer({
           placeholder="Let's chart the cosmos of ideas..."
           disabled={disabled}
           agentSelector={
-            <CodexAgentSelector
+            <AgentSelector
               dropdownPosition="top"
               disabled={disabled}
               modelId={agentModelId}
@@ -81,6 +91,11 @@ export function ChatComposer({
               onOpenAgentSettings={onOpenAgentSettings}
               onChangeModelId={onChangeModelId}
               onChangeThinkingEffort={onChangeThinkingEffort}
+              defaultRunner={defaultRunner}
+              runnerOverride={runnerOverride}
+              ampModeOverride={ampModeOverride}
+              onChangeRunnerOverride={onChangeRunnerOverride}
+              onChangeAmpModeOverride={onChangeAmpModeOverride}
             />
           }
           primaryAction={{

@@ -1,9 +1,9 @@
 "use client"
 
-import type { ThinkingEffort } from "@/lib/luban-api"
+import type { AgentRunnerKind, ThinkingEffort } from "@/lib/luban-api"
 
 import { useMemo, useState } from "react"
-import { ChevronDown, Settings } from "lucide-react"
+import { ChevronDown, Settings, Zap } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { AGENT_MODELS, supportedThinkingEffortsForModel } from "@/lib/agent-settings"
@@ -205,6 +205,278 @@ export function CodexAgentSelector({
                 })}
               </div>
             </div>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+export type AgentRunnerOverride = AgentRunnerKind | null
+
+export type AmpModeOverride = "smart" | "rush" | null
+
+export function AgentSelector({
+  testId = "agent-selector",
+  modelId,
+  thinkingEffort,
+  onChangeModelId,
+  onChangeThinkingEffort,
+  defaultModelId,
+  defaultThinkingEffort,
+  onOpenAgentSettings,
+  disabled = false,
+  dropdownPosition = "bottom",
+  className,
+  defaultRunner,
+  runnerOverride,
+  onChangeRunnerOverride,
+  ampModeOverride,
+  onChangeAmpModeOverride,
+}: {
+  testId?: string
+  modelId: string | null | undefined
+  thinkingEffort: ThinkingEffort | null | undefined
+  onChangeModelId: (modelId: string) => void
+  onChangeThinkingEffort: (effort: ThinkingEffort) => void
+  defaultModelId?: string | null
+  defaultThinkingEffort?: ThinkingEffort | null
+  onOpenAgentSettings?: (agentId: string, filePath?: string) => void
+  disabled?: boolean
+  dropdownPosition?: "top" | "bottom"
+  className?: string
+  defaultRunner: AgentRunnerKind | null | undefined
+  runnerOverride: AgentRunnerOverride
+  onChangeRunnerOverride: (runner: AgentRunnerOverride) => void
+  ampModeOverride: AmpModeOverride
+  onChangeAmpModeOverride: (mode: AmpModeOverride) => void
+}) {
+  const effectiveRunner: AgentRunnerKind = runnerOverride ?? defaultRunner ?? "codex"
+  const isAmp = effectiveRunner === "amp"
+
+  const defaultRunnerLabel = useMemo(() => {
+    return `Default (${(defaultRunner ?? "codex") === "amp" ? "Amp" : "Codex"})`
+  }, [defaultRunner])
+
+  const modeLabel = useMemo(() => {
+    if (!isAmp) return null
+    if (ampModeOverride == null) return "Default"
+    return ampModeOverride === "rush" ? "Rush" : "Smart"
+  }, [ampModeOverride, isAmp])
+
+  const displayName = useMemo(() => {
+    if (isAmp) {
+      return modeLabel ? `Amp · ${modeLabel}` : "Amp"
+    }
+    const model = agentModelLabel(modelId)
+    const effort = thinkingEffortLabel(thinkingEffort)
+    if (model === "Model" || effort === "Effort") return "Codex"
+    if (runnerOverride == null) return `${model} · ${effort}`
+    return `${model} · ${effort}`
+  }, [isAmp, modeLabel, modelId, runnerOverride, thinkingEffort])
+
+  const icon = isAmp ? <Zap className="w-3.5 h-3.5" /> : <OpenAIIcon className="w-3.5 h-3.5" />
+
+  const [open, setOpen] = useState(false)
+  const [tempModelId, setTempModelId] = useState<string | null>(null)
+
+  const currentModelId = modelId ?? ""
+  const currentEffort = thinkingEffort ?? null
+
+  const panelModelId = tempModelId ?? currentModelId
+  const effortOptions = useMemo(() => supportedThinkingEffortsForModel(panelModelId), [panelModelId])
+
+  const close = () => {
+    setOpen(false)
+    setTempModelId(null)
+  }
+
+  const apply = (nextModelId: string, nextEffort: ThinkingEffort) => {
+    if (nextModelId && nextModelId !== currentModelId) onChangeModelId(nextModelId)
+    if (nextEffort !== currentEffort && nextEffort != null) onChangeThinkingEffort(nextEffort)
+    close()
+  }
+
+  return (
+    <div className={cn("relative", className)}>
+      <button
+        data-testid={testId}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => {
+          if (disabled) return
+          setOpen((prev) => !prev)
+          setTempModelId(null)
+        }}
+        disabled={disabled}
+        className={cn(
+          "inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors",
+          "text-muted-foreground hover:text-foreground hover:bg-muted",
+          open && "bg-muted text-foreground",
+          disabled && "opacity-60 cursor-default hover:bg-transparent hover:text-muted-foreground",
+        )}
+      >
+        {icon}
+        <span className="whitespace-nowrap">{displayName}</span>
+        <ChevronDown className={cn("w-3 h-3 transition-transform", open && "rotate-180")} />
+      </button>
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onMouseDown={close} />
+          <div
+            className={cn(
+              "absolute z-50 w-80 rounded-lg border border-border bg-popover shadow-lg p-2",
+              dropdownPosition === "top" ? "bottom-full mb-2" : "top-full mt-2",
+              "left-0",
+            )}
+          >
+            <div className="p-1">
+              <div className="px-2.5 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+                Runner
+              </div>
+              {([
+                { id: null, label: defaultRunnerLabel },
+                { id: "codex" as const, label: "Codex" },
+                { id: "amp" as const, label: "Amp" },
+              ] as const).map((opt) => {
+                const selected = opt.id === runnerOverride
+                return (
+                  <button
+                    key={opt.label}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => {
+                      onChangeRunnerOverride(opt.id)
+                      if (opt.id !== "amp") onChangeAmpModeOverride(null)
+                    }}
+                    className={cn(
+                      "w-full flex items-center px-2.5 py-1.5 text-left text-xs transition-colors rounded-md whitespace-nowrap",
+                      selected ? "bg-primary/10 text-primary" : "text-foreground hover:bg-accent",
+                    )}
+                  >
+                    <span>{opt.label}</span>
+                  </button>
+                )
+              })}
+            </div>
+
+            {isAmp ? (
+              <div className="p-1 border-t border-border">
+                <div className="px-2.5 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+                  Mode
+                </div>
+                {([
+                  { id: null, label: "Default (from Amp config)" },
+                  { id: "smart" as const, label: "Smart" },
+                  { id: "rush" as const, label: "Rush" },
+                ] as const).map((opt) => {
+                  const selected = opt.id === ampModeOverride
+                  return (
+                    <button
+                      key={opt.label}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        onChangeAmpModeOverride(opt.id)
+                        close()
+                      }}
+                      className={cn(
+                        "w-full flex items-center px-2.5 py-1.5 text-left text-xs transition-colors rounded-md whitespace-nowrap",
+                        selected ? "bg-primary/10 text-primary" : "text-foreground hover:bg-accent",
+                      )}
+                    >
+                      <span>{opt.label}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="p-1 border-t border-border">
+                <div className="px-2.5 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+                  Model
+                </div>
+                {AGENT_MODELS.map((m) => {
+                  const selected = m.id === panelModelId
+                  const isDefault = defaultModelId != null && m.id === defaultModelId
+                  return (
+                    <div key={m.id} className="relative group">
+                      <button
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => setTempModelId(m.id)}
+                        className={cn(
+                          "w-full flex items-center px-2.5 py-1.5 text-left text-xs transition-colors rounded-md whitespace-nowrap",
+                          selected ? "bg-primary/10 text-primary" : "text-foreground hover:bg-accent",
+                        )}
+                      >
+                        <span className="pr-10">{m.label}</span>
+                      </button>
+                      {isDefault && (
+                        <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1 px-1.5 py-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity bg-popover/95 rounded">
+                          <span className="text-[10px] text-muted-foreground pointer-events-none select-none">default</span>
+                          {onOpenAgentSettings && (
+                            <button
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                close()
+                                onOpenAgentSettings("codex", "config.toml")
+                              }}
+                              className="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                              title="Edit Codex defaults"
+                            >
+                              <Settings className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {!isAmp && (
+              <div className="p-1">
+                <div className="px-2.5 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+                  Reasoning
+                </div>
+                {effortOptions.map((effort) => {
+                  const selected = effort === (currentEffort ?? "")
+                  const isDefault = defaultThinkingEffort != null && effort === defaultThinkingEffort
+                  return (
+                    <div key={effort} className="relative group">
+                      <button
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => apply(panelModelId, effort)}
+                        className={cn(
+                          "w-full flex items-center px-2.5 py-1.5 text-left text-xs transition-colors rounded-md whitespace-nowrap",
+                          selected ? "bg-primary/10 text-primary" : "text-foreground hover:bg-accent",
+                        )}
+                      >
+                        <span className="pr-10">{thinkingEffortLabel(effort)}</span>
+                      </button>
+                      {isDefault && (
+                        <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1 px-1.5 py-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity bg-popover/95 rounded">
+                          <span className="text-[10px] text-muted-foreground pointer-events-none select-none">default</span>
+                          {onOpenAgentSettings && (
+                            <button
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                close()
+                                onOpenAgentSettings("codex", "config.toml")
+                              }}
+                              className="p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                              title="Edit Codex defaults"
+                            >
+                              <Settings className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         </>
       )}

@@ -1559,11 +1559,10 @@ function AmpSettings({
   initialSelectedFilePath?: string | null
   autoFocusEditor?: boolean
 }) {
-  const { app, checkAmp, listAmpConfigDir, readAmpConfigFile, setAgentAmpMode, writeAmpConfigFile } = useLuban()
+  const { checkAmp, listAmpConfigDir, readAmpConfigFile, writeAmpConfigFile } = useLuban()
   const [enabled, setEnabled] = useState(true)
   const [checkStatus, setCheckStatus] = useState<CheckStatus>("idle")
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle")
-  const [ampModeDraft, setAmpModeDraft] = useState("smart")
   const [selectedFile, setSelectedFile] = useState<AmpSelectedFile | null>(null)
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set())
   const [dirEntries, setDirEntries] = useState<Record<string, AmpConfigEntrySnapshot[]>>({})
@@ -1575,10 +1574,6 @@ function AmpSettings({
   const editorRef = useRef<HTMLTextAreaElement>(null)
   const highlightRef = useRef<HTMLDivElement>(null)
   const highlighter = useShikiHighlighter()
-
-  useEffect(() => {
-    setAmpModeDraft(app?.agent?.amp_mode ?? "smart")
-  }, [app?.agent?.amp_mode])
 
   const loadDir = useCallback(
     async (path: string): Promise<AmpConfigEntrySnapshot[]> => {
@@ -1828,31 +1823,7 @@ function AmpSettings({
                   </span>
 	                )}
 	              </div>
-	              <div className="flex items-center gap-2">
-	                <div className="flex items-center gap-1">
-	                  <span className="text-xs text-muted-foreground">Mode</span>
-	                  <input
-	                    data-testid="settings-agent-amp-mode"
-	                    type="text"
-	                    value={ampModeDraft}
-	                    maxLength={32}
-	                    onChange={(e) => setAmpModeDraft(e.target.value)}
-	                    onBlur={() => setAgentAmpMode(ampModeDraft)}
-	                    onKeyDown={(e) => {
-	                      if (e.key !== "Enter") return
-	                      e.preventDefault()
-	                      setAgentAmpMode(ampModeDraft)
-	                      e.currentTarget.blur()
-	                    }}
-	                    className={cn(
-	                      "w-28 h-7 px-2 rounded-md border border-border bg-background text-xs",
-	                      "focus:outline-none focus:ring-2 focus:ring-primary/40",
-	                    )}
-	                    placeholder="smart"
-	                  />
-	                </div>
-	
-	                <div className="flex items-center gap-1">
+	              <div className="flex items-center gap-1">
 	                <button
 	                  data-testid="settings-amp-check"
 	                  onClick={handleCheck}
@@ -1894,7 +1865,6 @@ function AmpSettings({
 	                  <Pencil className="w-3.5 h-3.5" />
 	                  Edit in Luban
 	                </button>
-	                </div>
 	              </div>
 	            </div>
 

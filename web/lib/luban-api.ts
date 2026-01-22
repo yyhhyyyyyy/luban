@@ -353,27 +353,33 @@ export type ClientAction =
       thread_id: WorkspaceThreadId
       thinking_effort: ThinkingEffort
     }
-  | {
-      type: "send_agent_message"
-      workspace_id: WorkspaceId
-      thread_id: WorkspaceThreadId
-      text: string
-      attachments: AttachmentRef[]
-    }
+	  | {
+	      type: "send_agent_message"
+	      workspace_id: WorkspaceId
+	      thread_id: WorkspaceThreadId
+	      text: string
+	      attachments: AttachmentRef[]
+	      runner?: AgentRunnerKind
+	      amp_mode?: string
+	    }
   | {
       type: "cancel_and_send_agent_message"
       workspace_id: WorkspaceId
       thread_id: WorkspaceThreadId
       text: string
       attachments: AttachmentRef[]
+      runner?: AgentRunnerKind
+      amp_mode?: string
     }
-  | {
-      type: "queue_agent_message"
-      workspace_id: WorkspaceId
-      thread_id: WorkspaceThreadId
-      text: string
-      attachments: AttachmentRef[]
-    }
+	  | {
+	      type: "queue_agent_message"
+	      workspace_id: WorkspaceId
+	      thread_id: WorkspaceThreadId
+	      text: string
+	      attachments: AttachmentRef[]
+	      runner?: AgentRunnerKind
+	      amp_mode?: string
+	    }
   | { type: "remove_queued_prompt"; workspace_id: WorkspaceId; thread_id: WorkspaceThreadId; prompt_id: number }
   | { type: "reorder_queued_prompt"; workspace_id: WorkspaceId; thread_id: WorkspaceThreadId; active_id: number; over_id: number }
   | {
