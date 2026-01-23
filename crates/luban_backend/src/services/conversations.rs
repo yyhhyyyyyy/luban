@@ -326,7 +326,6 @@ mod tests {
     use crate::sqlite_store::SqliteStore;
     use luban_domain::CodexThreadItem;
     use std::path::{Path, PathBuf};
-    use std::sync::{Arc, OnceLock};
 
     fn temp_dir(test_name: &str) -> PathBuf {
         let mut dir = std::env::temp_dir();
@@ -380,7 +379,6 @@ mod tests {
             conversations_root: conversations_root.clone(),
             task_prompts_root: root.join("task-prompts"),
             sqlite,
-            codex_executable_cache: Arc::new(OnceLock::new()),
         };
 
         let legacy_entries = vec![
@@ -428,7 +426,6 @@ mod tests {
             conversations_root: conversations_root.clone(),
             task_prompts_root: root.join("task-prompts"),
             sqlite: sqlite.clone(),
-            codex_executable_cache: Arc::new(OnceLock::new()),
         };
 
         let legacy_entries = vec![
