@@ -5,6 +5,7 @@ import type {
   AttachmentKind,
   AttachmentRef,
   ChangedFileSnapshot,
+  ClaudeConfigEntrySnapshot,
   CodexConfigEntrySnapshot,
   CodexCustomPromptSnapshot,
   ContextItemSnapshot,
@@ -41,6 +42,10 @@ export type MockFixtures = {
   }
   ampConfig: {
     tree: AmpConfigEntrySnapshot[]
+    files: Record<string, string>
+  }
+  claudeConfig: {
+    tree: ClaudeConfigEntrySnapshot[]
     files: Record<string, string>
   }
 }
@@ -543,6 +548,26 @@ export function defaultMockFixtures(): MockFixtures {
     "README.md": "# Amp config\n\nThis is mock content.\n",
   }
 
+  const claudeConfigTree: ClaudeConfigEntrySnapshot[] = [
+    {
+      path: "settings.json",
+      name: "settings.json",
+      kind: "file",
+      children: [],
+    },
+    {
+      path: "history.jsonl",
+      name: "history.jsonl",
+      kind: "file",
+      children: [],
+    },
+  ]
+
+  const claudeConfigFiles: Record<string, string> = {
+    "settings.json": "{\n  \"permissions\": {\n    \"allow\": []\n  }\n}\n",
+    "history.jsonl": "{\"type\":\"mock\"}\n",
+  }
+
   return {
     app,
     threadsByWorkspace,
@@ -555,5 +580,6 @@ export function defaultMockFixtures(): MockFixtures {
     mentionIndex,
     codexConfig: { tree: codexConfigTree, files: codexConfigFiles },
     ampConfig: { tree: ampConfigTree, files: ampConfigFiles },
+    claudeConfig: { tree: claudeConfigTree, files: claudeConfigFiles },
   }
 }

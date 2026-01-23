@@ -19,7 +19,7 @@ export type AppearanceSnapshot = {
   global_zoom: number
 }
 
-export type AgentRunnerKind = "codex" | "amp"
+export type AgentRunnerKind = "codex" | "amp" | "claude"
 
 export type AgentSettingsSnapshot = {
   codex_enabled: boolean
@@ -299,6 +299,15 @@ export type AmpConfigEntrySnapshot = {
   children: AmpConfigEntrySnapshot[]
 }
 
+export type ClaudeConfigEntryKind = "file" | "folder"
+
+export type ClaudeConfigEntrySnapshot = {
+  path: string
+  name: string
+  kind: ClaudeConfigEntryKind
+  children: ClaudeConfigEntrySnapshot[]
+}
+
 export type AgentItemKind =
   | "agent_message"
   | "reasoning"
@@ -426,6 +435,11 @@ export type ClientAction =
   | { type: "amp_config_list_dir"; path: string }
   | { type: "amp_config_read_file"; path: string }
   | { type: "amp_config_write_file"; path: string; contents: string }
+  | { type: "claude_check" }
+  | { type: "claude_config_tree" }
+  | { type: "claude_config_list_dir"; path: string }
+  | { type: "claude_config_read_file"; path: string }
+  | { type: "claude_config_write_file"; path: string; contents: string }
 
 export type ServerEvent =
   | { type: "app_changed"; rev: number; snapshot: AppSnapshot }
@@ -452,6 +466,11 @@ export type ServerEvent =
   | { type: "amp_config_list_dir_ready"; request_id: string; path: string; entries: AmpConfigEntrySnapshot[] }
   | { type: "amp_config_file_ready"; request_id: string; path: string; contents: string }
   | { type: "amp_config_file_saved"; request_id: string; path: string }
+  | { type: "claude_check_ready"; request_id: string; ok: boolean; message: string | null }
+  | { type: "claude_config_tree_ready"; request_id: string; tree: ClaudeConfigEntrySnapshot[] }
+  | { type: "claude_config_list_dir_ready"; request_id: string; path: string; entries: ClaudeConfigEntrySnapshot[] }
+  | { type: "claude_config_file_ready"; request_id: string; path: string; contents: string }
+  | { type: "claude_config_file_saved"; request_id: string; path: string }
 
 export type WsClientMessage =
   | { type: "hello"; protocol_version: number; last_seen_rev: number | null }

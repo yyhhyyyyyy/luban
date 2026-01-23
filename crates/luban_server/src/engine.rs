@@ -908,6 +908,36 @@ impl Engine {
                     return;
                 }
 
+                if matches!(action, luban_api::ClientAction::ClaudeCheck) {
+                    let services = self.services.clone();
+                    let events = self.events.clone();
+                    let request_id = request_id.clone();
+                    let rev = self.rev;
+                    tokio::spawn(async move {
+                        let result = tokio::task::spawn_blocking(move || services.claude_check())
+                            .await
+                            .ok()
+                            .unwrap_or_else(|| Err("failed to join claude check task".to_owned()));
+
+                        let (ok, message) = match result {
+                            Ok(()) => (true, None),
+                            Err(message) => (false, Some(message)),
+                        };
+
+                        let _ = events.send(WsServerMessage::Event {
+                            rev,
+                            event: Box::new(luban_api::ServerEvent::ClaudeCheckReady {
+                                request_id,
+                                ok,
+                                message,
+                            }),
+                        });
+                    });
+
+                    let _ = reply.send(Ok(self.rev));
+                    return;
+                }
+
                 if matches!(action, luban_api::ClientAction::CodexConfigTree) {
                     fn map_entry(
                         entry: luban_domain::CodexConfigEntry,
@@ -1300,6 +1330,212 @@ impl Engine {
                     return;
                 }
 
+                if matches!(action, luban_api::ClientAction::ClaudeConfigTree) {
+                    fn map_entry(
+                        entry: luban_domain::ClaudeConfigEntry,
+                    ) -> luban_api::ClaudeConfigEntrySnapshot {
+                        luban_api::ClaudeConfigEntrySnapshot {
+                            path: entry.path,
+                            name: entry.name,
+                            kind: match entry.kind {
+                                luban_domain::ClaudeConfigEntryKind::File => {
+                                    luban_api::ClaudeConfigEntryKind::File
+                                }
+                                luban_domain::ClaudeConfigEntryKind::Folder => {
+                                    luban_api::ClaudeConfigEntryKind::Folder
+                                }
+                            },
+                            children: entry.children.into_iter().map(map_entry).collect(),
+                        }
+                    }
+
+                    let services = self.services.clone();
+                    let events = self.events.clone();
+                    let request_id = request_id.clone();
+                    let rev = self.rev;
+                    tokio::spawn(async move {
+                        let result =
+                            tokio::task::spawn_blocking(move || services.claude_config_tree())
+                                .await
+                                .ok()
+                                .unwrap_or_else(|| {
+                                    Err("failed to join claude config tree task".to_owned())
+                                });
+
+                        match result {
+                            Ok(tree) => {
+                                let tree = tree.into_iter().map(map_entry).collect();
+                                let _ = events.send(WsServerMessage::Event {
+                                    rev,
+                                    event: Box::new(
+                                        luban_api::ServerEvent::ClaudeConfigTreeReady {
+                                            request_id,
+                                            tree,
+                                        },
+                                    ),
+                                });
+                            }
+                            Err(message) => {
+                                let _ = events.send(WsServerMessage::Error {
+                                    request_id: Some(request_id),
+                                    message,
+                                });
+                            }
+                        }
+                    });
+
+                    let _ = reply.send(Ok(self.rev));
+                    return;
+                }
+
+                if let luban_api::ClientAction::ClaudeConfigListDir { path } = &action {
+                    fn map_entry(
+                        entry: luban_domain::ClaudeConfigEntry,
+                    ) -> luban_api::ClaudeConfigEntrySnapshot {
+                        luban_api::ClaudeConfigEntrySnapshot {
+                            path: entry.path,
+                            name: entry.name,
+                            kind: match entry.kind {
+                                luban_domain::ClaudeConfigEntryKind::File => {
+                                    luban_api::ClaudeConfigEntryKind::File
+                                }
+                                luban_domain::ClaudeConfigEntryKind::Folder => {
+                                    luban_api::ClaudeConfigEntryKind::Folder
+                                }
+                            },
+                            children: entry.children.into_iter().map(map_entry).collect(),
+                        }
+                    }
+
+                    let services = self.services.clone();
+                    let events = self.events.clone();
+                    let request_id = request_id.clone();
+                    let rev = self.rev;
+                    let path = path.clone();
+                    tokio::spawn(async move {
+                        let path_for_task = path.clone();
+                        let result = tokio::task::spawn_blocking(move || {
+                            services.claude_config_list_dir(path_for_task)
+                        })
+                        .await
+                        .ok()
+                        .unwrap_or_else(|| {
+                            Err("failed to join claude config list dir task".to_owned())
+                        });
+
+                        match result {
+                            Ok(entries) => {
+                                let entries = entries.into_iter().map(map_entry).collect();
+                                let _ = events.send(WsServerMessage::Event {
+                                    rev,
+                                    event: Box::new(
+                                        luban_api::ServerEvent::ClaudeConfigListDirReady {
+                                            request_id,
+                                            path,
+                                            entries,
+                                        },
+                                    ),
+                                });
+                            }
+                            Err(message) => {
+                                let _ = events.send(WsServerMessage::Error {
+                                    request_id: Some(request_id),
+                                    message,
+                                });
+                            }
+                        }
+                    });
+
+                    let _ = reply.send(Ok(self.rev));
+                    return;
+                }
+
+                if let luban_api::ClientAction::ClaudeConfigReadFile { path } = &action {
+                    let services = self.services.clone();
+                    let events = self.events.clone();
+                    let request_id = request_id.clone();
+                    let rev = self.rev;
+                    let path = path.clone();
+                    tokio::spawn(async move {
+                        let path_for_task = path.clone();
+                        let result = tokio::task::spawn_blocking(move || {
+                            services.claude_config_read_file(path_for_task)
+                        })
+                        .await
+                        .ok()
+                        .unwrap_or_else(|| {
+                            Err("failed to join claude config read task".to_owned())
+                        });
+
+                        match result {
+                            Ok(contents) => {
+                                let _ = events.send(WsServerMessage::Event {
+                                    rev,
+                                    event: Box::new(
+                                        luban_api::ServerEvent::ClaudeConfigFileReady {
+                                            request_id,
+                                            path,
+                                            contents,
+                                        },
+                                    ),
+                                });
+                            }
+                            Err(message) => {
+                                let _ = events.send(WsServerMessage::Error {
+                                    request_id: Some(request_id),
+                                    message,
+                                });
+                            }
+                        }
+                    });
+
+                    let _ = reply.send(Ok(self.rev));
+                    return;
+                }
+
+                if let luban_api::ClientAction::ClaudeConfigWriteFile { path, contents } = &action {
+                    let services = self.services.clone();
+                    let events = self.events.clone();
+                    let request_id = request_id.clone();
+                    let rev = self.rev;
+                    let path = path.clone();
+                    let contents = contents.clone();
+                    tokio::spawn(async move {
+                        let path_for_task = path.clone();
+                        let result = tokio::task::spawn_blocking(move || {
+                            services.claude_config_write_file(path_for_task, contents)
+                        })
+                        .await
+                        .ok()
+                        .unwrap_or_else(|| {
+                            Err("failed to join claude config write task".to_owned())
+                        });
+
+                        match result {
+                            Ok(()) => {
+                                let _ = events.send(WsServerMessage::Event {
+                                    rev,
+                                    event: Box::new(
+                                        luban_api::ServerEvent::ClaudeConfigFileSaved {
+                                            request_id,
+                                            path,
+                                        },
+                                    ),
+                                });
+                            }
+                            Err(message) => {
+                                let _ = events.send(WsServerMessage::Error {
+                                    request_id: Some(request_id),
+                                    message,
+                                });
+                            }
+                        }
+                    });
+
+                    let _ = reply.send(Ok(self.rev));
+                    return;
+                }
+
                 if let luban_api::ClientAction::OpenWorkspace { workspace_id } = &action {
                     self.maybe_refresh_pull_request(WorkspaceId::from_u64(workspace_id.0));
                 }
@@ -1368,9 +1604,10 @@ impl Engine {
                         })
                         .await;
                         let runner = runner.map(map_api_agent_runner_kind);
-                        let amp_mode = match runner {
-                            Some(luban_domain::AgentRunnerKind::Codex) => None,
-                            _ => amp_mode.clone(),
+                        let amp_mode = if runner == Some(luban_domain::AgentRunnerKind::Amp) {
+                            amp_mode.clone()
+                        } else {
+                            None
                         };
                         self.process_action_queue(Action::SendAgentMessage {
                             workspace_id: wid,
@@ -2926,6 +3163,7 @@ impl Engine {
                 default_runner: Some(match self.state.agent_default_runner() {
                     luban_domain::AgentRunnerKind::Codex => luban_api::AgentRunnerKind::Codex,
                     luban_domain::AgentRunnerKind::Amp => luban_api::AgentRunnerKind::Amp,
+                    luban_domain::AgentRunnerKind::Claude => luban_api::AgentRunnerKind::Claude,
                 }),
                 amp_mode: Some(self.state.agent_amp_mode().to_owned()),
             },
@@ -3930,6 +4168,7 @@ fn map_client_action(action: luban_api::ClientAction) -> Option<Action> {
                 runner: match runner {
                     luban_api::AgentRunnerKind::Codex => luban_domain::AgentRunnerKind::Codex,
                     luban_api::AgentRunnerKind::Amp => luban_domain::AgentRunnerKind::Amp,
+                    luban_api::AgentRunnerKind::Claude => luban_domain::AgentRunnerKind::Claude,
                 },
             })
         }
@@ -3972,7 +4211,12 @@ fn map_client_action(action: luban_api::ClientAction) -> Option<Action> {
         | luban_api::ClientAction::AmpConfigTree
         | luban_api::ClientAction::AmpConfigListDir { .. }
         | luban_api::ClientAction::AmpConfigReadFile { .. }
-        | luban_api::ClientAction::AmpConfigWriteFile { .. } => None,
+        | luban_api::ClientAction::AmpConfigWriteFile { .. }
+        | luban_api::ClientAction::ClaudeCheck
+        | luban_api::ClientAction::ClaudeConfigTree
+        | luban_api::ClientAction::ClaudeConfigListDir { .. }
+        | luban_api::ClientAction::ClaudeConfigReadFile { .. }
+        | luban_api::ClientAction::ClaudeConfigWriteFile { .. } => None,
     }
 }
 
@@ -4013,6 +4257,7 @@ fn map_api_agent_runner_kind(kind: luban_api::AgentRunnerKind) -> luban_domain::
     match kind {
         luban_api::AgentRunnerKind::Codex => luban_domain::AgentRunnerKind::Codex,
         luban_api::AgentRunnerKind::Amp => luban_domain::AgentRunnerKind::Amp,
+        luban_api::AgentRunnerKind::Claude => luban_domain::AgentRunnerKind::Claude,
     }
 }
 

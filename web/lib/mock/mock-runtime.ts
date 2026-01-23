@@ -7,6 +7,7 @@ import type {
   AttachmentKind,
   AttachmentRef,
   ClientAction,
+  ClaudeConfigEntrySnapshot,
   CodexConfigEntrySnapshot,
   CodexCustomPromptSnapshot,
   ContextItemSnapshot,
@@ -50,6 +51,10 @@ type MockRuntimeState = {
   }
   ampConfig: {
     tree: AmpConfigEntrySnapshot[]
+    files: Map<string, string>
+  }
+  claudeConfig: {
+    tree: ClaudeConfigEntrySnapshot[]
     files: Map<string, string>
   }
   nextContextId: number
@@ -138,6 +143,7 @@ function initRuntime(): MockRuntimeState {
 
   const codexConfigFiles = new Map<string, string>(Object.entries(fixtures.codexConfig.files))
   const ampConfigFiles = new Map<string, string>(Object.entries(fixtures.ampConfig.files))
+  const claudeConfigFiles = new Map<string, string>(Object.entries(fixtures.claudeConfig.files))
 
   return {
     rev: fixtures.app.rev,
@@ -152,6 +158,7 @@ function initRuntime(): MockRuntimeState {
     mentionIndex: clone(fixtures.mentionIndex),
     codexConfig: { tree: clone(fixtures.codexConfig.tree), files: codexConfigFiles },
     ampConfig: { tree: clone(fixtures.ampConfig.tree), files: ampConfigFiles },
+    claudeConfig: { tree: clone(fixtures.claudeConfig.tree), files: claudeConfigFiles },
     nextContextId,
     nextThreadId,
     pendingAgentTimersByKey: new Map(),
@@ -803,7 +810,28 @@ export function mockDispatchAction(args: {
     return
   }
 
-  if (a.type === "pick_project_path" || a.type === "task_preview" || a.type === "task_execute" || a.type === "feedback_submit" || a.type === "codex_check" || a.type === "codex_config_tree" || a.type === "codex_config_list_dir" || a.type === "codex_config_read_file" || a.type === "codex_config_write_file" || a.type === "amp_check" || a.type === "amp_config_tree" || a.type === "amp_config_list_dir" || a.type === "amp_config_read_file" || a.type === "amp_config_write_file" || a.type === "add_project_and_open") {
+  if (
+    a.type === "pick_project_path" ||
+    a.type === "task_preview" ||
+    a.type === "task_execute" ||
+    a.type === "feedback_submit" ||
+    a.type === "codex_check" ||
+    a.type === "codex_config_tree" ||
+    a.type === "codex_config_list_dir" ||
+    a.type === "codex_config_read_file" ||
+    a.type === "codex_config_write_file" ||
+    a.type === "amp_check" ||
+    a.type === "amp_config_tree" ||
+    a.type === "amp_config_list_dir" ||
+    a.type === "amp_config_read_file" ||
+    a.type === "amp_config_write_file" ||
+    a.type === "claude_check" ||
+    a.type === "claude_config_tree" ||
+    a.type === "claude_config_list_dir" ||
+    a.type === "claude_config_read_file" ||
+    a.type === "claude_config_write_file" ||
+    a.type === "add_project_and_open"
+  ) {
     args.onEvent({ type: "toast", message: `Mock: request-only action used as sendAction: ${a.type}` })
     return
   }
@@ -828,6 +856,20 @@ function listCodexDir(tree: CodexConfigEntrySnapshot[], prefix: string): CodexCo
 }
 
 function listAmpDir(tree: AmpConfigEntrySnapshot[], prefix: string): AmpConfigEntrySnapshot[] {
+  const normalized = prefix.replace(/^\/+/, "").replace(/\/+$/, "")
+  if (normalized.length === 0) return tree
+
+  const parts = normalized.split("/").filter(Boolean)
+  let cursor = tree
+  for (const part of parts) {
+    const next = cursor.find((e) => e.name === part || e.path === part)
+    if (!next || next.kind !== "folder") return []
+    cursor = next.children ?? []
+  }
+  return cursor
+}
+
+function listClaudeDir(tree: ClaudeConfigEntrySnapshot[], prefix: string): ClaudeConfigEntrySnapshot[] {
   const normalized = prefix.replace(/^\/+/, "").replace(/\/+$/, "")
   if (normalized.length === 0) return tree
 
@@ -993,6 +1035,30 @@ export async function mockRequest<T>(action: ClientAction): Promise<T> {
 
   if (action.type === "amp_config_write_file") {
     state.ampConfig.files.set(action.path, action.contents)
+    return null as unknown as T
+  }
+
+  if (action.type === "claude_check") {
+    return { ok: true, message: "Mock check ok" } as T
+  }
+
+  if (action.type === "claude_config_tree") {
+    return clone(state.claudeConfig.tree) as T
+  }
+
+  if (action.type === "claude_config_list_dir") {
+    const entries = listClaudeDir(state.claudeConfig.tree, action.path)
+    return { path: action.path, entries: clone(entries) } as unknown as T
+  }
+
+  if (action.type === "claude_config_read_file") {
+    const value = state.claudeConfig.files.get(action.path)
+    if (value == null) throw new Error(`mock: file not found: ${action.path}`)
+    return value as unknown as T
+  }
+
+  if (action.type === "claude_config_write_file") {
+    state.claudeConfig.files.set(action.path, action.contents)
     return null as unknown as T
   }
 

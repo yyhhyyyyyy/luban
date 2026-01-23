@@ -198,6 +198,20 @@ pub struct AmpConfigEntry {
     pub children: Vec<AmpConfigEntry>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ClaudeConfigEntryKind {
+    File,
+    Folder,
+}
+
+#[derive(Clone, Debug)]
+pub struct ClaudeConfigEntry {
+    pub path: String,
+    pub name: String,
+    pub kind: ClaudeConfigEntryKind,
+    pub children: Vec<ClaudeConfigEntry>,
+}
+
 pub trait ProjectWorkspaceService: Send + Sync {
     fn load_app_state(&self) -> Result<PersistedAppState, String>;
 
@@ -445,6 +459,26 @@ pub trait ProjectWorkspaceService: Send + Sync {
     }
 
     fn amp_config_write_file(&self, _path: String, _contents: String) -> Result<(), String> {
+        Err("unimplemented".to_owned())
+    }
+
+    fn claude_check(&self) -> Result<(), String> {
+        Err("unimplemented".to_owned())
+    }
+
+    fn claude_config_tree(&self) -> Result<Vec<ClaudeConfigEntry>, String> {
+        Err("unimplemented".to_owned())
+    }
+
+    fn claude_config_list_dir(&self, _path: String) -> Result<Vec<ClaudeConfigEntry>, String> {
+        Err("unimplemented".to_owned())
+    }
+
+    fn claude_config_read_file(&self, _path: String) -> Result<String, String> {
+        Err("unimplemented".to_owned())
+    }
+
+    fn claude_config_write_file(&self, _path: String, _contents: String) -> Result<(), String> {
         Err("unimplemented".to_owned())
     }
 

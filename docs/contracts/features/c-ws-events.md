@@ -40,6 +40,10 @@ See `crates/luban_api`:
 
 These enums are part of the wire surface. Adding/removing variants must update this contract.
 
+- `AgentRunnerKind`:
+  - `codex`
+  - `amp`
+  - `claude`
 - `SystemTaskKind`:
   - `infer-type`
   - `rename-branch`
@@ -55,6 +59,7 @@ The following actions expose a filesystem-backed config tree to the UI:
 
 - `CodexConfigTree`, `CodexConfigListDir`, `CodexConfigReadFile`, `CodexConfigWriteFile`
 - `AmpConfigTree`, `AmpConfigListDir`, `AmpConfigReadFile`, `AmpConfigWriteFile`
+- `ClaudeConfigTree`, `ClaudeConfigListDir`, `ClaudeConfigReadFile`, `ClaudeConfigWriteFile`
 
 Rules:
 
@@ -120,6 +125,11 @@ update this section.
 - `AmpConfigListDir`
 - `AmpConfigReadFile`
 - `AmpConfigWriteFile`
+- `ClaudeCheck`
+- `ClaudeConfigTree`
+- `ClaudeConfigListDir`
+- `ClaudeConfigReadFile`
+- `ClaudeConfigWriteFile`
 
 ## Event inventory (tracked)
 
@@ -144,6 +154,11 @@ All `ServerEvent` variants are part of this contract surface:
 - `AmpConfigListDirReady`
 - `AmpConfigFileReady`
 - `AmpConfigFileSaved`
+- `ClaudeCheckReady`
+- `ClaudeConfigTreeReady`
+- `ClaudeConfigListDirReady`
+- `ClaudeConfigFileReady`
+- `ClaudeConfigFileSaved`
 
 ## Request/response style events
 
@@ -165,3 +180,8 @@ The web UI treats some `ServerEvent` variants as request/response completions ke
 - `AmpConfigListDirReady`
 - `AmpConfigFileReady`
 - `AmpConfigFileSaved`
+- `ClaudeCheckReady`
+- `ClaudeConfigTreeReady`
+- `ClaudeConfigListDirReady`
+- `ClaudeConfigFileReady`
+- `ClaudeConfigFileSaved`

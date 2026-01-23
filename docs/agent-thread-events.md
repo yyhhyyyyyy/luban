@@ -81,10 +81,11 @@ Implemented:
 
 Environment variables (overrides):
 
-- `LUBAN_AGENT_RUNNER`: `codex` (default) or `amp`.
+- `LUBAN_AGENT_RUNNER`: `codex` (default), `amp`, or `claude`.
 - `LUBAN_AMP_BIN`: optional absolute path to the `amp` executable (defaults to `amp` on `PATH`).
 - `LUBAN_AMP_MODE`: optional Amp mode value passed via `--mode` (overrides all other sources).
 - `LUBAN_AMP_ROOT`: optional override for the Amp config root directory.
+- `LUBAN_CLAUDE_BIN`: optional absolute path to the `claude` executable (defaults to `claude` on `PATH`).
 
 Known limitations:
 

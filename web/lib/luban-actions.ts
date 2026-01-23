@@ -4,6 +4,7 @@ import type {
   AgentRunConfigSnapshot,
   AgentRunnerKind,
   AmpConfigEntrySnapshot,
+  ClaudeConfigEntrySnapshot,
   AppearanceFontsSnapshot,
   AppearanceTheme,
   AttachmentRef,
@@ -59,6 +60,11 @@ export type LubanActions = {
   listAmpConfigDir: (path: string) => Promise<{ path: string; entries: AmpConfigEntrySnapshot[] }>
   readAmpConfigFile: (path: string) => Promise<string>
   writeAmpConfigFile: (path: string, contents: string) => Promise<void>
+  checkClaude: () => Promise<{ ok: boolean; message: string | null }>
+  getClaudeConfigTree: () => Promise<ClaudeConfigEntrySnapshot[]>
+  listClaudeConfigDir: (path: string) => Promise<{ path: string; entries: ClaudeConfigEntrySnapshot[] }>
+  readClaudeConfigFile: (path: string) => Promise<string>
+  writeClaudeConfigFile: (path: string, contents: string) => Promise<void>
 
   previewTask: (input: string) => Promise<TaskDraft>
   executeTask: (draft: TaskDraft, mode: TaskExecuteMode) => Promise<TaskExecuteResult>
@@ -309,6 +315,29 @@ export function createLubanActions(args: {
 
   async function writeAmpConfigFile(path: string, contents: string): Promise<void> {
     await args.request<null>({ type: "amp_config_write_file", path, contents })
+  }
+
+  function checkClaude(): Promise<{ ok: boolean; message: string | null }> {
+    return args.request<{ ok: boolean; message: string | null }>({ type: "claude_check" })
+  }
+
+  function getClaudeConfigTree(): Promise<ClaudeConfigEntrySnapshot[]> {
+    return args.request<ClaudeConfigEntrySnapshot[]>({ type: "claude_config_tree" })
+  }
+
+  function listClaudeConfigDir(path: string): Promise<{ path: string; entries: ClaudeConfigEntrySnapshot[] }> {
+    return args.request<{ path: string; entries: ClaudeConfigEntrySnapshot[] }>({
+      type: "claude_config_list_dir",
+      path,
+    })
+  }
+
+  function readClaudeConfigFile(path: string): Promise<string> {
+    return args.request<string>({ type: "claude_config_read_file", path })
+  }
+
+  async function writeClaudeConfigFile(path: string, contents: string): Promise<void> {
+    await args.request<null>({ type: "claude_config_write_file", path, contents })
   }
 
   function previewTask(input: string): Promise<TaskDraft> {
@@ -755,6 +784,11 @@ export function createLubanActions(args: {
     listAmpConfigDir,
     readAmpConfigFile,
     writeAmpConfigFile,
+    checkClaude,
+    getClaudeConfigTree,
+    listClaudeConfigDir,
+    readClaudeConfigFile,
+    writeClaudeConfigFile,
     previewTask,
     executeTask,
     submitFeedback,

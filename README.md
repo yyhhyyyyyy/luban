@@ -133,12 +133,16 @@ Common environment variables:
 
 - `LUBAN_SERVER_ADDR`: override bind addr/port (default: `127.0.0.1:8421`)
 - `LUBAN_CODEX_BIN`: absolute path to the `codex` CLI binary
+- `LUBAN_CLAUDE_BIN`: absolute path to the `claude` (Claude Code) CLI binary
+- `LUBAN_CLAUDE_ROOT`: override Claude config root (default: `$HOME/.claude`)
+- `LUBAN_AGENT_RUNNER`: agent runner override (`codex` / `amp` / `claude`)
 
 ## Troubleshooting
 
 - `pnpm not found`: install `pnpm` and rerun `just web ...`
 - Port already in use: set `LUBAN_SERVER_ADDR=127.0.0.1:8422` (or any free port)
 - `codex` not found: install Codex CLI or set `LUBAN_CODEX_BIN`
+- `claude` not found: install Claude Code or set `LUBAN_CLAUDE_BIN`
 
 ## More docs
 

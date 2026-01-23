@@ -3,7 +3,7 @@
 import type { AgentRunnerKind, ThinkingEffort } from "@/lib/luban-api"
 
 import { useMemo, useState } from "react"
-import { ChevronDown, Settings, Zap } from "lucide-react"
+import { ChevronDown, Settings, Sparkles, Zap } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { AGENT_MODELS, supportedThinkingEffortsForModel } from "@/lib/agent-settings"
@@ -260,6 +260,7 @@ export function AgentSelector({
   const resolvedDefaultRunner: AgentRunnerKind = defaultRunner ?? "codex"
   const resolvedRunner: AgentRunnerKind = runnerOverride ?? resolvedDefaultRunner
   const isAmp = resolvedRunner === "amp"
+  const isClaude = resolvedRunner === "claude"
   const resolvedDefaultAmpMode: AmpModeOverride = defaultAmpMode === "rush" ? "rush" : defaultAmpMode === "smart" ? "smart" : null
 
   const displayName = useMemo(() => {
@@ -268,13 +269,20 @@ export function AgentSelector({
       if (ampModeOverride === "smart") return "Amp · Smart"
       return "Amp"
     }
+    if (isClaude) return "Claude"
     const model = agentModelLabel(modelId)
     const effort = thinkingEffortLabel(thinkingEffort)
     if (model === "Model" || effort === "Effort") return "Codex"
     return `${model} · ${effort}`
-  }, [ampModeOverride, isAmp, modelId, thinkingEffort])
+  }, [ampModeOverride, isAmp, isClaude, modelId, thinkingEffort])
 
-  const icon = isAmp ? <Zap className="w-3.5 h-3.5" /> : <OpenAIIcon className="w-3.5 h-3.5" />
+  const icon = isAmp ? (
+    <Zap className="w-3.5 h-3.5" />
+  ) : isClaude ? (
+    <Sparkles className="w-3.5 h-3.5" />
+  ) : (
+    <OpenAIIcon className="w-3.5 h-3.5" />
+  )
 
   const [open, setOpen] = useState(false)
   const [tempModelId, setTempModelId] = useState<string | null>(null)
@@ -313,7 +321,8 @@ export function AgentSelector({
     }
   }
 
-  const noAgentsEnabled = !codexEnabled && !ampEnabled
+  const claudeEnabled = true
+  const noAgentsEnabled = !codexEnabled && !ampEnabled && !claudeEnabled
 
   if (noAgentsEnabled) {
     return (
@@ -378,9 +387,17 @@ export function AgentSelector({
                 </div>
 
                 {([
-                  { id: "codex" as const, label: "Codex", icon: <OpenAIIcon className="w-3.5 h-3.5 flex-shrink-0" />, enabled: codexEnabled },
+                  {
+                    id: "codex" as const,
+                    label: "Codex",
+                    icon: <OpenAIIcon className="w-3.5 h-3.5 flex-shrink-0" />,
+                    enabled: codexEnabled,
+                  },
                   { id: "amp" as const, label: "Amp", icon: <Zap className="w-3.5 h-3.5 flex-shrink-0" />, enabled: ampEnabled },
-                ] as const).filter((opt) => opt.enabled).map((opt) => {
+                  { id: "claude" as const, label: "Claude", icon: <Sparkles className="w-3.5 h-3.5 flex-shrink-0" />, enabled: true },
+                ] as const)
+                  .filter((opt) => opt.enabled)
+                  .map((opt) => {
                   const selected = opt.id === tempRunner
                   const isDefault = opt.id === resolvedDefaultRunner
                   return (
@@ -512,7 +529,7 @@ export function AgentSelector({
                     })}
                   </div>
                 </>
-              ) : (
+              ) : tempRunner === "amp" ? (
                 <div className="p-1">
                   <div className="px-2.5 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
                     Mode
@@ -567,6 +584,8 @@ export function AgentSelector({
                     )
                   })}
                 </div>
+              ) : (
+                <div className="p-3 text-xs text-muted-foreground whitespace-nowrap">Uses Claude Code local settings.</div>
               )}
             </div>
           </div>

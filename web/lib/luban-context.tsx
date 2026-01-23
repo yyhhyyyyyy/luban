@@ -13,6 +13,7 @@ import type {
   AttachmentRef,
   AgentRunnerKind,
   AgentRunConfigSnapshot,
+  ClaudeConfigEntrySnapshot,
   CodexConfigEntrySnapshot,
   ConversationSnapshot,
   FeedbackSubmitAction,
@@ -147,6 +148,11 @@ type LubanContextValue = {
   listAmpConfigDir: (path: string) => Promise<{ path: string; entries: AmpConfigEntrySnapshot[] }>
   readAmpConfigFile: (path: string) => Promise<string>
   writeAmpConfigFile: (path: string, contents: string) => Promise<void>
+  checkClaude: () => Promise<{ ok: boolean; message: string | null }>
+  getClaudeConfigTree: () => Promise<ClaudeConfigEntrySnapshot[]>
+  listClaudeConfigDir: (path: string) => Promise<{ path: string; entries: ClaudeConfigEntrySnapshot[] }>
+  readClaudeConfigFile: (path: string) => Promise<string>
+  writeClaudeConfigFile: (path: string, contents: string) => Promise<void>
 }
 
 const LubanContext = createContext<LubanContextValue | null>(null)
@@ -325,6 +331,11 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     listAmpConfigDir: actions.listAmpConfigDir,
     readAmpConfigFile: actions.readAmpConfigFile,
     writeAmpConfigFile: actions.writeAmpConfigFile,
+    checkClaude: actions.checkClaude,
+    getClaudeConfigTree: actions.getClaudeConfigTree,
+    listClaudeConfigDir: actions.listClaudeConfigDir,
+    readClaudeConfigFile: actions.readClaudeConfigFile,
+    writeClaudeConfigFile: actions.writeClaudeConfigFile,
   }
 
   return <LubanContext.Provider value={value}>{children}</LubanContext.Provider>

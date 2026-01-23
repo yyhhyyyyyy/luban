@@ -2,10 +2,11 @@ use anyhow::{Context as _, anyhow};
 use bip39::Language;
 use luban_domain::paths;
 use luban_domain::{
-    AgentThreadEvent, AttachmentKind, AttachmentRef, CodexConfigEntry, CodexConfigEntryKind,
-    CodexThreadEvent, CodexThreadItem, ContextImage, ConversationEntry, ConversationSnapshot,
-    CreatedWorkspace, OpenTarget, PersistedAppState, ProjectWorkspaceService, PullRequestCiState,
-    PullRequestInfo, PullRequestState, RunAgentTurnRequest, SystemTaskKind, TaskIntentKind,
+    AgentThreadEvent, AttachmentKind, AttachmentRef, ClaudeConfigEntry, ClaudeConfigEntryKind,
+    CodexConfigEntry, CodexConfigEntryKind, CodexThreadEvent, CodexThreadItem, ContextImage,
+    ConversationEntry, ConversationSnapshot, CreatedWorkspace, OpenTarget, PersistedAppState,
+    ProjectWorkspaceService, PullRequestCiState, PullRequestInfo, PullRequestState,
+    RunAgentTurnRequest, SystemTaskKind, TaskIntentKind,
 };
 use rand::{Rng as _, rngs::OsRng};
 use std::{
@@ -20,6 +21,7 @@ use std::{
 use crate::sqlite_store::{SqliteStore, SqliteStoreOptions};
 
 mod amp_cli;
+mod claude_cli;
 mod codex_cli;
 mod context_blobs;
 mod conversations;
@@ -27,6 +29,7 @@ mod feedback;
 mod git;
 mod task;
 use amp_cli::AmpTurnParams;
+use claude_cli::ClaudeTurnParams;
 use codex_cli::CodexTurnParams;
 
 #[derive(Clone, Debug)]
@@ -315,6 +318,24 @@ fn resolve_amp_root() -> anyhow::Result<PathBuf> {
     Ok(PathBuf::from(home).join(".config").join("amp"))
 }
 
+fn resolve_claude_root() -> anyhow::Result<PathBuf> {
+    if let Some(root) = std::env::var_os(paths::LUBAN_CLAUDE_ROOT_ENV) {
+        let root = root.to_string_lossy();
+        let trimmed = root.trim();
+        if trimmed.is_empty() {
+            return Err(anyhow!("{} is set but empty", paths::LUBAN_CLAUDE_ROOT_ENV));
+        }
+        return Ok(PathBuf::from(trimmed));
+    }
+
+    if cfg!(test) {
+        return Ok(PathBuf::from(".claude"));
+    }
+
+    let home = std::env::var_os("HOME").ok_or_else(|| anyhow!("HOME is not set"))?;
+    Ok(PathBuf::from(home).join(".claude"))
+}
+
 fn parse_amp_mode_from_config_text(contents: &str) -> Option<String> {
     for raw_line in contents.lines() {
         let line = raw_line.trim();
@@ -495,6 +516,15 @@ impl GitWorkspaceService {
         on_event: impl FnMut(CodexThreadEvent) -> anyhow::Result<()>,
     ) -> anyhow::Result<()> {
         amp_cli::run_amp_turn_streamed_via_cli(params, cancel, on_event)
+    }
+
+    fn run_claude_turn_streamed_via_cli(
+        &self,
+        params: ClaudeTurnParams,
+        cancel: Arc<AtomicBool>,
+        on_event: impl FnMut(CodexThreadEvent) -> anyhow::Result<()>,
+    ) -> anyhow::Result<()> {
+        claude_cli::run_claude_turn_streamed_via_cli(params, cancel, on_event)
     }
 }
 
@@ -1328,6 +1358,166 @@ impl ProjectWorkspaceService for GitWorkspaceService {
                         worktree_path: worktree_path.clone(),
                         prompt: amp_prompt,
                         mode: resolved_amp_mode.clone(),
+                    },
+                    cancel.clone(),
+                    |event| {
+                        let mut events_to_process = Vec::with_capacity(1);
+                        match &event {
+                            CodexThreadEvent::Error { message }
+                                if is_transient_reconnect_notice(message) =>
+                            {
+                                transient_error_seq = transient_error_seq.saturating_add(1);
+                                events_to_process.push(CodexThreadEvent::ItemCompleted {
+                                    item: CodexThreadItem::Error {
+                                        id: format!("transient-error-{transient_error_seq}"),
+                                        message: message.clone(),
+                                    },
+                                });
+                            }
+                            _ => events_to_process.push(event),
+                        }
+
+                        for event in events_to_process {
+                            let event = qualify_event(&turn_scope_id, event);
+                            on_event(event.clone());
+
+                            if let CodexThreadEvent::ItemStarted { item }
+                            | CodexThreadEvent::ItemUpdated { item }
+                            | CodexThreadEvent::ItemCompleted { item } = &event
+                                && matches!(item, CodexThreadItem::AgentMessage { .. })
+                            {
+                                saw_agent_message = true;
+                            }
+
+                            match &event {
+                                CodexThreadEvent::ThreadStarted { thread_id } => {
+                                    self.sqlite.set_conversation_thread_id(
+                                        project_slug.clone(),
+                                        workspace_name.clone(),
+                                        thread_local_id,
+                                        thread_id.clone(),
+                                    )?;
+                                }
+                                CodexThreadEvent::ItemCompleted { item } => {
+                                    let id = codex_item_id(item).to_owned();
+                                    if appended_item_ids.insert(id) {
+                                        self.sqlite.append_conversation_entries(
+                                            project_slug.clone(),
+                                            workspace_name.clone(),
+                                            thread_local_id,
+                                            vec![ConversationEntry::CodexItem {
+                                                item: Box::new(item.clone()),
+                                            }],
+                                        )?;
+                                    }
+                                }
+                                CodexThreadEvent::TurnCompleted { usage } => {
+                                    let _ = usage;
+                                    if duration_appended_for_events
+                                        .compare_exchange(
+                                            false,
+                                            true,
+                                            Ordering::SeqCst,
+                                            Ordering::SeqCst,
+                                        )
+                                        .is_ok()
+                                    {
+                                        let duration_ms =
+                                            turn_started_at.elapsed().as_millis() as u64;
+                                        self.sqlite.append_conversation_entries(
+                                            project_slug.clone(),
+                                            workspace_name.clone(),
+                                            thread_local_id,
+                                            vec![ConversationEntry::TurnDuration { duration_ms }],
+                                        )?;
+                                        on_event(CodexThreadEvent::TurnDuration { duration_ms });
+                                    }
+                                }
+                                CodexThreadEvent::TurnFailed { error } => {
+                                    if turn_error.is_none() {
+                                        turn_error = Some(error.message.clone());
+                                    }
+                                    self.sqlite.append_conversation_entries(
+                                        project_slug.clone(),
+                                        workspace_name.clone(),
+                                        thread_local_id,
+                                        vec![ConversationEntry::TurnError {
+                                            message: error.message.clone(),
+                                        }],
+                                    )?;
+                                    if duration_appended_for_events
+                                        .compare_exchange(
+                                            false,
+                                            true,
+                                            Ordering::SeqCst,
+                                            Ordering::SeqCst,
+                                        )
+                                        .is_ok()
+                                    {
+                                        let duration_ms =
+                                            turn_started_at.elapsed().as_millis() as u64;
+                                        self.sqlite.append_conversation_entries(
+                                            project_slug.clone(),
+                                            workspace_name.clone(),
+                                            thread_local_id,
+                                            vec![ConversationEntry::TurnDuration { duration_ms }],
+                                        )?;
+                                        on_event(CodexThreadEvent::TurnDuration { duration_ms });
+                                    }
+                                }
+                                CodexThreadEvent::Error { message } => {
+                                    if turn_error.is_none() {
+                                        turn_error = Some(message.clone());
+                                    }
+                                    self.sqlite.append_conversation_entries(
+                                        project_slug.clone(),
+                                        workspace_name.clone(),
+                                        thread_local_id,
+                                        vec![ConversationEntry::TurnError {
+                                            message: message.clone(),
+                                        }],
+                                    )?;
+                                    if duration_appended_for_events
+                                        .compare_exchange(
+                                            false,
+                                            true,
+                                            Ordering::SeqCst,
+                                            Ordering::SeqCst,
+                                        )
+                                        .is_ok()
+                                    {
+                                        let duration_ms =
+                                            turn_started_at.elapsed().as_millis() as u64;
+                                        self.sqlite.append_conversation_entries(
+                                            project_slug.clone(),
+                                            workspace_name.clone(),
+                                            thread_local_id,
+                                            vec![ConversationEntry::TurnDuration { duration_ms }],
+                                        )?;
+                                        on_event(CodexThreadEvent::TurnDuration { duration_ms });
+                                    }
+                                }
+                                CodexThreadEvent::TurnStarted
+                                | CodexThreadEvent::TurnDuration { .. }
+                                | CodexThreadEvent::ItemStarted { .. }
+                                | CodexThreadEvent::ItemUpdated { .. } => {}
+                            }
+                        }
+
+                        Ok(())
+                    },
+                )
+            } else if runner == luban_domain::AgentRunnerKind::Claude {
+                self.run_claude_turn_streamed_via_cli(
+                    ClaudeTurnParams {
+                        thread_id: resolved_thread_id,
+                        worktree_path: worktree_path.clone(),
+                        prompt: codex_prompt.clone(),
+                        add_dirs: if prompt_attachments.is_empty() {
+                            Vec::new()
+                        } else {
+                            vec![blobs_dir.clone()]
+                        },
                     },
                     cancel.clone(),
                     |event| {
@@ -2757,6 +2947,297 @@ impl ProjectWorkspaceService for GitWorkspaceService {
         result.map_err(|e| format!("{e:#}"))
     }
 
+    fn claude_check(&self) -> Result<(), String> {
+        let result: anyhow::Result<()> = (|| {
+            let claude = std::env::var_os(paths::LUBAN_CLAUDE_BIN_ENV)
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("claude"));
+            let output = Command::new(&claude)
+                .args(["--version"])
+                .output()
+                .with_context(|| format!("failed to spawn {}", claude.display()))?;
+
+            if output.status.success() {
+                return Ok(());
+            }
+
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+            if !stderr.is_empty() {
+                return Err(anyhow!("{stderr}"));
+            }
+            if !stdout.is_empty() {
+                return Err(anyhow!("{stdout}"));
+            }
+            Err(anyhow!("claude exited with status {}", output.status))
+        })();
+
+        result.map_err(|e| format!("{e:#}"))
+    }
+
+    fn claude_config_tree(&self) -> Result<Vec<ClaudeConfigEntry>, String> {
+        let result: anyhow::Result<Vec<ClaudeConfigEntry>> = (|| {
+            let root = resolve_claude_root()?;
+
+            if !root.exists() {
+                return Ok(Vec::new());
+            }
+
+            let meta = std::fs::metadata(&root).context("failed to stat claude config root")?;
+            if !meta.is_dir() {
+                return Err(anyhow!(
+                    "claude config root is not a directory: {}",
+                    root.display()
+                ));
+            }
+
+            fn rel_to_string(rel: &std::path::Path) -> String {
+                rel.to_string_lossy()
+                    .replace(std::path::MAIN_SEPARATOR, "/")
+            }
+
+            let mut entries = std::fs::read_dir(&root)
+                .with_context(|| format!("failed to read directory {}", root.display()))?
+                .filter_map(|entry| entry.ok())
+                .collect::<Vec<_>>();
+
+            entries.sort_by_key(|entry| entry.file_name());
+
+            let mut out = Vec::new();
+            for entry in entries {
+                let file_type = entry.file_type().context("failed to stat entry")?;
+
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.is_empty() {
+                    continue;
+                }
+
+                let rel_child = std::path::Path::new("").join(&name);
+                let path = rel_to_string(&rel_child);
+
+                let (is_dir, is_file) = if file_type.is_symlink() {
+                    match std::fs::metadata(entry.path()) {
+                        Ok(meta) => (meta.is_dir(), meta.is_file()),
+                        Err(_) => (false, true),
+                    }
+                } else {
+                    (file_type.is_dir(), file_type.is_file())
+                };
+
+                if is_dir {
+                    out.push(ClaudeConfigEntry {
+                        path,
+                        name,
+                        kind: ClaudeConfigEntryKind::Folder,
+                        children: Vec::new(),
+                    });
+                } else if is_file {
+                    out.push(ClaudeConfigEntry {
+                        path,
+                        name,
+                        kind: ClaudeConfigEntryKind::File,
+                        children: Vec::new(),
+                    });
+                }
+            }
+
+            out.sort_by(|a, b| match (a.kind, b.kind) {
+                (ClaudeConfigEntryKind::Folder, ClaudeConfigEntryKind::File) => {
+                    std::cmp::Ordering::Less
+                }
+                (ClaudeConfigEntryKind::File, ClaudeConfigEntryKind::Folder) => {
+                    std::cmp::Ordering::Greater
+                }
+                _ => a.name.cmp(&b.name),
+            });
+
+            Ok(out)
+        })();
+
+        result.map_err(|e| format!("{e:#}"))
+    }
+
+    fn claude_config_list_dir(&self, path: String) -> Result<Vec<ClaudeConfigEntry>, String> {
+        let result: anyhow::Result<Vec<ClaudeConfigEntry>> = (|| {
+            let root = resolve_claude_root()?;
+
+            if !root.exists() {
+                return Ok(Vec::new());
+            }
+
+            let rel = path.trim();
+            if rel.starts_with('/') {
+                return Err(anyhow!("path must be relative"));
+            }
+            if rel.contains('\\') {
+                return Err(anyhow!("invalid path separator"));
+            }
+
+            let mut rel_path = PathBuf::new();
+            for segment in rel.split('/') {
+                if segment.is_empty() {
+                    continue;
+                }
+                if segment == "." || segment == ".." {
+                    return Err(anyhow!("invalid path segment"));
+                }
+                rel_path.push(segment);
+            }
+
+            let abs = root.join(&rel_path);
+            let meta = std::fs::metadata(&abs)
+                .with_context(|| format!("failed to stat {}", abs.display()))?;
+            if !meta.is_dir() {
+                return Err(anyhow!("not a directory: {}", abs.display()));
+            }
+
+            fn rel_to_string(rel: &std::path::Path) -> String {
+                rel.to_string_lossy()
+                    .replace(std::path::MAIN_SEPARATOR, "/")
+            }
+
+            let mut entries = std::fs::read_dir(&abs)
+                .with_context(|| format!("failed to read directory {}", abs.display()))?
+                .filter_map(|entry| entry.ok())
+                .collect::<Vec<_>>();
+
+            entries.sort_by_key(|entry| entry.file_name());
+
+            let mut out = Vec::new();
+            for entry in entries {
+                let file_type = entry.file_type().context("failed to stat entry")?;
+
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.is_empty() {
+                    continue;
+                }
+
+                let rel_child = rel_path.join(&name);
+                let path = rel_to_string(&rel_child);
+
+                let (is_dir, is_file) = if file_type.is_symlink() {
+                    match std::fs::metadata(entry.path()) {
+                        Ok(meta) => (meta.is_dir(), meta.is_file()),
+                        Err(_) => (false, true),
+                    }
+                } else {
+                    (file_type.is_dir(), file_type.is_file())
+                };
+
+                if is_dir {
+                    out.push(ClaudeConfigEntry {
+                        path,
+                        name,
+                        kind: ClaudeConfigEntryKind::Folder,
+                        children: Vec::new(),
+                    });
+                } else if is_file {
+                    out.push(ClaudeConfigEntry {
+                        path,
+                        name,
+                        kind: ClaudeConfigEntryKind::File,
+                        children: Vec::new(),
+                    });
+                }
+            }
+
+            out.sort_by(|a, b| match (a.kind, b.kind) {
+                (ClaudeConfigEntryKind::Folder, ClaudeConfigEntryKind::File) => {
+                    std::cmp::Ordering::Less
+                }
+                (ClaudeConfigEntryKind::File, ClaudeConfigEntryKind::Folder) => {
+                    std::cmp::Ordering::Greater
+                }
+                _ => a.name.cmp(&b.name),
+            });
+
+            Ok(out)
+        })();
+
+        result.map_err(|e| format!("{e:#}"))
+    }
+
+    fn claude_config_read_file(&self, path: String) -> Result<String, String> {
+        let result: anyhow::Result<String> = (|| {
+            let root = resolve_claude_root()?;
+
+            let rel = path.trim();
+            if rel.is_empty() {
+                return Err(anyhow!("path is empty"));
+            }
+            if rel.starts_with('/') {
+                return Err(anyhow!("path must be relative"));
+            }
+            if rel.contains('\\') {
+                return Err(anyhow!("invalid path separator"));
+            }
+
+            let mut rel_path = PathBuf::new();
+            for segment in rel.split('/') {
+                if segment.is_empty() || segment == "." || segment == ".." {
+                    return Err(anyhow!("invalid path segment"));
+                }
+                rel_path.push(segment);
+            }
+
+            let abs = root.join(rel_path);
+            let meta = std::fs::metadata(&abs)
+                .with_context(|| format!("failed to stat {}", abs.display()))?;
+            if !meta.is_file() {
+                return Err(anyhow!("not a file: {}", abs.display()));
+            }
+            if meta.len() > 2 * 1024 * 1024 {
+                return Err(anyhow!("file is too large to edit"));
+            }
+
+            let bytes =
+                std::fs::read(&abs).with_context(|| format!("failed to read {}", abs.display()))?;
+            let text = String::from_utf8(bytes).context("file is not valid UTF-8")?;
+            Ok(text)
+        })();
+
+        result.map_err(|e| format!("{e:#}"))
+    }
+
+    fn claude_config_write_file(&self, path: String, contents: String) -> Result<(), String> {
+        let result: anyhow::Result<()> = (|| {
+            let root = resolve_claude_root()?;
+
+            let rel = path.trim();
+            if rel.is_empty() {
+                return Err(anyhow!("path is empty"));
+            }
+            if rel.starts_with('/') {
+                return Err(anyhow!("path must be relative"));
+            }
+            if rel.contains('\\') {
+                return Err(anyhow!("invalid path separator"));
+            }
+
+            let mut rel_path = PathBuf::new();
+            for segment in rel.split('/') {
+                if segment.is_empty() || segment == "." || segment == ".." {
+                    return Err(anyhow!("invalid path segment"));
+                }
+                rel_path.push(segment);
+            }
+
+            let abs = root.join(rel_path);
+            let parent = abs
+                .parent()
+                .ok_or_else(|| anyhow!("invalid path"))?
+                .to_path_buf();
+            std::fs::create_dir_all(&parent)
+                .with_context(|| format!("failed to create directory {}", parent.display()))?;
+
+            std::fs::write(&abs, contents.as_bytes())
+                .with_context(|| format!("failed to write {}", abs.display()))?;
+            Ok(())
+        })();
+
+        result.map_err(|e| format!("{e:#}"))
+    }
+
     fn project_identity(&self, path: PathBuf) -> Result<luban_domain::ProjectIdentity, String> {
         let result: anyhow::Result<luban_domain::ProjectIdentity> = (|| {
             if !path.exists() {
@@ -3377,6 +3858,173 @@ mod tests {
         } else {
             unsafe {
                 std::env::remove_var(paths::LUBAN_AMP_ROOT_ENV);
+            }
+        }
+
+        drop(service);
+        let _ = std::fs::remove_dir_all(&base_dir);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn claude_config_tree_is_shallow_and_claude_config_list_dir_pages() {
+        let _guard = lock_env();
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be valid")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "luban-claude-config-tree-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&root).expect("temp dir should be created");
+
+        let cache_dir = root.join("cache");
+        std::fs::create_dir_all(&cache_dir).expect("cache dir should be created");
+        for i in 0..512 {
+            std::fs::write(cache_dir.join(format!("blob-{i}.bin")), b"x")
+                .expect("write cache file");
+        }
+
+        std::fs::write(
+            root.join("settings.json"),
+            "{ \"permissions\": { \"allow\": [] } }\n",
+        )
+        .expect("write settings.json");
+
+        let prev = std::env::var_os(paths::LUBAN_CLAUDE_ROOT_ENV);
+        unsafe {
+            std::env::set_var(paths::LUBAN_CLAUDE_ROOT_ENV, &root);
+        }
+
+        let base_dir =
+            std::env::temp_dir().join(format!("luban-services-{}-{}", std::process::id(), unique));
+        std::fs::create_dir_all(&base_dir).expect("luban root should exist");
+        let sqlite =
+            SqliteStore::new(paths::sqlite_path(&base_dir)).expect("sqlite init should work");
+        let service = GitWorkspaceService {
+            worktrees_root: paths::worktrees_root(&base_dir),
+            conversations_root: paths::conversations_root(&base_dir),
+            task_prompts_root: paths::task_prompts_root(&base_dir),
+            sqlite,
+            codex_executable_cache: Arc::new(OnceLock::new()),
+        };
+
+        let tree = ProjectWorkspaceService::claude_config_tree(&service)
+            .expect("claude_config_tree should succeed");
+
+        let entries = ProjectWorkspaceService::claude_config_list_dir(&service, "cache".to_owned())
+            .expect("claude_config_list_dir should succeed");
+        assert!(
+            entries.len() >= 512,
+            "expected list_dir to include all files (got {})",
+            entries.len()
+        );
+
+        if let Some(value) = prev {
+            unsafe {
+                std::env::set_var(paths::LUBAN_CLAUDE_ROOT_ENV, value);
+            }
+        } else {
+            unsafe {
+                std::env::remove_var(paths::LUBAN_CLAUDE_ROOT_ENV);
+            }
+        }
+
+        let mut paths = Vec::new();
+        fn collect(out: &mut Vec<String>, entries: &[ClaudeConfigEntry]) {
+            for entry in entries {
+                out.push(entry.path.clone());
+                collect(out, &entry.children);
+            }
+        }
+        collect(&mut paths, &tree);
+
+        assert!(
+            paths.iter().any(|p| p == "settings.json"),
+            "tree should include settings.json"
+        );
+        assert!(
+            paths.iter().any(|p| p == "cache"),
+            "tree should include cache directory (shallow listing)"
+        );
+
+        drop(service);
+        let _ = std::fs::remove_dir_all(&base_dir);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn claude_config_tree_includes_symlink_files() {
+        use std::os::unix::fs::symlink;
+
+        let _guard = lock_env();
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be valid")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "luban-claude-config-symlink-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir_all(&root).expect("temp dir should be created");
+
+        std::fs::write(root.join("settings-target.json"), "{ \"ok\": true }\n")
+            .expect("write target");
+        symlink("settings-target.json", root.join("settings.json"))
+            .expect("symlink should be created");
+
+        let prev = std::env::var_os(paths::LUBAN_CLAUDE_ROOT_ENV);
+        unsafe {
+            std::env::set_var(paths::LUBAN_CLAUDE_ROOT_ENV, &root);
+        }
+
+        let base_dir =
+            std::env::temp_dir().join(format!("luban-services-{}-{}", std::process::id(), unique));
+        std::fs::create_dir_all(&base_dir).expect("luban root should exist");
+        let sqlite =
+            SqliteStore::new(paths::sqlite_path(&base_dir)).expect("sqlite init should work");
+        let service = GitWorkspaceService {
+            worktrees_root: paths::worktrees_root(&base_dir),
+            conversations_root: paths::conversations_root(&base_dir),
+            task_prompts_root: paths::task_prompts_root(&base_dir),
+            sqlite,
+            codex_executable_cache: Arc::new(OnceLock::new()),
+        };
+
+        let tree = ProjectWorkspaceService::claude_config_tree(&service)
+            .expect("claude_config_tree should succeed");
+
+        let mut paths = Vec::new();
+        fn collect(out: &mut Vec<String>, entries: &[ClaudeConfigEntry]) {
+            for entry in entries {
+                out.push(entry.path.clone());
+                collect(out, &entry.children);
+            }
+        }
+        collect(&mut paths, &tree);
+        assert!(
+            paths.iter().any(|p| p == "settings.json"),
+            "tree should include settings.json symlink"
+        );
+
+        let contents =
+            ProjectWorkspaceService::claude_config_read_file(&service, "settings.json".to_owned())
+                .expect("read should succeed");
+        assert_eq!(contents, "{ \"ok\": true }\n");
+
+        if let Some(value) = prev {
+            unsafe {
+                std::env::set_var(paths::LUBAN_CLAUDE_ROOT_ENV, value);
+            }
+        } else {
+            unsafe {
+                std::env::remove_var(paths::LUBAN_CLAUDE_ROOT_ENV);
             }
         }
 

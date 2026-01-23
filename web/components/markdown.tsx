@@ -92,7 +92,7 @@ export function Markdown({
             }
 
             const first = Array.isArray(children) ? children[0] : children
-            if (isValidElement(first)) {
+            if (isValidElement<{ className?: string; children?: unknown }>(first)) {
               const childClassName = String(first.props?.className ?? "")
               if (childClassName.includes("language-mermaid")) {
                 const raw = String(first.props?.children ?? "")

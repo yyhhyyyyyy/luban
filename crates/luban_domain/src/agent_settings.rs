@@ -13,6 +13,7 @@ pub enum ThinkingEffort {
 pub enum AgentRunnerKind {
     Codex,
     Amp,
+    Claude,
 }
 
 impl AgentRunnerKind {
@@ -20,6 +21,7 @@ impl AgentRunnerKind {
         match self {
             AgentRunnerKind::Codex => "codex",
             AgentRunnerKind::Amp => "amp",
+            AgentRunnerKind::Claude => "claude",
         }
     }
 }
@@ -28,6 +30,7 @@ pub fn parse_agent_runner_kind(value: &str) -> Option<AgentRunnerKind> {
     match value.trim().to_ascii_lowercase().as_str() {
         "codex" => Some(AgentRunnerKind::Codex),
         "amp" => Some(AgentRunnerKind::Amp),
+        "claude" => Some(AgentRunnerKind::Claude),
         _ => None,
     }
 }
@@ -38,6 +41,23 @@ pub fn default_agent_runner_kind() -> AgentRunnerKind {
 
 pub fn default_amp_mode() -> &'static str {
     "smart"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_agent_runner_kind_accepts_claude() {
+        assert_eq!(
+            parse_agent_runner_kind("claude"),
+            Some(AgentRunnerKind::Claude)
+        );
+        assert_eq!(
+            parse_agent_runner_kind("ClAuDe"),
+            Some(AgentRunnerKind::Claude)
+        );
+    }
 }
 
 impl ThinkingEffort {

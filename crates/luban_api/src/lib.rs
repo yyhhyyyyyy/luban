@@ -81,6 +81,7 @@ impl Default for AgentSettingsSnapshot {
 pub enum AgentRunnerKind {
     Codex,
     Amp,
+    Claude,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -145,6 +146,22 @@ pub struct AmpConfigEntrySnapshot {
     pub kind: AmpConfigEntryKind,
     #[serde(default)]
     pub children: Vec<AmpConfigEntrySnapshot>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClaudeConfigEntryKind {
+    File,
+    Folder,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ClaudeConfigEntrySnapshot {
+    pub path: String,
+    pub name: String,
+    pub kind: ClaudeConfigEntryKind,
+    #[serde(default)]
+    pub children: Vec<ClaudeConfigEntrySnapshot>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -803,6 +820,18 @@ pub enum ClientAction {
         path: String,
         contents: String,
     },
+    ClaudeCheck,
+    ClaudeConfigTree,
+    ClaudeConfigListDir {
+        path: String,
+    },
+    ClaudeConfigReadFile {
+        path: String,
+    },
+    ClaudeConfigWriteFile {
+        path: String,
+        contents: String,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -888,6 +917,29 @@ pub enum ServerEvent {
         contents: String,
     },
     AmpConfigFileSaved {
+        request_id: String,
+        path: String,
+    },
+    ClaudeCheckReady {
+        request_id: String,
+        ok: bool,
+        message: Option<String>,
+    },
+    ClaudeConfigTreeReady {
+        request_id: String,
+        tree: Vec<ClaudeConfigEntrySnapshot>,
+    },
+    ClaudeConfigListDirReady {
+        request_id: String,
+        path: String,
+        entries: Vec<ClaudeConfigEntrySnapshot>,
+    },
+    ClaudeConfigFileReady {
+        request_id: String,
+        path: String,
+        contents: String,
+    },
+    ClaudeConfigFileSaved {
         request_id: String,
         path: String,
     },

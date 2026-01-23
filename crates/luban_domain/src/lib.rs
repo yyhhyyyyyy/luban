@@ -14,10 +14,11 @@ pub use agent_thread::{
 
 mod adapters;
 pub use adapters::{
-    AmpConfigEntry, AmpConfigEntryKind, CodexConfigEntry, CodexConfigEntryKind, ContextImage,
-    CreatedWorkspace, OpenTarget, ProjectIdentity, ProjectWorkspaceService, PullRequestCiState,
-    PullRequestInfo, PullRequestState, RunAgentTurnRequest, TaskDraft, TaskIntentKind,
-    TaskIssueInfo, TaskProjectSpec, TaskPullRequestInfo, TaskRepoInfo,
+    AmpConfigEntry, AmpConfigEntryKind, ClaudeConfigEntry, ClaudeConfigEntryKind, CodexConfigEntry,
+    CodexConfigEntryKind, ContextImage, CreatedWorkspace, OpenTarget, ProjectIdentity,
+    ProjectWorkspaceService, PullRequestCiState, PullRequestInfo, PullRequestState,
+    RunAgentTurnRequest, TaskDraft, TaskIntentKind, TaskIssueInfo, TaskProjectSpec,
+    TaskPullRequestInfo, TaskRepoInfo,
 };
 mod context_tokens;
 pub use context_tokens::{
