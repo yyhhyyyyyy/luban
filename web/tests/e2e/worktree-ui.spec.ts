@@ -122,14 +122,8 @@ test("switching between worktrees keeps chat content stable (no flash)", async (
   await projectContainer.getByTestId("worktree-branch-name").filter({ hasText: nameA }).first().click()
   await expect(page.getByText(tokenA).first()).toBeVisible({ timeout: 20_000 })
   {
-    const row = projectContainer
-      .getByTestId("worktree-branch-name")
-      .filter({ hasText: nameA })
-      .first()
-      .locator("..")
-      .locator("..")
-      .locator("..")
-    await expect(row.getByTestId("worktree-active-underline")).toBeVisible({ timeout: 10_000 })
+    const row = projectContainer.getByTestId("worktree-row").filter({ hasText: nameA }).first()
+    await expect(row.getByTestId("worktree-active-underline")).toHaveCount(1, { timeout: 10_000 })
   }
 
   const nameB = await page.evaluate(async (workspaceId) => {
@@ -147,14 +141,8 @@ test("switching between worktrees keeps chat content stable (no flash)", async (
   await projectContainer.getByTestId("worktree-branch-name").filter({ hasText: String(nameB) }).first().click()
   await expect(page.getByText(tokenB).first()).toBeVisible({ timeout: 20_000 })
   {
-    const row = projectContainer
-      .getByTestId("worktree-branch-name")
-      .filter({ hasText: String(nameB) })
-      .first()
-      .locator("..")
-      .locator("..")
-      .locator("..")
-    await expect(row.getByTestId("worktree-active-underline")).toBeVisible({ timeout: 10_000 })
+    const row = projectContainer.getByTestId("worktree-row").filter({ hasText: String(nameB) }).first()
+    await expect(row.getByTestId("worktree-active-underline")).toHaveCount(1, { timeout: 10_000 })
   }
 
   const sawEmptyState = await page.evaluate(() => Boolean((window as any).__e2eSawChatEmptyState))
@@ -192,7 +180,7 @@ test("new worktree highlight clears after a short delay", async ({ page }) => {
 test("main worktree home icon is only visible on hover", async ({ page }) => {
   await ensureWorkspace(page)
 
-  const row = page.getByTestId("worktree-branch-name").first().locator("..").locator("..").locator("..")
+  const row = page.getByTestId("worktree-row").filter({ has: page.getByTestId("worktree-home-icon") }).first()
   const icon = row.getByTestId("worktree-home-icon")
   await expect(icon).toHaveCount(1)
 
@@ -328,7 +316,7 @@ test("running status spinner stays centered", async ({ page }) => {
     attachments: [],
   })
 
-  const row = page.getByTestId("worktree-branch-name").first().locator("..").locator("..").locator("..")
+  const row = page.getByTestId("worktree-row").filter({ has: page.getByTestId("worktree-active-underline") }).first()
   const spinner = row.locator("svg.animate-spin").first()
   await spinner.waitFor({ state: "visible", timeout: 10_000 })
 
