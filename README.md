@@ -1,6 +1,6 @@
 # Luban
 
-**Thank you for using Luban at this early stage. Please note that Luban is under active development and has breaking changes every day. Please do not actively discuss or share this project, as it could attract too many people while the project is still young. (I have to open source it now because I can't afford the CI usage.)**
+**Thank you for using Luban at this early stage. Please note that Luban is under active development and has breaking changes every day. Please do not actively discuss or share this project's link, as it could attract too many people while the project is still young. (I have to open source it now because I can't afford the CI usage.)**
 
 Luban is a localhost-only AI code editor built as a browser UI served by a local Rust server, with
 an optional Tauri desktop shell.
