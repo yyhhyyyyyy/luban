@@ -367,6 +367,7 @@ export function defaultMockFixtures(): MockFixtures {
       taskId: task1,
       title: "Mock task 1",
       taskStatus: "todo",
+      runStatus: "running",
       entries: [
         systemEvent({
           id: "sys_1",
@@ -461,6 +462,7 @@ export function defaultMockFixtures(): MockFixtures {
       taskId: task3,
       title: "PR: pending",
       taskStatus: "in_progress",
+      runStatus: "running",
       entries: [
         systemEvent({
           id: "sys_1",

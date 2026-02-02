@@ -561,6 +561,78 @@ export function mockDispatchAction(args: { action: ClientAction; onEvent: (event
     return
   }
 
+  if (a.type === "queue_agent_message") {
+    const key = workdirTaskKey(a.workdir_id, a.task_id)
+    const convo = state.conversationsByWorkdirTask.get(key) ?? null
+    if (!convo) return
+
+    const runner = a.runner ?? convo.agent_runner
+    const ampMode = runner === "amp" ? a.amp_mode ?? convo.amp_mode ?? "default" : null
+    const runConfig = {
+      runner,
+      model_id: convo.agent_model_id,
+      thinking_effort: convo.thinking_effort,
+      amp_mode: ampMode,
+    }
+
+    const nextId = Math.max(0, ...(convo.pending_prompts ?? []).map((p) => p.id)) + 1
+    const pending = [
+      ...(convo.pending_prompts ?? []),
+      { id: nextId, text: a.text, attachments: a.attachments ?? [], run_config: runConfig },
+    ]
+    state.conversationsByWorkdirTask.set(key, { ...convo, pending_prompts: pending })
+    emitConversationChanged({ state, workdirId: a.workdir_id, taskId: a.task_id, onEvent: args.onEvent })
+    return
+  }
+
+  if (a.type === "remove_queued_prompt") {
+    const key = workdirTaskKey(a.workdir_id, a.task_id)
+    const convo = state.conversationsByWorkdirTask.get(key) ?? null
+    if (!convo) return
+    const pending = (convo.pending_prompts ?? []).filter((p) => p.id !== a.prompt_id)
+    state.conversationsByWorkdirTask.set(key, { ...convo, pending_prompts: pending })
+    emitConversationChanged({ state, workdirId: a.workdir_id, taskId: a.task_id, onEvent: args.onEvent })
+    return
+  }
+
+  if (a.type === "reorder_queued_prompt") {
+    const key = workdirTaskKey(a.workdir_id, a.task_id)
+    const convo = state.conversationsByWorkdirTask.get(key) ?? null
+    if (!convo) return
+    const pending = [...(convo.pending_prompts ?? [])]
+    const from = pending.findIndex((p) => p.id === a.active_id)
+    const to = pending.findIndex((p) => p.id === a.over_id)
+    if (from < 0 || to < 0 || from === to) return
+    const [item] = pending.splice(from, 1)
+    if (!item) return
+    pending.splice(to, 0, item)
+    state.conversationsByWorkdirTask.set(key, { ...convo, pending_prompts: pending })
+    emitConversationChanged({ state, workdirId: a.workdir_id, taskId: a.task_id, onEvent: args.onEvent })
+    return
+  }
+
+  if (a.type === "update_queued_prompt") {
+    const key = workdirTaskKey(a.workdir_id, a.task_id)
+    const convo = state.conversationsByWorkdirTask.get(key) ?? null
+    if (!convo) return
+    const pending = (convo.pending_prompts ?? []).map((p) => {
+      if (p.id !== a.prompt_id) return p
+      return {
+        ...p,
+        text: a.text,
+        attachments: a.attachments ?? [],
+        run_config: {
+          ...p.run_config,
+          model_id: a.model_id ?? p.run_config.model_id,
+          thinking_effort: a.thinking_effort ?? p.run_config.thinking_effort,
+        },
+      }
+    })
+    state.conversationsByWorkdirTask.set(key, { ...convo, pending_prompts: pending })
+    emitConversationChanged({ state, workdirId: a.workdir_id, taskId: a.task_id, onEvent: args.onEvent })
+    return
+  }
+
   if (a.type === "task_status_set") {
     const snap = state.threadsByWorkdir.get(a.workdir_id) ?? null
     if (!snap) return

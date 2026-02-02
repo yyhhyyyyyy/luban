@@ -144,9 +144,8 @@ export function QueuedPromptRow({
     >
       <div
         className={cn(
-          "relative max-w-[85%] rounded-lg px-3 py-2.5 transition-all duration-200",
-          "border border-dashed border-border bg-muted/20 opacity-60 hover:opacity-80",
-          isDragging && "shadow-lg border-primary/30 opacity-100 bg-background",
+          "relative max-w-[85%] border border-dashed border-border rounded-lg px-3 py-2.5 bg-muted/30 luban-font-chat transition-all duration-200",
+          isDragging && "shadow-lg border-primary/30 bg-background",
         )}
         onDoubleClick={() => onStartEdit()}
         data-testid="queued-prompt-bubble"
@@ -204,7 +203,7 @@ export function QueuedPromptRow({
           </div>
         )}
 
-        <div className="text-[13px] text-foreground/80 line-clamp-2 cursor-grab active:cursor-grabbing">
+        <div className="text-[13px] text-foreground whitespace-pre-wrap break-words cursor-grab active:cursor-grabbing">
           {prompt.text}
         </div>
       </div>

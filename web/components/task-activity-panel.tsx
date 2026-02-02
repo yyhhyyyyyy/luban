@@ -3,8 +3,9 @@
 import type React from "react"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { ArrowLeft } from "lucide-react"
+import { ArrowLeft, Clock, X } from "lucide-react"
 import { useLuban } from "@/lib/luban-context"
+import { cn } from "@/lib/utils"
 import { buildMessages, type Message } from "@/lib/conversation-ui"
 import { TaskActivityView } from "@/components/task-activity-view"
 import { fetchCodexCustomPrompts, fetchWorkspaceDiff, uploadAttachment } from "@/lib/luban-http"
@@ -54,6 +55,7 @@ export function TaskActivityPanel({
     sendAgentMessage,
     queueAgentMessage,
     cancelAgentTurn,
+    removeQueuedPrompt,
     setChatModel,
     setThinkingEffort,
     setChatRunner,
@@ -87,6 +89,7 @@ export function TaskActivityPanel({
   )
 
   const messages = useMemo(() => buildMessages(conversation), [conversation])
+  const queuedPrompts = useMemo(() => conversation?.pending_prompts ?? [], [conversation?.pending_prompts])
 
   const messageHistory = useMemo(() => {
     return messages.filter((m) => m.type === "user").map((m) => m.content)
@@ -310,9 +313,88 @@ export function TaskActivityPanel({
     return draftText.trim().length > 0 || hasReady
   }, [activeWorkspaceId, activeThreadId, attachments, draftText])
 
+  const handleCancelQueuedPrompt = useCallback(
+    (promptId: number) => {
+      if (activeWorkspaceId == null || activeThreadId == null) return
+      removeQueuedPrompt(activeWorkspaceId, activeThreadId, promptId)
+    },
+    [activeWorkspaceId, activeThreadId, removeQueuedPrompt],
+  )
+
   const inputComponent = (
     <div className="relative">
       <EscCancelHint visible={escHintVisible} timeoutMs={ESC_TIMEOUT_MS} />
+      {queuedPrompts.length > 0 && (
+        <div className="mb-3 space-y-2" data-testid="queued-prompts">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <div className="h-px flex-1 bg-border" />
+            <span className="flex items-center gap-1.5 px-2">
+              <Clock className="w-3 h-3" />
+              {queuedPrompts.length} queued
+            </span>
+            <div className="h-px flex-1 bg-border" />
+          </div>
+
+          {queuedPrompts.map((prompt) => (
+            <div
+              key={prompt.id}
+              className="group transition-all duration-200"
+              data-testid="queued-prompt-item"
+              data-prompt-id={prompt.id}
+            >
+              <div
+                className="group/activity relative"
+                data-testid="queued-prompt-bubble"
+                style={{
+                  border: "1px dashed #e8e8e8",
+                  borderRadius: "8px",
+                  backgroundColor: "#ffffff",
+                  boxShadow:
+                    "rgba(0,0,0,0.022) 0px 3px 6px -2px, rgba(0,0,0,0.044) 0px 1px 1px 0px",
+                  padding: "12px 16px",
+                  marginLeft: "-6px",
+                  marginRight: "-6px",
+                }}
+              >
+                <div className="flex items-center gap-2.5 mb-2">
+                  <div
+                    className="flex items-center justify-center text-white flex-shrink-0"
+                    style={{
+                      width: "20px",
+                      height: "20px",
+                      borderRadius: "50%",
+                      backgroundColor: "#5e6ad2",
+                      fontSize: "9px",
+                      fontWeight: 500,
+                    }}
+                  >
+                    U
+                  </div>
+                  <span style={{ fontSize: "14px", fontWeight: 500, color: "#1b1b1b" }}>You</span>
+                  <span style={{ fontSize: "14px", fontWeight: 400, color: "#5b5b5d" }}>Queued</span>
+                  <button
+                    type="button"
+                    onClick={() => handleCancelQueuedPrompt(prompt.id)}
+                    className="ml-auto p-1 bg-background border border-border rounded-full shadow-sm opacity-0 group-hover/activity:opacity-100 transition-opacity hover:bg-destructive hover:border-destructive hover:text-destructive-foreground"
+                    aria-label="Remove queued message"
+                    data-testid="queued-prompt-cancel"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+
+                <div style={{ fontSize: "13px", fontWeight: 400, lineHeight: "1.625", color: "#1b1b1b" }}>
+                  {prompt.text.split("\n").map((line, idx) => (
+                    <p key={idx} className="min-h-[1.625em]">
+                      {line || "\u00A0"}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
       <ChatComposer
         value={draftText}
         onChange={setDraftText}

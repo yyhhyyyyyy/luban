@@ -15,6 +15,7 @@ import { runSettingsPanel } from './scenarios/settings-panel.mjs';
 import { runStarFavorites } from './scenarios/star-favorites.mjs';
 import { runTaskStatusChange } from './scenarios/task-status-change.mjs';
 import { runTaskListNavigation } from './scenarios/task-list-navigation.mjs';
+import { runQueuedPrompts } from './scenarios/queued-prompts.mjs';
 
 async function canRun(command, args) {
   const proc = spawn(command, args, { stdio: 'ignore' });
@@ -147,6 +148,7 @@ async function main() {
     await runSettingsPanel({ page, baseUrl });
     await runTaskListNavigation({ page, baseUrl });
     await runTaskStatusChange({ page, baseUrl });
+    await runQueuedPrompts({ page, baseUrl });
     await runLatestEventsVisible({ page, baseUrl });
   } catch (err) {
     if (logFile) {
