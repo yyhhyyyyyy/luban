@@ -108,16 +108,23 @@ Luban ships prompt templates as a user-facing feature for tasks across *any* rep
   - which tests were added/updated
 
 ### 2.4 Multi-agent coordination (required)
-Multiple agents (and humans) may work on this repository concurrently. Assume conflicts are possible and manage your work accordingly:
+Multiple agents (and humans) may work on this repository concurrently. Assume conflicts are possible and manage your work accordingly.
 
-- Work on a dedicated branch; do not commit directly to `main`.
+This repository may be operated in a shared worktree model (multiple agents sharing the same working directory). In that mode, branch switching can disrupt other agents.
+
+**Shared worktree rule (hard requirement)**
+- If you are currently on `main`, do not open a PR. Commit and push directly to `main`.
+- Do not switch branches casually. Prefer staying on the current branch to avoid disrupting concurrent work.
+- If you must work on a different branch, do it in an isolated worktree/clone and coordinate explicitly.
+
+**General guidelines**
 - Keep your change set small and focused; avoid mixing unrelated changes.
-- Commit early and often (logical checkpoints), push regularly, and open a PR as soon as possible.
+- Commit early and often (logical checkpoints) and push regularly.
 - Before pushing, sync with `main` (fetch/rebase or merge) to minimize conflicts.
 - Never rely on long-lived uncommitted local changes; keep the working tree clean between tasks.
-- If you modify the same area as another PR, call it out explicitly in your PR description and resolve conflicts promptly.
+- If you modify the same area as another concurrent change, call it out explicitly and resolve conflicts promptly.
 
-## 2.4 Repository map (where things live)
+## 2.5 Repository map (where things live)
 - `crates/luban_domain/`: pure state + reducers (`AppState`, `Action`, `Effect`), deterministic logic, most regressions should be captured here.
 - `crates/luban_server/`: local server, WebSocket event stream, PTY endpoint, static file serving for `web/`.
 - `crates/luban_tauri/`: desktop wrapper for the web UI.
