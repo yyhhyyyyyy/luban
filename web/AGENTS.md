@@ -12,8 +12,10 @@ web/
 │   ├── luban-sidebar.tsx  # Navigation sidebar
 │   ├── inbox-view.tsx     # Inbox with split view
 │   ├── task-list-view.tsx # Task list grouped by status
-│   ├── task-detail-view.tsx # Full task view with chat
-│   ├── chat-panel.tsx     # Chat/conversation component
+│   ├── task-detail-view.tsx # Full task view with chat or activity view
+│   ├── chat-panel.tsx     # Traditional chat/conversation component
+│   ├── task-activity-view.tsx  # Linear-style activity view component
+│   ├── task-activity-panel.tsx # Activity view with input composer
 │   ├── right-sidebar.tsx  # Properties sidebar
 │   ├── settings-panel.tsx # Full-screen settings
 │   └── shared/

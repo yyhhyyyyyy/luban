@@ -184,6 +184,121 @@ Use Radix UI `DropdownMenu` component with these styles:
 </DropdownMenuContent>
 ```
 
+## Activity-Based Task View (Linear Style)
+
+The activity-based task view follows Linear's issue detail page pattern. Styles extracted via agent-browser inspection of Linear app.
+
+### Layout Structure
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│  ← 60px margin →│← max 686px content →│← 60px margin →│ Right Sidebar │
+├─────────────────┼─────────────────────┼───────────────┼────────────────┤
+│                 │ Task Title          │               │                │
+│                 │ Task Description    │               │                │
+│                 ├─────────────────────┤               │                │
+│                 │ Activity            │               │                │
+│                 ├─────────────────────┤               │                │
+│                 │ [18px Avatar] user · 2mo ago        │                │
+│                 │ User message content...             │                │
+│                 ├─────────────────────┤               │                │
+│                 │ [18px Avatar] Agent · 1h ago · 5s   │                │
+│                 │ ▶ Completed 5 steps                 │                │
+│                 │ Agent response content...           │                │
+│                 ├─────────────────────┤               │                │
+│                 │ [Input Composer]    │               │                │
+└─────────────────┴─────────────────────┴───────────────┴────────────────┘
+```
+
+### Layout Dimensions (from Linear)
+
+| Element | Value |
+|---------|-------|
+| Content max-width | `686px` |
+| Content margin | `0 60px` |
+| Comment padding | `16px 0px` (vertical only, horizontal from parent margin) |
+
+### Typography (from Linear)
+
+| Element | Size | Weight | Color |
+|---------|------|--------|-------|
+| Task title | 24px | 600 | #1b1b1b |
+| Title line-height | 38.4px | - | - |
+| Title letter-spacing | -0.1px | - | - |
+| Description | 15px | 450 | #2f2f2f |
+| Activity header | 15px | 600 | #1b1b1b |
+| User/Agent name | 12px | 500 | #5b5b5d (muted) |
+| Timestamp | 12px | 450 | #5b5b5d (muted) |
+| Message content | 15px | 450 | #2f2f2f |
+| Activity step | 12px | 450 | #5b5b5d |
+
+### Comment Header Layout
+
+| Element | Value |
+|---------|-------|
+| Avatar size | 20x20px, border-radius: 4px |
+| Gap avatar to username | 11px |
+| Gap between username/timestamp | 8px |
+
+### Comment/Activity Item (from Linear)
+
+| Element | Value |
+|---------|-------|
+| Border | **NONE** - comments have no border |
+| Background | **transparent** - no card background |
+| Box shadow | **NONE** |
+| Timeline line | 1px solid #c8c8c8 (vertical connector) |
+| Avatar position | **OUTSIDE** content, on the left |
+| Avatar to content gap | 11px |
+
+### Components
+
+#### Activity Event (User Message)
+```tsx
+<div className="group/activity flex items-start">
+  {/* Avatar - 20px with 4px border-radius, OUTSIDE content */}
+  <div style={{ 
+    width: '20px', 
+    height: '20px', 
+    marginRight: '11px',
+    borderRadius: '4px', 
+    backgroundColor: '#5e6ad2' 
+  }}>U</div>
+  
+  {/* Content - NO border, NO background, NO shadow */}
+  <div className="flex-1">
+    {/* Header: name + timestamp */}
+    <div className="flex items-center gap-2 mb-1">
+      <span style={{ fontSize: '15px', fontWeight: 500, color: '#1b1b1b' }}>You</span>
+      <span style={{ fontSize: '14px', fontWeight: 400, color: '#5b5b5d' }}>3m ago</span>
+    </div>
+    <div style={{ fontSize: '15px', fontWeight: 400, lineHeight: '22.5px', color: '#1b1b1b' }}>
+      {/* Message content */}
+    </div>
+  </div>
+</div>
+```
+
+#### Simple Event (System Event)
+```tsx
+<div className="flex items-start" style={{ padding: '1px 0' }}>
+  {/* Icon column - 14x14 */}
+  <div style={{ width: '14px', height: '18px', marginRight: '11px', paddingTop: '2px' }}>
+    <div style={{ width: '14px', height: '14px', borderRadius: '4px', backgroundColor: '#5e6ad2' }}>
+      {/* Icon or initial */}
+    </div>
+  </div>
+  
+  {/* Event text - inline, 12px, muted */}
+  <span style={{ fontSize: '12px', color: '#5b5b5d' }}>
+    <b style={{ fontWeight: 500 }}>wyatt</b> created the issue · 3mo ago
+  </span>
+</div>
+```
+
+#### Collapsible Agent Activities
+Activities are collapsed by default, showing a summary like "Completed 5 steps" with a chevron to expand.
+
 ## Full-Screen Overlays
 
 Settings and other full-screen views use:

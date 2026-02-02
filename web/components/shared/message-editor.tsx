@@ -80,6 +80,8 @@ export function MessageEditor({
   primaryAction,
   secondaryAction,
   testIds,
+  className,
+  style,
 }: {
   value: string
   onChange: (value: string) => void
@@ -115,6 +117,10 @@ export function MessageEditor({
     attachButton: string
     attachmentTile: string
   }
+  /** Optional className for the container */
+  className?: string
+  /** Optional inline style for the container */
+  style?: React.CSSProperties
 }) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -501,7 +507,9 @@ export function MessageEditor({
         "relative bg-background border rounded-lg shadow-lg transition-all",
         isFocused ? "border-primary/50 ring-1 ring-primary/20 shadow-xl" : "border-border",
         isDragging && "border-primary ring-2 ring-primary/30 bg-primary/5",
+        className,
       )}
+      style={style}
       onDragOver={(e) => {
         e.preventDefault()
         if (disabled) return

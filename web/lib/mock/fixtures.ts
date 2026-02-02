@@ -1,4 +1,5 @@
 import type {
+  AgentItemKind,
   AgentRunnerKind,
   AmpConfigEntrySnapshot,
   AppSnapshot,
@@ -109,6 +110,10 @@ function agentMessage(text: string): ConversationEntry {
   return { type: "agent_item", id: `agent_msg_${Math.random().toString(16).slice(2)}`, kind: "agent_message", payload: { text } }
 }
 
+function agentActivity(kind: AgentItemKind, payload: unknown): ConversationEntry {
+  return { type: "agent_item", id: `agent_act_${Math.random().toString(16).slice(2)}`, kind, payload }
+}
+
 function conversationBase(args: {
   workdirId: WorkspaceId
   taskId: WorkspaceThreadId
@@ -117,6 +122,7 @@ function conversationBase(args: {
   runStatus?: OperationStatus
   taskStatus?: TaskStatus
   entries: ConversationEntry[]
+  inProgressItems?: Array<{ id: string; kind: AgentItemKind; payload: unknown }>
 }): ConversationSnapshot {
   const runner = args.runner ?? "codex"
   return {
@@ -135,7 +141,7 @@ function conversationBase(args: {
     entries_total: args.entries.length,
     entries_start: 0,
     entries_truncated: false,
-    in_progress_items: [],
+    in_progress_items: args.inProgressItems ?? [],
     pending_prompts: [],
     queue_paused: false,
     remote_thread_id: null,
@@ -336,7 +342,39 @@ export function defaultMockFixtures(): MockFixtures {
       taskId: task1,
       title: "Mock task 1",
       taskStatus: "todo",
-      entries: [userMessage("Hello from mock task 1."), agentMessage("Mock agent reply.")],
+      entries: [
+        // First user message
+        userMessage("Please help me refactor the authentication module."),
+        // First agent turn with many activities (should fully collapse between cards)
+        agentActivity("reasoning", { text: "Analyzing the authentication module structure" }),
+        agentActivity("command_execution", { command: "find src -name '*auth*'", status: "completed", aggregated_output: "src/auth/index.ts\nsrc/auth/jwt.ts" }),
+        agentActivity("file_change", { changes: [{ path: "src/auth/index.ts", kind: "update" }] }),
+        agentActivity("command_execution", { command: "pnpm run typecheck", status: "completed", aggregated_output: "No errors" }),
+        agentActivity("reasoning", { text: "Reviewing the JWT implementation" }),
+        agentActivity("file_change", { changes: [{ path: "src/auth/jwt.ts", kind: "update" }] }),
+        agentMessage("I've refactored the authentication module. The main changes include:\n\n1. Extracted JWT logic into a separate utility\n2. Added proper error handling\n3. Improved type safety"),
+        // Second user message
+        userMessage("Can you also add unit tests for the changes?"),
+        // Second agent turn with many activities (should fully collapse between cards)
+        agentActivity("reasoning", { text: "Planning test coverage for auth module" }),
+        agentActivity("file_change", { changes: [{ path: "src/auth/__tests__/index.test.ts", kind: "create" }] }),
+        agentActivity("file_change", { changes: [{ path: "src/auth/__tests__/jwt.test.ts", kind: "create" }] }),
+        agentActivity("command_execution", { command: "pnpm run test src/auth", status: "completed", aggregated_output: "Test Suites: 2 passed\nTests: 8 passed" }),
+        agentActivity("reasoning", { text: "All tests passing, adding edge case tests" }),
+        agentActivity("file_change", { changes: [{ path: "src/auth/__tests__/jwt.test.ts", kind: "update" }] }),
+        agentActivity("command_execution", { command: "pnpm run test src/auth", status: "completed", aggregated_output: "Test Suites: 2 passed\nTests: 12 passed" }),
+        agentMessage("I've added comprehensive unit tests for the authentication module:\n\n- `index.test.ts`: Tests for the main auth flow\n- `jwt.test.ts`: Tests for JWT token handling including edge cases\n\nAll 12 tests are passing."),
+        // Third user message (latest turn - should keep last 3 visible)
+        userMessage("Great! Now please update the documentation."),
+        // Third agent turn - in progress (should keep last 3 visible)
+        agentActivity("reasoning", { text: "Reviewing existing documentation" }),
+        agentActivity("command_execution", { command: "cat docs/auth.md", status: "completed", aggregated_output: "# Authentication\n..." }),
+        agentActivity("file_change", { changes: [{ path: "docs/auth.md", kind: "update" }] }),
+        agentActivity("reasoning", { text: "Adding API reference section" }),
+        agentActivity("file_change", { changes: [{ path: "docs/api/auth.md", kind: "create" }] }),
+        agentActivity("command_execution", { command: "pnpm run docs:build", status: "completed", aggregated_output: "Documentation built successfully" }),
+        agentMessage("I've updated the documentation:\n\n1. Updated `docs/auth.md` with the new refactored API\n2. Created `docs/api/auth.md` with detailed API reference\n\nThe documentation has been built successfully."),
+      ],
     }),
     [key(workdir1, task2)]: conversationBase({
       workdirId: workdir1,
@@ -350,8 +388,19 @@ export function defaultMockFixtures(): MockFixtures {
       taskId: task3,
       title: "PR: pending",
       taskStatus: "in_progress",
-      entries: [userMessage("Please open a PR."), agentMessage("Working on it.")],
+      entries: [userMessage("Please open a PR.")],
       runStatus: "running",
+      inProgressItems: [
+        { id: "prog_1", kind: "reasoning", payload: { text: "Analyzing the codebase structure to understand the project layout" } },
+        { id: "prog_2", kind: "command_execution", payload: { command: "git status", status: "completed", aggregated_output: "On branch main\nnothing to commit" } },
+        { id: "prog_3", kind: "file_change", payload: { changes: [{ path: "src/utils/helpers.ts", kind: "update" }] } },
+        { id: "prog_4", kind: "command_execution", payload: { command: "pnpm run lint", status: "completed", aggregated_output: "✓ No ESLint warnings or errors" } },
+        { id: "prog_5", kind: "web_search", payload: { query: "TypeScript best practices for error handling" } },
+        { id: "prog_6", kind: "file_change", payload: { changes: [{ path: "src/lib/api.ts", kind: "update" }, { path: "src/lib/types.ts", kind: "create" }] } },
+        { id: "prog_7", kind: "command_execution", payload: { command: "pnpm run test", status: "completed", aggregated_output: "Test Suites: 12 passed\nTests: 48 passed" } },
+        { id: "prog_8", kind: "reasoning", payload: { text: "Preparing the pull request with proper commit message" } },
+        { id: "prog_9", kind: "command_execution", payload: { command: "git add -A && git commit -m 'feat: add new API endpoints'", status: "in_progress" } },
+      ],
     }),
     [key(workdir3, task1)]: conversationBase({
       workdirId: workdir3,

@@ -38,6 +38,7 @@ export function ChatComposer({
   canSend,
   codexEnabled = true,
   ampEnabled = true,
+  compact = false,
 }: {
   value: string
   onChange: (value: string) => void
@@ -68,10 +69,17 @@ export function ChatComposer({
   canSend: boolean
   codexEnabled?: boolean
   ampEnabled?: boolean
+  /** When true, removes padding and max-width constraints for embedding in cards */
+  compact?: boolean
 }) {
-  return (
-    <div className="px-4 pb-4">
-      <div className="max-w-3xl mx-auto">
+  // Card-style for compact mode (matches Linear activity card styling)
+  const compactStyle = compact ? {
+    border: '1px solid #e8e8e8',
+    borderRadius: '8px',
+    boxShadow: 'rgba(0,0,0,0.022) 0px 3px 6px -2px, rgba(0,0,0,0.044) 0px 1px 1px 0px',
+  } : undefined
+
+  const content = (
         <MessageEditor
           value={value}
           onChange={onChange}
@@ -121,7 +129,18 @@ export function ChatComposer({
             attachButton: "chat-attach",
             attachmentTile: "chat-attachment-tile",
           }}
+          style={compactStyle}
         />
+  )
+
+  if (compact) {
+    return content
+  }
+
+  return (
+    <div className="px-4 pb-4">
+      <div className="max-w-3xl mx-auto">
+        {content}
       </div>
     </div>
   )

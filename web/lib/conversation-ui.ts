@@ -18,9 +18,17 @@ export interface ActivityEvent {
   badge?: string
 }
 
+export interface SystemEvent {
+  id: string
+  type: "event"
+  eventType: "task_created" | "task_started" | "task_completed" | "task_cancelled" | "status_changed"
+  title: string
+  timestamp?: string
+}
+
 export interface Message {
   id: string
-  type: "user" | "assistant"
+  type: "user" | "assistant" | "event"
   content: string
   attachments?: AttachmentRef[]
   timestamp?: string
@@ -33,6 +41,7 @@ export interface Message {
     duration?: string
   }
   codeReferences?: { file: string; line: number }[]
+  eventType?: "task_created" | "task_started" | "task_completed" | "task_cancelled" | "status_changed"
 }
 
 function safeStringify(value: unknown): string {
@@ -238,6 +247,9 @@ export function buildMessages(conversation: ConversationSnapshot | null): Messag
   if (!conversation) return []
 
   const out: Message[] = []
+  
+
+  
   let assistantContent = ""
   let assistantActivities: ActivityEvent[] = []
   let assistantToolCalls = 0
@@ -261,6 +273,7 @@ export function buildMessages(conversation: ConversationSnapshot | null): Messag
       id: `a_${out.length}`,
       type: "assistant",
       content: assistantContent.trim(),
+      timestamp: new Date().toISOString(),
       isCancelled: assistantCancelled || undefined,
       activities: assistantActivities.length > 0 ? assistantActivities : undefined,
       metadata,
@@ -281,6 +294,7 @@ export function buildMessages(conversation: ConversationSnapshot | null): Messag
         type: "user",
         content: entry.text,
         attachments: entry.attachments,
+        timestamp: new Date().toISOString(),
       })
       continue
     }
@@ -375,5 +389,36 @@ export function buildMessages(conversation: ConversationSnapshot | null): Messag
       last.isStreaming = true
     }
   }
+  
+  // Prepend system events for demo/review purposes
+  // Use a sample timestamp for demo (e.g., 2 hours ago)
+  const demoTimestamp = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
+  const systemEvents: Message[] = [
+    {
+      id: "event_task_created",
+      type: "event",
+      eventType: "task_created",
+      content: "created the task",
+      timestamp: demoTimestamp,
+    },
+    {
+      id: "event_status_todo",
+      type: "event",
+      eventType: "status_changed",
+      content: "moved from Backlog to Todo",
+      timestamp: demoTimestamp,
+    },
+    {
+      id: "event_status_in_progress",
+      type: "event",
+      eventType: "status_changed", 
+      content: "changed status to In Progress",
+      timestamp: demoTimestamp,
+    },
+  ]
+  
+  // Insert events at the beginning
+  out.unshift(...systemEvents)
+  
   return out
 }
