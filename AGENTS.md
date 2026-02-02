@@ -107,6 +107,16 @@ Luban ships prompt templates as a user-facing feature for tasks across *any* rep
   - how to verify (commands + manual steps)
   - which tests were added/updated
 
+### 2.4 Multi-agent coordination (required)
+Multiple agents (and humans) may work on this repository concurrently. Assume conflicts are possible and manage your work accordingly:
+
+- Work on a dedicated branch; do not commit directly to `main`.
+- Keep your change set small and focused; avoid mixing unrelated changes.
+- Commit early and often (logical checkpoints), push regularly, and open a PR as soon as possible.
+- Before pushing, sync with `main` (fetch/rebase or merge) to minimize conflicts.
+- Never rely on long-lived uncommitted local changes; keep the working tree clean between tasks.
+- If you modify the same area as another PR, call it out explicitly in your PR description and resolve conflicts promptly.
+
 ## 2.4 Repository map (where things live)
 - `crates/luban_domain/`: pure state + reducers (`AppState`, `Action`, `Effect`), deterministic logic, most regressions should be captured here.
 - `crates/luban_server/`: local server, WebSocket event stream, PTY endpoint, static file serving for `web/`.
