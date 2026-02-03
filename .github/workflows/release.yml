@@ -160,9 +160,34 @@ jobs:
       - name: Install 1Password CLI
         uses: 1password/install-cli-action@v2
 
+      - name: Detect rustc version (cache key)
+        id: rustc
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "version=$(rustc -V | tr ' ' '-')" >> "${GITHUB_OUTPUT}"
+
+      - name: Restore cached Tauri CLI
+        id: tauri_cli_cache
+        uses: actions/cache@v4
+        with:
+          path: .ci/tauri-cli
+          key: tauri-cli-${{ runner.os }}-${{ runner.arch }}-rust-${{ steps.rustc.outputs.version }}-v2.9.5
+
+      - name: Add cached Tauri CLI to PATH
+        shell: bash
+        run: echo "${GITHUB_WORKSPACE}/.ci/tauri-cli/bin" >> "${GITHUB_PATH}"
+
       - name: Install Tauri CLI
         shell: bash
-        run: cargo install tauri-cli --locked --version 2.9.5
+        run: |
+          set -euo pipefail
+          if command -v cargo-tauri >/dev/null 2>&1; then
+            cargo-tauri --version
+            exit 0
+          fi
+          cargo install tauri-cli --locked --version 2.9.5 --root "${GITHUB_WORKSPACE}/.ci/tauri-cli"
+          cargo-tauri --version
 
       - name: Inject secrets into .env
         shell: bash
