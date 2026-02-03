@@ -712,8 +712,14 @@ impl AppState {
                     None
                 };
 
+                let has_non_system_entries = conversation.entries.iter().any(|entry| {
+                    matches!(
+                        entry,
+                        ConversationEntry::UserEvent { .. } | ConversationEntry::AgentEvent { .. }
+                    )
+                });
                 let should_auto_title =
-                    conversation.entries.is_empty() && conversation.title.starts_with("Thread ");
+                    !has_non_system_entries && conversation.title.starts_with("Thread ");
                 let input_for_auto_title = if should_auto_title {
                     text.clone()
                 } else {
@@ -828,7 +834,13 @@ impl AppState {
                     None
                 };
 
-                if conversation.entries.is_empty() && conversation.title.starts_with("Thread ") {
+                let has_non_system_entries = conversation.entries.iter().any(|entry| {
+                    matches!(
+                        entry,
+                        ConversationEntry::UserEvent { .. } | ConversationEntry::AgentEvent { .. }
+                    )
+                });
+                if !has_non_system_entries && conversation.title.starts_with("Thread ") {
                     let title = derive_thread_title(&text);
                     if !title.is_empty() {
                         conversation.title = title;
@@ -2626,6 +2638,150 @@ mod tests {
             .expect("missing current run config");
         assert_eq!(running.model_id, "gpt-5.2-codex");
         assert_eq!(running.thinking_effort, ThinkingEffort::High);
+    }
+
+    #[test]
+    fn auto_title_thread_ignores_system_events_on_first_user_message() {
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+            is_git: true,
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "w1".to_owned(),
+            branch_name: "repo/w1".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/w1"),
+        });
+
+        let workspace_id = workspace_id_by_name(&state, "w1");
+        let thread_id = WorkspaceThreadId(1);
+
+        state.apply(Action::ConversationLoaded {
+            workspace_id,
+            thread_id,
+            snapshot: ConversationSnapshot {
+                title: Some("Thread 1".to_owned()),
+                thread_id: None,
+                task_status: crate::TaskStatus::Todo,
+                runner: None,
+                agent_model_id: None,
+                thinking_effort: None,
+                amp_mode: None,
+                entries: vec![ConversationEntry::SystemEvent {
+                    entry_id: "sys_1".to_owned(),
+                    created_at_unix_ms: 1,
+                    event: crate::ConversationSystemEvent::TaskCreated,
+                }],
+                entries_total: 1,
+                entries_start: 0,
+                pending_prompts: Vec::new(),
+                queue_paused: false,
+                run_started_at_unix_ms: None,
+                run_finished_at_unix_ms: None,
+            },
+        });
+
+        let text = "Fix title auto summary".to_owned();
+        let expected_title = derive_thread_title(&text);
+        assert!(
+            !expected_title.is_empty(),
+            "expected derive_thread_title to produce a non-empty title"
+        );
+
+        let effects = state.apply(Action::SendAgentMessage {
+            workspace_id,
+            thread_id,
+            text: text.clone(),
+            attachments: Vec::new(),
+            runner: None,
+            amp_mode: None,
+        });
+
+        let conversation = state
+            .workspace_thread_conversation(workspace_id, thread_id)
+            .expect("missing conversation");
+        assert_eq!(conversation.title, expected_title);
+
+        let (input, expected_current_title) = effects
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::AiAutoTitleThread {
+                    input,
+                    expected_current_title,
+                    ..
+                } => Some((input.as_str(), expected_current_title.as_str())),
+                _ => None,
+            })
+            .expect("missing AiAutoTitleThread effect");
+        assert_eq!(input, text.as_str());
+        assert_eq!(expected_current_title, expected_title.as_str());
+    }
+
+    #[test]
+    fn queue_agent_message_derives_title_with_only_system_events() {
+        let mut state = AppState::new();
+        state.apply(Action::AddProject {
+            path: PathBuf::from("/tmp/repo"),
+            is_git: true,
+        });
+        let project_id = state.projects[0].id;
+        state.apply(Action::WorkspaceCreated {
+            project_id,
+            workspace_name: "w1".to_owned(),
+            branch_name: "repo/w1".to_owned(),
+            worktree_path: PathBuf::from("/tmp/luban/worktrees/repo/w1"),
+        });
+
+        let workspace_id = workspace_id_by_name(&state, "w1");
+        let thread_id = WorkspaceThreadId(1);
+
+        state.apply(Action::ConversationLoaded {
+            workspace_id,
+            thread_id,
+            snapshot: ConversationSnapshot {
+                title: Some("Thread 1".to_owned()),
+                thread_id: None,
+                task_status: crate::TaskStatus::Todo,
+                runner: None,
+                agent_model_id: None,
+                thinking_effort: None,
+                amp_mode: None,
+                entries: vec![ConversationEntry::SystemEvent {
+                    entry_id: "sys_1".to_owned(),
+                    created_at_unix_ms: 1,
+                    event: crate::ConversationSystemEvent::TaskCreated,
+                }],
+                entries_total: 1,
+                entries_start: 0,
+                pending_prompts: Vec::new(),
+                queue_paused: false,
+                run_started_at_unix_ms: None,
+                run_finished_at_unix_ms: None,
+            },
+        });
+
+        let text = "Fix title auto summary".to_owned();
+        let expected_title = derive_thread_title(&text);
+        assert!(
+            !expected_title.is_empty(),
+            "expected derive_thread_title to produce a non-empty title"
+        );
+
+        state.apply(Action::QueueAgentMessage {
+            workspace_id,
+            thread_id,
+            text: text.clone(),
+            attachments: Vec::new(),
+            runner: None,
+            amp_mode: None,
+        });
+
+        let conversation = state
+            .workspace_thread_conversation(workspace_id, thread_id)
+            .expect("missing conversation");
+        assert_eq!(conversation.title, expected_title);
     }
 
     #[test]
