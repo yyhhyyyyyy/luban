@@ -9,6 +9,10 @@ This directory contains engineering postmortems for user-visible bugs, CI regres
 - **Sev-3 (Medium)**: partial degradation, flaky behavior, or CI instability; workaround exists.
 - **Sev-4 (Low)**: cosmetic or low-impact papercut.
 
+## Index (by incident)
+
+- `2026-02-task-list-project-avatar-inconsistency.md`
+  - Related fix commits: `c06feb1`
 - `2026-01-terminal-clipboard-shortcuts.md`
   - Related fix commits: `a3b4fd0`, `b7120c4`, `a343f74`, `397fc88`
 - `2026-01-ghostty-web-clipboard-overwrite.md`
