@@ -3,12 +3,26 @@
 import type { AgentRunnerKind, ThinkingEffort } from "@/lib/luban-api"
 
 import { useMemo, useState } from "react"
-import { ChevronDown, Settings, Sparkles, Zap } from "lucide-react"
+import { ChevronDown, Settings } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { AGENT_MODELS, supportedThinkingEffortsForModel } from "@/lib/agent-settings"
 import { agentModelLabel, thinkingEffortLabel } from "@/lib/conversation-ui"
 import { UnifiedProviderLogo } from "@/components/shared/unified-provider-logo"
+
+const AMP_MARK_URL = "/logos/amp.svg"
+
+function AmpMark({ className }: { className?: string }) {
+  return (
+    <img
+      data-agent-runner-icon="amp"
+      src={AMP_MARK_URL}
+      alt=""
+      aria-hidden="true"
+      className={cn("inline-block", className)}
+    />
+  )
+}
 
 export function CodexAgentSelector({
   testId = "codex-agent-selector",
@@ -80,14 +94,14 @@ export function CodexAgentSelector({
           disabled && "opacity-60 cursor-default hover:bg-transparent hover:text-muted-foreground",
         )}
       >
-        <UnifiedProviderLogo className="w-3.5 h-3.5" />
+        <UnifiedProviderLogo providerId="openai" className="w-3.5 h-3.5" />
         <span className="whitespace-nowrap">{displayName}</span>
         <ChevronDown className={cn("w-3 h-3 transition-transform", open && "rotate-180")} />
       </button>
 
       {open && !disabled && (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => close()} />
+          <div data-testid={`${testId}-overlay`} className="fixed inset-0 z-40" onClick={() => close()} />
           <div
             className={cn(
               "absolute left-0 bg-popover border border-border rounded-lg shadow-xl z-50 overflow-hidden",
@@ -103,7 +117,7 @@ export function CodexAgentSelector({
                   onMouseDown={(e) => e.preventDefault()}
                   className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-xs transition-colors rounded-md whitespace-nowrap bg-primary/10 text-primary"
                 >
-                  <UnifiedProviderLogo className="w-3.5 h-3.5 flex-shrink-0" />
+                  <UnifiedProviderLogo providerId="openai" className="w-3.5 h-3.5 flex-shrink-0" />
                   Codex
                 </button>
               </div>
@@ -270,11 +284,11 @@ export function AgentSelector({
   }, [isAmp, isClaude, modelId, resolvedAmpMode, thinkingEffort])
 
   const icon = isAmp ? (
-    <Zap className="w-3.5 h-3.5" />
+    <AmpMark className="w-3.5 h-3.5" />
   ) : isClaude ? (
-    <Sparkles className="w-3.5 h-3.5" />
+    <UnifiedProviderLogo providerId="anthropic" className="w-3.5 h-3.5" />
   ) : (
-    <UnifiedProviderLogo className="w-3.5 h-3.5" />
+    <UnifiedProviderLogo providerId="openai" className="w-3.5 h-3.5" />
   )
 
   const [open, setOpen] = useState(false)
@@ -357,7 +371,7 @@ export function AgentSelector({
 
       {open && !disabled && (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => close()} />
+          <div data-testid={`${testId}-overlay`} className="fixed inset-0 z-40" onClick={() => close()} />
           <div
             className={cn(
               "absolute left-0 bg-popover border border-border rounded-lg shadow-xl z-50 overflow-hidden",
@@ -374,11 +388,16 @@ export function AgentSelector({
                   {
                     id: "codex" as const,
                     label: "Codex",
-                    icon: <UnifiedProviderLogo className="w-3.5 h-3.5 flex-shrink-0" />,
+                    icon: <UnifiedProviderLogo providerId="openai" className="w-3.5 h-3.5 flex-shrink-0" />,
                     enabled: codexEnabled,
                   },
-                  { id: "amp" as const, label: "Amp", icon: <Zap className="w-3.5 h-3.5 flex-shrink-0" />, enabled: ampEnabled },
-                  { id: "claude" as const, label: "Claude", icon: <Sparkles className="w-3.5 h-3.5 flex-shrink-0" />, enabled: true },
+                  { id: "amp" as const, label: "Amp", icon: <AmpMark className="w-3.5 h-3.5 flex-shrink-0" />, enabled: ampEnabled },
+                  {
+                    id: "claude" as const,
+                    label: "Claude",
+                    icon: <UnifiedProviderLogo providerId="anthropic" className="w-3.5 h-3.5 flex-shrink-0" />,
+                    enabled: true,
+                  },
                 ] as const)
                   .filter((opt) => opt.enabled)
                   .map((opt) => {
@@ -387,6 +406,7 @@ export function AgentSelector({
                   return (
                     <div key={opt.id} className="relative group">
                       <button
+                        data-testid={`agent-runner-option-${opt.id}`}
                         onMouseDown={(e) => e.preventDefault()}
                         onClick={() => selectRunner(opt.id)}
                         className={cn(

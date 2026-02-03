@@ -31,6 +31,26 @@ import { UnifiedProviderLogo } from "@/components/shared/unified-provider-logo"
 import { extractTurnDurationLabel, useActivityTiming } from "@/lib/activity-timing"
 import { attachmentHref } from "@/lib/attachment-href"
 
+const AMP_MARK_URL = "/logos/amp.svg"
+
+function AgentRunnerIcon({
+  runner,
+  className,
+}: {
+  runner: Message["agentRunner"]
+  className?: string
+}): React.ReactElement {
+  if (runner === "amp") {
+    return <img data-agent-runner-icon="amp" src={AMP_MARK_URL} alt="" aria-hidden="true" className={className} />
+  }
+
+  if (runner === "claude") {
+    return <UnifiedProviderLogo providerId="anthropic" className={className} />
+  }
+
+  return <UnifiedProviderLogo providerId="openai" className={className} />
+}
+
 /**
  * Linear Design System (extracted from Linear app via agent-browser):
  * 
@@ -316,7 +336,7 @@ function SystemEventItem({ message, actor }: SystemEventItemProps) {
           {showLubanLogo ? (
             <Image src="/icon-light-32x32.png" alt="Luban" width={10} height={10} unoptimized />
           ) : isAgentEvent ? (
-            <UnifiedProviderLogo className="w-2.5 h-2.5" />
+            <AgentRunnerIcon runner={message.agentRunner} className="w-2.5 h-2.5" />
           ) : (
             eventActor.initial
           )}
@@ -552,7 +572,7 @@ function AgentActivityEvent({ message }: AgentActivityEventProps) {
                 fontWeight: 500
               }}
             >
-              <UnifiedProviderLogo className="w-3.5 h-3.5" />
+              <AgentRunnerIcon runner={message.agentRunner} className="w-3.5 h-3.5" />
             </div>
             <span style={{ fontSize: '14px', fontWeight: 500, color: COLORS.textPrimary }}>
               {agentName}
@@ -687,7 +707,7 @@ function AgentTurnCardEvent({
               fontWeight: 500,
             }}
           >
-            <UnifiedProviderLogo className="w-3.5 h-3.5" />
+            <AgentRunnerIcon runner={message.agentRunner} className="w-3.5 h-3.5" />
           </div>
           <span style={{ fontSize: "14px", fontWeight: 500, color: COLORS.textPrimary }}>{agentName}</span>
           <span
