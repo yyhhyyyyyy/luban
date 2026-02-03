@@ -7,6 +7,7 @@ import Image from "next/image"
 import { Brain, Check, Clock, Copy, FileCode, FileText, Loader2, Wrench } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { agentRunnerLabel } from "@/lib/conversation-ui"
 import type { Message } from "@/lib/conversation-ui"
 import type { AttachmentRef } from "@/lib/luban-api"
 import { Markdown } from "@/components/markdown"
@@ -91,7 +92,11 @@ export function ConversationMessage({
             className="inline-block w-3 h-3 animate-spin mr-1 align-[-2px]"
           />
         )}
-        {message.eventSource === "agent" ? "Agent: " : message.eventSource === "system" ? "Luban: " : ""}
+        {message.eventSource === "agent"
+          ? `${agentRunnerLabel(message.agentRunner)}: `
+          : message.eventSource === "system"
+            ? "Luban: "
+            : ""}
         {message.content}
       </div>
     )

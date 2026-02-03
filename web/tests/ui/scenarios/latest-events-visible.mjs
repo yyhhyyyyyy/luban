@@ -48,6 +48,12 @@ export async function runLatestEventsVisible({ page }) {
   const latestTurn = page.getByTestId('agent-turn-card').filter({ hasText: 'Progress update 3' }).first();
   await latestTurn.waitFor({ state: 'visible' });
   await latestTurn.scrollIntoViewIfNeeded();
+
+  const agentTurnHeaderText = ((await latestTurn.getByTestId('agent-turn-toggle').textContent()) ?? '').trim();
+  if (!agentTurnHeaderText.startsWith('Codex')) {
+    throw new Error(`expected agent turns to be attributed to Codex, got "${agentTurnHeaderText}"`);
+  }
+
   await latestTurn.getByTestId('agent-turn-toggle').click();
 
   const progressEvents = latestTurn.getByTestId('agent-turn-event').filter({ hasText: 'Progress update' });

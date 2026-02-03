@@ -23,9 +23,11 @@ import {
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { agentRunnerLabel } from "@/lib/conversation-ui"
 import type { Message, ActivityEvent } from "@/lib/conversation-ui"
 import { Markdown } from "@/components/markdown"
 import { AnsiOutput } from "@/components/shared/ansi-output"
+import { UnifiedProviderLogo } from "@/components/shared/unified-provider-logo"
 import { extractTurnDurationLabel, useActivityTiming } from "@/lib/activity-timing"
 import { attachmentHref } from "@/lib/attachment-href"
 
@@ -270,7 +272,7 @@ interface SystemEventItemProps {
 function SystemEventItem({ message, actor }: SystemEventItemProps) {
   const defaultActor = (() => {
     if (message.eventSource === "agent") {
-      return { name: "Agent", initial: "A", color: COLORS.textPrimary }
+      return { name: agentRunnerLabel(message.agentRunner), initial: "A", color: COLORS.textPrimary }
     }
     if (message.eventSource === "system") {
       return { name: "Luban", initial: "L", color: COLORS.textMuted }
@@ -278,6 +280,7 @@ function SystemEventItem({ message, actor }: SystemEventItemProps) {
     return { name: "You", initial: "U", color: COLORS.accent }
   })()
   const eventActor = actor || defaultActor
+  const isAgentEvent = message.eventSource === "agent"
   const showLubanLogo = !actor && message.eventSource === "system"
 
   return (
@@ -298,19 +301,22 @@ function SystemEventItem({ message, actor }: SystemEventItemProps) {
       >
         <div
           data-testid="event-avatar"
-          className="flex items-center justify-center text-white"
+          className="flex items-center justify-center"
           style={{ 
             width: ACTIVITY_ICON_SIZE_PX,
             height: ACTIVITY_ICON_SIZE_PX,
             borderRadius: '50%',
-            backgroundColor: showLubanLogo ? COLORS.white : eventActor.color,
-            border: showLubanLogo ? `1px solid ${COLORS.border}` : undefined,
+            backgroundColor: showLubanLogo || isAgentEvent ? COLORS.white : eventActor.color,
+            border: showLubanLogo || isAgentEvent ? `1px solid ${COLORS.border}` : undefined,
+            color: showLubanLogo || isAgentEvent ? COLORS.textPrimary : COLORS.white,
             fontSize: '7px',
             fontWeight: 500
           }}
         >
           {showLubanLogo ? (
             <Image src="/icon-light-32x32.png" alt="Luban" width={10} height={10} unoptimized />
+          ) : isAgentEvent ? (
+            <UnifiedProviderLogo className="w-2.5 h-2.5" />
           ) : (
             eventActor.initial
           )}
@@ -513,6 +519,7 @@ interface AgentActivityEventProps {
 
 function AgentActivityEvent({ message }: AgentActivityEventProps) {
   const hasContent = message.content.length > 0
+  const agentName = agentRunnerLabel(message.agentRunner)
 
   return (
     <div className="flex flex-col gap-2">
@@ -533,20 +540,22 @@ function AgentActivityEvent({ message }: AgentActivityEventProps) {
           {/* Header row: Avatar + Agent name + Timestamp + Duration */}
           <div className="flex items-center gap-2.5 mb-2">
             <div
-              className="flex items-center justify-center text-white flex-shrink-0"
+              className="flex items-center justify-center flex-shrink-0"
               style={{ 
                 width: '20px', 
                 height: '20px', 
                 borderRadius: '50%',
-                backgroundColor: COLORS.textPrimary,
+                backgroundColor: COLORS.white,
+                border: `1px solid ${COLORS.border}`,
+                color: COLORS.textPrimary,
                 fontSize: '9px',
                 fontWeight: 500
               }}
             >
-              A
+              <UnifiedProviderLogo className="w-3.5 h-3.5" />
             </div>
             <span style={{ fontSize: '14px', fontWeight: 500, color: COLORS.textPrimary }}>
-              Agent
+              {agentName}
             </span>
             <span style={{ fontSize: '14px', fontWeight: 400, color: COLORS.textMuted }}>
               {formatRelativeTime(message.timestamp)}
@@ -640,6 +649,8 @@ function AgentTurnCardEvent({
     return `Completed ${completedCount} steps${suffix}`
   })()
 
+  const agentName = agentRunnerLabel(message.agentRunner)
+
   return (
     <div
       data-testid="agent-turn-card"
@@ -664,19 +675,21 @@ function AgentTurnCardEvent({
         >
           <div
             data-testid="agent-turn-avatar"
-            className="flex items-center justify-center text-white flex-shrink-0"
+            className="flex items-center justify-center flex-shrink-0"
             style={{
               width: "20px",
               height: "20px",
               borderRadius: "50%",
-              backgroundColor: COLORS.textPrimary,
+              backgroundColor: COLORS.white,
+              border: `1px solid ${COLORS.border}`,
+              color: COLORS.textPrimary,
               fontSize: "9px",
               fontWeight: 500,
             }}
           >
-            A
+            <UnifiedProviderLogo className="w-3.5 h-3.5" />
           </div>
-          <span style={{ fontSize: "14px", fontWeight: 500, color: COLORS.textPrimary }}>Agent</span>
+          <span style={{ fontSize: "14px", fontWeight: 500, color: COLORS.textPrimary }}>{agentName}</span>
           <span
             className="flex-1 min-w-0 truncate"
             style={{ fontSize: "12px", fontWeight: 450, color: COLORS.textMuted }}
