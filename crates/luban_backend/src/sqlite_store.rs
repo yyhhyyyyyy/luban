@@ -2398,6 +2398,7 @@ impl SqliteDatabase {
             "SELECT c.thread_local_id,
                     c.thread_id,
                     c.title,
+                    c.created_at,
                     c.updated_at,
                     c.task_status,
                     c.queue_paused,
@@ -2426,12 +2427,13 @@ impl SqliteDatabase {
                 row.get::<_, Option<String>>(1)?,
                 row.get::<_, Option<String>>(2)?,
                 row.get::<_, i64>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, i64>(5)?,
-                row.get::<_, Option<i64>>(6)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, i64>(6)?,
                 row.get::<_, Option<i64>>(7)?,
-                row.get::<_, i64>(8)?,
-                row.get::<_, Option<String>>(9)?,
+                row.get::<_, Option<i64>>(8)?,
+                row.get::<_, i64>(9)?,
+                row.get::<_, Option<String>>(10)?,
             ))
         })?;
 
@@ -2441,6 +2443,7 @@ impl SqliteDatabase {
                 thread_local_id,
                 remote_thread_id,
                 title,
+                created_at,
                 updated_at,
                 task_status,
                 queue_paused,
@@ -2450,6 +2453,9 @@ impl SqliteDatabase {
                 last_turn_kind,
             ) = row?;
             let Some(thread_local_id) = u64::try_from(thread_local_id).ok() else {
+                continue;
+            };
+            let Some(created_at) = u64::try_from(created_at).ok() else {
                 continue;
             };
             let Some(updated_at) = u64::try_from(updated_at).ok() else {
@@ -2482,6 +2488,7 @@ impl SqliteDatabase {
                 thread_id: WorkspaceThreadId::from_u64(thread_local_id),
                 remote_thread_id,
                 title,
+                created_at_unix_seconds: created_at,
                 updated_at_unix_seconds: updated_at,
                 task_status,
                 turn_status,

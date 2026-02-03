@@ -11,12 +11,26 @@ type TimingMeta = {
   status: ActivityEvent["status"]
 }
 
+const TURN_DURATION_TITLE_PREFIX = "Turn duration:"
+
 const globalTiming = new Map<string, TimingMeta>()
 const MAX_TIMING_ENTRIES = 50_000
 const PRUNE_BATCH_SIZE = 5_000
 
 function formatStepDuration(ms: number): string {
   return formatDurationMs(ms)
+}
+
+export function extractTurnDurationLabel(activities: ActivityEvent[]): string | null {
+  for (let idx = activities.length - 1; idx >= 0; idx -= 1) {
+    const event = activities[idx]
+    if (!event) continue
+    const title = event.title ?? ""
+    if (!title.startsWith(TURN_DURATION_TITLE_PREFIX)) continue
+    const label = title.slice(TURN_DURATION_TITLE_PREFIX.length).trim()
+    return label.length > 0 ? label : null
+  }
+  return null
 }
 
 export function useActivityTiming(

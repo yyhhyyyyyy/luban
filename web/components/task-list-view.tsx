@@ -135,6 +135,15 @@ export function TaskListView({ activeProjectId, onTaskClick }: TaskListViewProps
   const [tasksSnapshot, setTasksSnapshot] = useState<TasksSnapshot | null>(null)
   const [selectedTask, setSelectedTask] = useState<string | null>(null)
 
+  const formatCreatedAt = useCallback((createdAtUnixSeconds: number): string => {
+    if (!createdAtUnixSeconds) return ""
+    const date = new Date(createdAtUnixSeconds * 1000)
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, "0")
+    const day = String(date.getDate()).padStart(2, "0")
+    return `${year}-${month}-${day}`
+  }, [])
+
   const refreshTasks = useCallback(async () => {
     if (!activeProjectId) {
       setTasksSnapshot(null)
@@ -226,7 +235,13 @@ export function TaskListView({ activeProjectId, onTaskClick }: TaskListViewProps
       return true
     })
 
-    filtered.sort((a, b) => b.updated_at_unix_seconds - a.updated_at_unix_seconds)
+    filtered.sort((a, b) => {
+      const primary = b.created_at_unix_seconds - a.created_at_unix_seconds
+      if (primary !== 0) return primary
+      const workdir = b.workdir_id - a.workdir_id
+      if (workdir !== 0) return workdir
+      return b.task_id - a.task_id
+    })
 
     for (const t of filtered) {
       const project = projectInfoById.get(t.project_id) ?? { name: t.project_id, color: "bg-violet-500" }
@@ -239,12 +254,12 @@ export function TaskListView({ activeProjectId, onTaskClick }: TaskListViewProps
         workdir: t.workdir_name || t.branch_name,
         projectName: project.name,
         projectColor: project.color,
-        createdAt: "",
+        createdAt: formatCreatedAt(t.created_at_unix_seconds),
       })
     }
 
     return out
-  }, [app, tasksSnapshot])
+  }, [app, formatCreatedAt, tasksSnapshot])
 
   const headerProject: ProjectInfo = useMemo(() => {
     if (!app) return { name: "Projects", color: "bg-violet-500" }

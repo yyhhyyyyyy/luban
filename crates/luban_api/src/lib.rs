@@ -491,6 +491,8 @@ pub struct TaskSummarySnapshot {
     #[serde(rename = "task_id", alias = "thread_id")]
     pub thread_id: WorkspaceThreadId,
     pub title: String,
+    #[serde(default)]
+    pub created_at_unix_seconds: u64,
     pub updated_at_unix_seconds: u64,
     pub branch_name: String,
     #[serde(rename = "workdir_name", alias = "workspace_name")]
@@ -1144,6 +1146,8 @@ pub struct ThreadMeta {
     pub thread_id: WorkspaceThreadId,
     pub remote_thread_id: Option<String>,
     pub title: String,
+    #[serde(default)]
+    pub created_at_unix_seconds: u64,
     pub updated_at_unix_seconds: u64,
     #[serde(default)]
     pub task_status: TaskStatus,

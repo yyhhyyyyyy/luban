@@ -27,6 +27,8 @@ client to iterate all workdirs and fan out requests.
 ## Schema notes
 
 - `TasksSnapshot.tasks[]` items are `TaskSummarySnapshot`.
+- `TaskSummarySnapshot.created_at_unix_seconds` is the stable task creation timestamp.
+- `TaskSummarySnapshot.updated_at_unix_seconds` is updated when the task timeline changes (for example user/agent messages, status changes).
 - `TaskSummarySnapshot.is_starred` indicates whether the user has starred the task.
 - `TaskSummarySnapshot.task_status` is an explicit lifecycle stage (`TaskStatus`).
 - `TaskSummarySnapshot.turn_status` and `TaskSummarySnapshot.last_turn_result` provide derived turn-level status (see `docs/task-and-turn-status.md`).

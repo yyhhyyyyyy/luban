@@ -88,6 +88,7 @@ function NotificationRow({ notification, testId, selected, onClick, onDoubleClic
               !notification.read ? "font-medium" : "font-normal"
             )}
             style={{ color: '#1b1b1b' }}
+            data-testid="inbox-notification-task-title"
           >
             {notification.taskTitle}
           </span>
@@ -134,7 +135,8 @@ export function InboxView({ onOpenFullView }: InboxViewProps) {
   const [nowMs, setNowMs] = useState<number | null>(null)
 
   useEffect(() => {
-    if (!app) {
+    const hasApp = app != null
+    if (!hasApp) {
       setTasksSnapshot(null)
       return
     }
@@ -153,7 +155,7 @@ export function InboxView({ onOpenFullView }: InboxViewProps) {
     return () => {
       cancelled = true
     }
-  }, [app])
+  }, [app != null])
 
   useEffect(() => {
     const update = () => setNowMs(Date.now())
@@ -208,7 +210,13 @@ export function InboxView({ onOpenFullView }: InboxViewProps) {
       return true
     })
 
-    filtered.sort((a, b) => b.updated_at_unix_seconds - a.updated_at_unix_seconds)
+    filtered.sort((a, b) => {
+      const primary = b.updated_at_unix_seconds - a.updated_at_unix_seconds
+      if (primary !== 0) return primary
+      const workdir = b.workdir_id - a.workdir_id
+      if (workdir !== 0) return workdir
+      return b.task_id - a.task_id
+    })
 
     for (const t of filtered) {
       const projectInfo = projectNameById.get(t.project_id) ?? { name: t.project_id, color: "bg-[#5e6ad2]" }
@@ -289,6 +297,15 @@ export function InboxView({ onOpenFullView }: InboxViewProps) {
               selected={selectedNotification?.id === notification.id}
               onClick={() => {
                 setSelectedNotificationId(notification.id)
+                setTasksSnapshot((prev) => {
+                  if (!prev) return prev
+                  return {
+                    ...prev,
+                    tasks: prev.tasks.map((t) =>
+                      t.workdir_id === notification.workdirId ? { ...t, has_unread_completion: false } : t,
+                    ),
+                  }
+                })
                 void (async () => {
                   await openWorkdir(notification.workdirId)
                   await activateTask(notification.taskId)

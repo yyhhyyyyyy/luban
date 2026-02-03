@@ -151,6 +151,7 @@ export type TaskSummarySnapshot = {
   workdir_id: WorkspaceId
   task_id: WorkspaceThreadId
   title: string
+  created_at_unix_seconds: number
   updated_at_unix_seconds: number
   branch_name: string
   workdir_name: string
@@ -177,6 +178,7 @@ export type ThreadMeta = {
   task_id: WorkspaceThreadId
   remote_thread_id: string | null
   title: string
+  created_at_unix_seconds: number
   updated_at_unix_seconds: number
   task_status: TaskStatus
   turn_status: TurnStatus

@@ -221,6 +221,7 @@ pub struct ConversationThreadMeta {
     pub thread_id: WorkspaceThreadId,
     pub remote_thread_id: Option<String>,
     pub title: String,
+    pub created_at_unix_seconds: u64,
     pub updated_at_unix_seconds: u64,
     pub task_status: TaskStatus,
     pub turn_status: crate::TurnStatus,

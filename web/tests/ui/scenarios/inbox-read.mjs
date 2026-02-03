@@ -12,7 +12,18 @@ export async function runInboxRead({ page }) {
   }
   const unreadCount = await unreadRows.count();
   if (unreadCount === 0) {
-    throw new Error('expected at least one unread inbox notification');
+    const allRows = page.locator('[data-testid^="inbox-notification-row-"]');
+    const allCount = await allRows.count();
+    const sample = [];
+    for (let i = 0; i < Math.min(allCount, 5); i += 1) {
+      const row = allRows.nth(i);
+      sample.push({
+        idx: i,
+        read: await row.getAttribute('data-read'),
+        text: ((await row.innerText()) ?? '').trim().replace(/\s+/g, ' ').slice(0, 200),
+      });
+    }
+    throw new Error(`expected at least one unread inbox notification; rows=${allCount} sample=${JSON.stringify(sample)}`);
   }
 
   const rowTestId = await unreadRows.first().getAttribute('data-testid');

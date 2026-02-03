@@ -438,6 +438,7 @@ impl Engine {
                                 thread_id: luban_api::WorkspaceThreadId(t.thread_id.as_u64()),
                                 remote_thread_id: t.remote_thread_id,
                                 title: t.title,
+                                created_at_unix_seconds: t.created_at_unix_seconds,
                                 updated_at_unix_seconds: t.updated_at_unix_seconds,
                                 task_status: match t.task_status {
                                     luban_domain::TaskStatus::Backlog => {
@@ -3346,6 +3347,7 @@ impl Engine {
                 thread_id: luban_api::WorkspaceThreadId(t.thread_id.as_u64()),
                 remote_thread_id: t.remote_thread_id.clone(),
                 title: t.title.clone(),
+                created_at_unix_seconds: t.created_at_unix_seconds,
                 updated_at_unix_seconds: t.updated_at_unix_seconds,
                 task_status: match t.task_status {
                     luban_domain::TaskStatus::Backlog => luban_api::TaskStatus::Backlog,
@@ -5464,6 +5466,7 @@ mod tests {
                 thread_id: *id,
                 remote_thread_id: None,
                 title: format!("thread-{}", id.as_u64()),
+                created_at_unix_seconds: 0,
                 updated_at_unix_seconds: 0,
                 task_status: luban_domain::TaskStatus::Todo,
                 turn_status: luban_domain::TurnStatus::Idle,
@@ -5544,6 +5547,7 @@ mod tests {
                 thread_id,
                 remote_thread_id: None,
                 title: "alpha".to_owned(),
+                created_at_unix_seconds: 0,
                 updated_at_unix_seconds: 0,
                 task_status: luban_domain::TaskStatus::Todo,
                 turn_status: luban_domain::TurnStatus::Idle,
@@ -5553,6 +5557,7 @@ mod tests {
                 thread_id,
                 remote_thread_id: None,
                 title: "beta".to_owned(),
+                created_at_unix_seconds: 0,
                 updated_at_unix_seconds: 0,
                 task_status: luban_domain::TaskStatus::Todo,
                 turn_status: luban_domain::TurnStatus::Idle,

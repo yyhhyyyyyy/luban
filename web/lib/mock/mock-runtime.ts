@@ -203,6 +203,7 @@ export async function mockFetchTasks(args: { projectId?: string } = {}): Promise
           workdir_id: workdir.id,
           task_id: t.task_id,
           title: t.title,
+          created_at_unix_seconds: t.created_at_unix_seconds,
           updated_at_unix_seconds: t.updated_at_unix_seconds,
           branch_name: workdir.branch_name,
           workdir_name: workdir.workdir_name,
@@ -311,6 +312,7 @@ function createTaskInWorkdir(state: RuntimeState, workdirId: WorkspaceId, title:
     task_id: taskId,
     remote_thread_id: null,
     title,
+    created_at_unix_seconds: now,
     updated_at_unix_seconds: now,
     task_status: "backlog",
     turn_status: "idle",
@@ -548,6 +550,15 @@ export function mockDispatchAction(args: { action: ClientAction; onEvent: (event
     const key = workdirTaskKey(a.workdir_id, a.task_id)
     const convo = state.conversationsByWorkdirTask.get(key) ?? null
     if (!convo) return
+    const threads = state.threadsByWorkdir.get(a.workdir_id) ?? null
+    if (threads) {
+      const now = Math.floor(Date.now() / 1000)
+      threads.tasks = threads.tasks.map((t) =>
+        t.task_id === a.task_id
+          ? { ...t, updated_at_unix_seconds: Math.max(t.updated_at_unix_seconds, now) }
+          : t,
+      )
+    }
     const next: ConversationEntry[] = [
       ...convo.entries,
       {
@@ -556,7 +567,11 @@ export function mockDispatchAction(args: { action: ClientAction; onEvent: (event
         event: { type: "message", text: a.text, attachments: a.attachments ?? [] },
       },
     ]
-    state.conversationsByWorkdirTask.set(key, { ...convo, entries: next, entries_total: next.length })
+    const rev = bumpRev(state)
+    if (threads) threads.rev = rev
+    state.conversationsByWorkdirTask.set(key, { ...convo, entries: next, entries_total: next.length, rev })
+    args.onEvent({ type: "app_changed", rev, snapshot: clone(state.app) })
+    emitWorkdirTasksChanged({ state, workdirId: a.workdir_id, onEvent: args.onEvent })
     emitConversationChanged({ state, workdirId: a.workdir_id, taskId: a.task_id, onEvent: args.onEvent })
     return
   }
