@@ -2,6 +2,7 @@
 
 import type React from "react"
 import { useState, useCallback, useRef } from "react"
+import Image from "next/image"
 import {
   Brain,
   Check,
@@ -272,11 +273,12 @@ function SystemEventItem({ message, actor }: SystemEventItemProps) {
       return { name: "Agent", initial: "A", color: COLORS.textPrimary }
     }
     if (message.eventSource === "system") {
-      return { name: "System", initial: "S", color: COLORS.textMuted }
+      return { name: "Luban", initial: "L", color: COLORS.textMuted }
     }
     return { name: "You", initial: "U", color: COLORS.accent }
   })()
   const eventActor = actor || defaultActor
+  const showLubanLogo = !actor && message.eventSource === "system"
 
   return (
     <div 
@@ -301,12 +303,17 @@ function SystemEventItem({ message, actor }: SystemEventItemProps) {
             width: ACTIVITY_ICON_SIZE_PX,
             height: ACTIVITY_ICON_SIZE_PX,
             borderRadius: '50%',
-            backgroundColor: eventActor.color,
+            backgroundColor: showLubanLogo ? COLORS.white : eventActor.color,
+            border: showLubanLogo ? `1px solid ${COLORS.border}` : undefined,
             fontSize: '7px',
             fontWeight: 500
           }}
         >
-          {eventActor.initial}
+          {showLubanLogo ? (
+            <Image src="/icon-light-32x32.png" alt="Luban" width={10} height={10} unoptimized />
+          ) : (
+            eventActor.initial
+          )}
         </div>
       </div>
       

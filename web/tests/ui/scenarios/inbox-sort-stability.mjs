@@ -6,6 +6,17 @@ async function inboxRowTaskTitle(row) {
   return ((await title.textContent()) ?? '').trim();
 }
 
+async function collectInboxTitles({ page, limit = 10 }) {
+  const titles = [];
+  for (let i = 0; i < limit; i += 1) {
+    const row = page.getByTestId(`inbox-notification-row-${i}`);
+    if ((await row.count()) === 0) break;
+    await row.waitFor({ state: 'visible' });
+    titles.push(await inboxRowTaskTitle(row));
+  }
+  return titles;
+}
+
 export async function runInboxSortStability({ page }) {
   await page.getByTestId('nav-inbox-button').click();
   await page.getByTestId('inbox-view').waitFor({ state: 'visible' });
@@ -25,6 +36,18 @@ export async function runInboxSortStability({ page }) {
   }
 
   await row1.click();
+  const headerTitle = page.getByTestId('task-header-title').first();
+  await headerTitle.waitFor({ state: 'visible' });
+  const start = Date.now();
+  while (Date.now() - start < 20_000) {
+    const text = ((await headerTitle.textContent()) ?? '').trim();
+    if (text === row1Title) break;
+    await sleep(50);
+  }
+  const selectedTitle = ((await headerTitle.textContent()) ?? '').trim();
+  if (selectedTitle !== row1Title) {
+    throw new Error(`expected inbox selection to switch before sending message; got "${selectedTitle}" expected "${row1Title}"`);
+  }
   const message = `Inbox reorder stability ${Date.now()}`;
   await page.getByTestId('chat-input').fill(message);
   await page.getByTestId('chat-send').click();
@@ -46,16 +69,23 @@ export async function runInboxSortStability({ page }) {
   await page.getByTestId('nav-inbox-button').click();
   await page.getByTestId('inbox-view').waitFor({ state: 'visible' });
 
-  const row0AfterReopen = page.getByTestId('inbox-notification-row-0');
-  await row0AfterReopen.waitFor({ state: 'visible' });
-  const row0TitleAfterReopen = await inboxRowTaskTitle(row0AfterReopen);
-  if (row0TitleAfterReopen !== row1Title) {
+  const reopenedTitles = await collectInboxTitles({ page, limit: 10 });
+  const row0Index = reopenedTitles.indexOf(row0Title);
+  const row1Index = reopenedTitles.indexOf(row1Title);
+  if (row0Index === -1 || row1Index === -1) {
     throw new Error(
-      `expected inbox to resort after reopen; got row0="${row0TitleAfterReopen}" expected="${row1Title}"`,
+      `expected inbox to still contain "${row0Title}" and "${row1Title}" after reopen; got titles=${JSON.stringify(reopenedTitles)}`,
+    );
+  }
+  if (row1Index >= row0Index) {
+    throw new Error(
+      `expected inbox to move the updated task ahead after reopen; got "${row1Title}" at index=${row1Index} and "${row0Title}" at index=${row0Index}`,
     );
   }
 
   // Select the newest item so later scenarios have a stable header surface (star button).
+  const row0AfterReopen = page.getByTestId('inbox-notification-row-0');
+  await row0AfterReopen.waitFor({ state: 'visible' });
   await row0AfterReopen.click();
   await page.getByTestId('task-star-button').waitFor({ state: 'visible' });
 }

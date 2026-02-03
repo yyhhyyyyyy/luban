@@ -91,7 +91,7 @@ export function ConversationMessage({
             className="inline-block w-3 h-3 animate-spin mr-1 align-[-2px]"
           />
         )}
-        {message.eventSource === "agent" ? "Agent: " : message.eventSource === "system" ? "System: " : ""}
+        {message.eventSource === "agent" ? "Agent: " : message.eventSource === "system" ? "Luban: " : ""}
         {message.content}
       </div>
     )

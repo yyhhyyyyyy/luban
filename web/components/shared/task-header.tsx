@@ -81,7 +81,11 @@ export function TaskHeader({
         )}
 
         {/* Task title */}
-        <span className="text-[13px] font-medium truncate" style={{ color: '#1b1b1b' }}>
+        <span
+          data-testid="task-header-title"
+          className="text-[13px] font-medium truncate"
+          style={{ color: '#1b1b1b' }}
+        >
           {title || "Untitled Task"}
         </span>
 

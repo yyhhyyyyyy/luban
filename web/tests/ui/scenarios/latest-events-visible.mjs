@@ -10,6 +10,14 @@ export async function runLatestEventsVisible({ page }) {
   const contentWrapper = page.getByTestId('chat-content-wrapper');
   await contentWrapper.waitFor({ state: 'visible' });
 
+  const createdEvent = page.getByTestId('activity-event').filter({ hasText: 'created the task' }).first();
+  await createdEvent.scrollIntoViewIfNeeded();
+  await createdEvent.waitFor({ state: 'visible' });
+  const createdEventText = ((await createdEvent.getByTestId('event-text').textContent()) ?? '').trim();
+  if (!createdEventText.startsWith('Luban')) {
+    throw new Error(`expected system events to be attributed to Luban, got "${createdEventText}"`);
+  }
+
   const containerMetrics = await scrollContainer.evaluate((el) => {
     const rect = el.getBoundingClientRect();
     return {
