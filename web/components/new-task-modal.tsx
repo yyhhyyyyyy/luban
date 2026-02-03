@@ -193,9 +193,11 @@ export function NewTaskModal({ open, onOpenChange, activeProjectId }: NewTaskMod
     if (selectedProject == null) return false
     // Non-git project does not require explicit workdir selection.
     if (!isGitProject) return true
-    // Git project - need workdir selected (either existing or -1 for create new)
-    return selectedWorkdirId != null
-  }, [input, isGitProject, selectedProject, selectedWorkdirId])
+    // Git project - need workdir selected (either existing or -1 for create new).
+    // Allow the initial "no workdirs yet" state so submit can call ensureMainWorkdir().
+    if (selectedWorkdirId != null) return true
+    return workdirOptions.length === 0
+  }, [input, isGitProject, selectedProject, selectedWorkdirId, workdirOptions.length])
 
   // Focus input when modal opens
   useEffect(() => {
