@@ -10,6 +10,7 @@ import { BrowserManager } from 'agent-browser/dist/browser.js';
 import { waitForHttpOk } from './lib/utils.mjs';
 import { runActivityAttachments } from './scenarios/activity-attachments.mjs';
 import { runInboxRead } from './scenarios/inbox-read.mjs';
+import { runInboxPreviewLine } from './scenarios/inbox-preview-line.mjs';
 import { runInboxSortStability } from './scenarios/inbox-sort-stability.mjs';
 import { runLatestEventsVisible } from './scenarios/latest-events-visible.mjs';
 import { runNewTaskModal } from './scenarios/new-task-modal.mjs';
@@ -155,6 +156,7 @@ async function main() {
 	    await runNewTaskGitProjectWithoutWorkdirs({ page, baseUrl });
 	    await runActivityAttachments({ page, baseUrl });
 	    await runInboxRead({ page, baseUrl });
+	    await runInboxPreviewLine({ page, baseUrl });
 	    await runInboxSortStability({ page, baseUrl });
 	    await runStarFavorites({ page, baseUrl });
     await runNewTaskDefaultProjectFollowsContext({ page, baseUrl });

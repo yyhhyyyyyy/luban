@@ -1,10 +1,13 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   CheckCircle2,
   AlertCircle,
   MessageSquare,
+  Loader2,
+  Circle,
+  PauseCircle,
   MoreHorizontal,
   Filter,
   SlidersHorizontal,
@@ -12,15 +15,14 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { TaskActivityPanel } from "./task-activity-panel"
-import { TaskHeader, ProjectIcon } from "./shared/task-header"
+import { TaskHeader } from "./shared/task-header"
 import type { ChangedFile } from "./right-sidebar"
 import { useLuban } from "@/lib/luban-context"
 import { computeProjectDisplayNames } from "@/lib/project-display-names"
 import { projectColorClass } from "@/lib/project-colors"
-import { fetchTasks } from "@/lib/luban-http"
-import type { TasksSnapshot, TaskSummarySnapshot } from "@/lib/luban-api"
-
-type NotificationType = "completed" | "failed" | "needs-review"
+import { fetchConversation, fetchTasks } from "@/lib/luban-http"
+import type { ConversationSnapshot, OperationStatus, TasksSnapshot, TurnResult, TurnStatus } from "@/lib/luban-api"
+import { isMockMode } from "@/lib/luban-mode"
 
 export interface InboxNotification {
   id: string
@@ -29,9 +31,15 @@ export interface InboxNotification {
   taskTitle: string
   workdir: string
   projectName: string
+  projectAvatarUrl: string
+  projectFallbackAvatarUrl: string
   projectColor: string
-  type: NotificationType
-  description: string
+  taskStatus: {
+    agentRunStatus: OperationStatus
+    turnStatus: TurnStatus
+    lastTurnResult: TurnResult | null
+    hasUnreadCompletion: boolean
+  }
   timestamp: string
   read: boolean
   isStarred: boolean
@@ -41,26 +49,82 @@ interface InboxViewProps {
   onOpenFullView?: (notification: InboxNotification) => void
 }
 
-const NotificationIcon = ({ type }: { type: NotificationType }) => {
-  switch (type) {
-    case "completed":
-      return <CheckCircle2 className="w-[14px] h-[14px]" style={{ color: '#5e6ad2' }} />
-    case "failed":
-      return <AlertCircle className="w-[14px] h-[14px]" style={{ color: '#eb5757' }} />
-    case "needs-review":
-      return <MessageSquare className="w-[14px] h-[14px]" style={{ color: '#f2994a' }} />
+function escapeXmlText(raw: string): string {
+  return raw
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;")
+}
+
+function buildFallbackAvatarUrl(displayName: string, size: number): string {
+  const letter = displayName.trim().slice(0, 1).toUpperCase() || "?"
+  const safeLetter = escapeXmlText(letter)
+  const svg = [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">`,
+    `<rect width="${size}" height="${size}" rx="3" fill="#e8e8e8" />`,
+    `<text x="${size / 2}" y="${Math.floor(size * 0.7)}" text-anchor="middle" font-size="${Math.floor(size * 0.62)}" font-family="system-ui, -apple-system, sans-serif" fill="#6b6b6b">${safeLetter}</text>`,
+    `</svg>`,
+  ].join("")
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`
+}
+
+function extractLatestAgentResponsePreviewLine(conversation: ConversationSnapshot): string | null {
+  for (let i = conversation.entries.length - 1; i >= 0; i -= 1) {
+    const entry = conversation.entries[i]
+    if (!entry) continue
+    if (entry.type !== "agent_event") continue
+    if (entry.event.type !== "message") continue
+    const line = firstNonEmptyLine(entry.event.text)
+    if (line) return line
   }
+  return null
+}
+
+function firstNonEmptyLine(text: string): string | null {
+  for (const raw of text.split(/\r?\n/)) {
+    const trimmed = raw.trim()
+    if (!trimmed) continue
+    return trimmed
+  }
+  return null
+}
+
+function InboxTaskStatusIcon({ status }: { status: InboxNotification["taskStatus"] }) {
+  if (status.agentRunStatus === "running" || status.turnStatus === "running") {
+    return <Loader2 className="w-[14px] h-[14px] animate-spin" style={{ color: "#5e6ad2" }} />
+  }
+  if (status.turnStatus === "paused") {
+    return <PauseCircle className="w-[14px] h-[14px]" style={{ color: "#9b9b9b" }} />
+  }
+  if (status.turnStatus === "awaiting") {
+    return <MessageSquare className="w-[14px] h-[14px]" style={{ color: "#f2994a" }} />
+  }
+  if (status.lastTurnResult === "failed") {
+    return <AlertCircle className="w-[14px] h-[14px]" style={{ color: "#eb5757" }} />
+  }
+  if (status.lastTurnResult === "completed") {
+    return (
+      <CheckCircle2
+        className="w-[14px] h-[14px]"
+        style={{ color: status.hasUnreadCompletion ? "#5e6ad2" : "#27ae60" }}
+      />
+    )
+  }
+  return <Circle className="w-[14px] h-[14px]" style={{ color: "#9b9b9b" }} />
 }
 
 interface NotificationRowProps {
   notification: InboxNotification
+  previewText: string
   testId?: string
   selected?: boolean
   onClick?: () => void
   onDoubleClick?: () => void
 }
 
-function NotificationRow({ notification, testId, selected, onClick, onDoubleClick }: NotificationRowProps) {
+function NotificationRow({ notification, previewText, testId, selected, onClick, onDoubleClick }: NotificationRowProps) {
   return (
     <div
       data-testid={testId}
@@ -77,7 +141,20 @@ function NotificationRow({ notification, testId, selected, onClick, onDoubleClic
       <div className="flex-1 min-w-0">
         {/* Project + Title row */}
         <div className="flex items-center gap-1.5">
-          <ProjectIcon name={notification.projectName} color={notification.projectColor} />
+          <img
+            data-testid="inbox-notification-project-avatar"
+            src={notification.projectAvatarUrl}
+            alt={`${notification.projectName} project avatar`}
+            className="w-[14px] h-[14px] rounded-[3px] flex-shrink-0"
+            loading="lazy"
+            decoding="async"
+            onError={(e) => {
+              const img = e.currentTarget
+              if (img.src !== notification.projectFallbackAvatarUrl) {
+                img.src = notification.projectFallbackAvatarUrl
+              }
+            }}
+          />
           <span className="text-[12px]" style={{ color: '#6b6b6b' }}>
             {notification.projectName}
           </span>
@@ -94,16 +171,19 @@ function NotificationRow({ notification, testId, selected, onClick, onDoubleClic
           </span>
         </div>
         <div
+          data-testid="inbox-notification-preview"
           className="text-[12px] mt-0.5 truncate"
           style={{ color: '#6b6b6b' }}
         >
-          {notification.description}
+          {previewText}
         </div>
       </div>
 
       {/* Status + Timestamp (vertical stack) */}
       <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
-        <NotificationIcon type={notification.type} />
+        <span data-testid="inbox-notification-task-status-icon">
+          <InboxTaskStatusIcon status={notification.taskStatus} />
+        </span>
         <span
           className="text-[11px]"
           style={{ color: '#9b9b9b' }}
@@ -133,6 +213,13 @@ export function InboxView({ onOpenFullView }: InboxViewProps) {
   const [selectedNotificationId, setSelectedNotificationId] = useState<string | null>(null)
   const [pendingDiffFile, setPendingDiffFile] = useState<ChangedFile | null>(null)
   const [nowMs, setNowMs] = useState<number | null>(null)
+  const [agentPreviewByNotificationId, setAgentPreviewByNotificationId] = useState<Record<string, string | null>>({})
+  const agentPreviewByNotificationIdRef = useRef(agentPreviewByNotificationId)
+  const previewInFlightRef = useRef<Set<string>>(new Set())
+
+  useEffect(() => {
+    agentPreviewByNotificationIdRef.current = agentPreviewByNotificationId
+  }, [agentPreviewByNotificationId])
 
   useEffect(() => {
     const hasApp = app != null
@@ -194,11 +281,20 @@ export function InboxView({ onOpenFullView }: InboxViewProps) {
       }
     }
 
-    const projectNameById = new Map<string, { name: string; color: string }>()
+    const projectInfoById = new Map<string, { name: string; color: string; avatarUrl: string; fallbackAvatarUrl: string }>()
     for (const p of app.projects) {
-      projectNameById.set(p.path, {
-        name: displayNames.get(p.path) ?? p.slug,
+      const name = displayNames.get(p.path) ?? p.slug
+      const fallbackAvatarUrl = buildFallbackAvatarUrl(name, 14)
+      const avatarUrl = p.is_git
+        ? isMockMode()
+          ? fallbackAvatarUrl
+          : `/api/projects/avatar?project_id=${encodeURIComponent(p.id)}`
+        : fallbackAvatarUrl
+      projectInfoById.set(p.id, {
+        name,
         color: projectColorClass(p.id),
+        avatarUrl,
+        fallbackAvatarUrl,
       })
     }
 
@@ -219,7 +315,12 @@ export function InboxView({ onOpenFullView }: InboxViewProps) {
     })
 
     for (const t of filtered) {
-      const projectInfo = projectNameById.get(t.project_id) ?? { name: t.project_id, color: "bg-[#5e6ad2]" }
+      const projectInfo = projectInfoById.get(t.project_id) ?? {
+        name: t.project_id,
+        color: "bg-violet-500",
+        avatarUrl: buildFallbackAvatarUrl(t.project_id, 14),
+        fallbackAvatarUrl: buildFallbackAvatarUrl(t.project_id, 14),
+      }
       const id = `task-${t.workdir_id}-${t.task_id}`
       out.push({
         id,
@@ -228,9 +329,15 @@ export function InboxView({ onOpenFullView }: InboxViewProps) {
         taskTitle: t.title,
         workdir: t.workdir_name || t.branch_name,
         projectName: projectInfo.name,
+        projectAvatarUrl: projectInfo.avatarUrl,
+        projectFallbackAvatarUrl: projectInfo.fallbackAvatarUrl,
         projectColor: projectInfo.color,
-        type: "completed",
-        description: t.has_unread_completion ? "Unread completion" : "Read completion",
+        taskStatus: {
+          agentRunStatus: t.agent_run_status,
+          turnStatus: t.turn_status,
+          lastTurnResult: t.last_turn_result,
+          hasUnreadCompletion: t.has_unread_completion,
+        },
         timestamp: formatTimestamp(t.updated_at_unix_seconds),
         read: !t.has_unread_completion,
         isStarred: t.is_starred,
@@ -238,6 +345,56 @@ export function InboxView({ onOpenFullView }: InboxViewProps) {
     }
     return out
   }, [app, formatTimestamp, tasksSnapshot])
+
+  useEffect(() => {
+    if (notifications.length === 0) return
+
+    const concurrency = 4
+    const queue = notifications
+      .map((n) => ({ id: n.id, workdirId: n.workdirId, taskId: n.taskId }))
+      .filter((n) => agentPreviewByNotificationIdRef.current[n.id] === undefined && !previewInFlightRef.current.has(n.id))
+
+    if (queue.length === 0) return
+
+    let cancelled = false
+    let nextIdx = 0
+
+    const worker = async () => {
+      while (!cancelled) {
+        const idx = nextIdx
+        nextIdx += 1
+        const item = queue[idx]
+        if (!item) return
+
+        previewInFlightRef.current.add(item.id)
+        try {
+          const convo = await fetchConversation(item.workdirId, item.taskId, { limit: 200 })
+          if (cancelled) return
+          const preview = extractLatestAgentResponsePreviewLine(convo)
+          setAgentPreviewByNotificationId((prev) => {
+            if (prev[item.id] !== undefined) return prev
+            return { ...prev, [item.id]: preview }
+          })
+        } catch (err) {
+          if (cancelled) return
+          setAgentPreviewByNotificationId((prev) => {
+            if (prev[item.id] !== undefined) return prev
+            return { ...prev, [item.id]: null }
+          })
+        } finally {
+          previewInFlightRef.current.delete(item.id)
+        }
+      }
+    }
+
+    for (let i = 0; i < Math.min(concurrency, queue.length); i += 1) {
+      void worker()
+    }
+
+    return () => {
+      cancelled = true
+    }
+  }, [notifications])
 
   const selectedNotification = useMemo(() => {
     if (!selectedNotificationId) return null
@@ -289,31 +446,40 @@ export function InboxView({ onOpenFullView }: InboxViewProps) {
 
         {/* Notification List */}
         <div className="flex-1 overflow-y-auto">
-          {notifications.map((notification, idx) => (
-            <NotificationRow
-              key={notification.id}
-              notification={notification}
-              testId={`inbox-notification-row-${idx}`}
-              selected={selectedNotification?.id === notification.id}
-              onClick={() => {
-                setSelectedNotificationId(notification.id)
-                setTasksSnapshot((prev) => {
-                  if (!prev) return prev
-                  return {
-                    ...prev,
-                    tasks: prev.tasks.map((t) =>
-                      t.workdir_id === notification.workdirId ? { ...t, has_unread_completion: false } : t,
-                    ),
-                  }
-                })
-                void (async () => {
-                  await openWorkdir(notification.workdirId)
-                  await activateTask(notification.taskId)
-                })()
-              }}
-              onDoubleClick={() => onOpenFullView?.(notification)}
-            />
-          ))}
+          {notifications.map((notification, idx) => {
+            const preview = agentPreviewByNotificationId[notification.id]
+            const previewText =
+              preview === undefined ? "Loading response..." : preview == null ? "No agent response yet." : preview
+
+            return (
+              <NotificationRow
+                key={notification.id}
+                notification={notification}
+                previewText={previewText}
+                testId={`inbox-notification-row-${idx}`}
+                selected={selectedNotification?.id === notification.id}
+                onClick={() => {
+                  setSelectedNotificationId(notification.id)
+                  setTasksSnapshot((prev) => {
+                    if (!prev) return prev
+                    return {
+                      ...prev,
+                      tasks: prev.tasks.map((t) =>
+                        t.workdir_id === notification.workdirId && t.task_id === notification.taskId
+                          ? { ...t, has_unread_completion: false }
+                          : t,
+                      ),
+                    }
+                  })
+                  void (async () => {
+                    await openWorkdir(notification.workdirId)
+                    await activateTask(notification.taskId)
+                  })()
+                }}
+                onDoubleClick={() => onOpenFullView?.(notification)}
+              />
+            )
+          })}
         </div>
       </div>
 
