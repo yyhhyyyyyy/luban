@@ -16,6 +16,7 @@ import type { AttachmentRef, TaskExecuteMode } from "@/lib/luban-api"
 import { draftKey } from "@/lib/ui-prefs"
 import { focusChatInput } from "@/lib/focus-chat-input"
 import { uploadAttachment } from "@/lib/luban-http"
+import { isMockMode } from "@/lib/luban-mode"
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -23,6 +24,27 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu"
 import type { AppSnapshot } from "@/lib/luban-api"
+
+function escapeXmlText(raw: string): string {
+  return raw
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;")
+}
+
+function buildFallbackAvatarUrl(displayName: string, size: number): string {
+  const letter = displayName.trim().slice(0, 1).toUpperCase() || "?"
+  const safeLetter = escapeXmlText(letter)
+  const svg = [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">`,
+    `<rect width="${size}" height="${size}" rx="4" fill="#e8e8e8" />`,
+    `<text x="${size / 2}" y="${Math.floor(size * 0.67)}" text-anchor="middle" font-size="${Math.floor(size * 0.56)}" font-family="system-ui, -apple-system, sans-serif" fill="#6b6b6b">${safeLetter}</text>`,
+    `</svg>`,
+  ].join("")
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`
+}
 
 interface NewTaskModalProps {
   open: boolean
@@ -69,14 +91,25 @@ export function NewTaskModal({ open, onOpenChange, activeProjectId }: NewTaskMod
   const normalizePathLike = (raw: string) => raw.trim().replace(/\/+$/, "")
 
   const projectOptions = useMemo(() => {
-    return (app?.projects ?? []).map((p) => ({
-      id: p.id,
-      name: p.name,
-      path: p.path,
-      slug: p.slug,
-      isGit: p.is_git,
-      workdirs: p.workdirs.filter((w) => w.status === "active"),
-    }))
+    return (app?.projects ?? []).map((p) => {
+      const displayName = p.name || p.slug || p.id
+      const fallbackAvatarUrl = buildFallbackAvatarUrl(displayName, 16)
+      return {
+        id: p.id,
+        name: p.name,
+        displayName,
+        path: p.path,
+        slug: p.slug,
+        isGit: p.is_git,
+        fallbackAvatarUrl,
+        avatarUrl: p.is_git
+          ? isMockMode()
+            ? fallbackAvatarUrl
+            : `/api/projects/avatar?project_id=${encodeURIComponent(p.id)}`
+          : undefined,
+        workdirs: p.workdirs.filter((w) => w.status === "active"),
+      }
+    })
   }, [app])
 
   const defaultProjectId = useMemo(() => {
@@ -476,16 +509,30 @@ export function NewTaskModal({ open, onOpenChange, activeProjectId }: NewTaskMod
                   }}
                   disabled={executingMode != null}
                 >
-                  {/* Colored dot indicator */}
-	                  <span
-	                    className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full"
-	                    style={{ backgroundColor: "#26b5ce" }}
-	                  />
-	                  <span>
-	                    {selectedProject?.name || selectedProject?.slug || "Project"}
-	                  </span>
-	                </button>
-	              </DropdownMenuTrigger>
+	                  {/* Project indicator */}
+	                  {selectedProject != null && selectedProject.isGit ? (
+	                    <img
+	                      src={selectedProject.avatarUrl ?? selectedProject.fallbackAvatarUrl}
+	                      alt=""
+	                      width={12}
+	                      height={12}
+	                      className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 rounded overflow-hidden"
+	                      onError={(e) => {
+	                        e.currentTarget.onerror = null
+	                        e.currentTarget.src = selectedProject.fallbackAvatarUrl
+	                      }}
+	                    />
+	                  ) : (
+	                    <span
+	                      className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full"
+	                      style={{ backgroundColor: "#26b5ce" }}
+	                    />
+	                  )}
+		                  <span>
+		                    {selectedProject?.name || selectedProject?.slug || "Project"}
+		                  </span>
+		                </button>
+		              </DropdownMenuTrigger>
               <DropdownMenuContent
                 align="start"
                 sideOffset={4}
@@ -514,27 +561,42 @@ export function NewTaskModal({ open, onOpenChange, activeProjectId }: NewTaskMod
 
 	                <div className="p-1 max-h-[300px] overflow-y-auto">
 	                  {/* Project options */}
-		                  {filteredProjects.map((p, idx) => (
-		                    <DropdownMenuItem
-		                      key={p.id}
-                      onClick={() => {
-                        setSelectedProjectId(p.id)
-                        setProjectSearch("")
-                      }}
-                      className="flex items-center justify-between h-8 px-2 rounded cursor-pointer hover:bg-[#f5f5f5] focus:bg-[#f5f5f5] outline-none"
-                    >
-	                      <div className="flex items-center gap-2">
-	                        <span
-	                          className="w-4 h-4 rounded flex items-center justify-center text-[10px] text-white font-medium"
-	                          style={{ backgroundColor: ["#26b5ce", "#f2994a", "#eb5757", "#5e6ad2", "#27ae60"][idx % 5] }}
-	                        >
-	                          {(p.name || p.slug || "P").charAt(0).toUpperCase()}
-	                        </span>
-	                        <span className="text-[13px]" style={{ color: "#2d2d2d" }}>{p.name || p.slug}</span>
-		                      </div>
-		                      {selectedProjectId === p.id && (
-		                        <Check className="w-4 h-4" style={{ color: "#2d2d2d" }} />
-		                      )}
+			                  {filteredProjects.map((p, idx) => (
+			                    <DropdownMenuItem
+			                      key={p.id}
+	                      data-testid={`new-task-project-option-${p.id}`}
+	                      onClick={() => {
+	                        setSelectedProjectId(p.id)
+	                        setProjectSearch("")
+	                      }}
+	                      className="flex items-center justify-between h-8 px-2 rounded cursor-pointer hover:bg-[#f5f5f5] focus:bg-[#f5f5f5] outline-none"
+	                    >
+		                      <div className="flex items-center gap-2">
+		                        {p.isGit ? (
+	                          <img
+	                            src={p.avatarUrl ?? p.fallbackAvatarUrl}
+	                            alt=""
+	                            width={16}
+	                            height={16}
+	                            className="w-4 h-4 rounded overflow-hidden flex-shrink-0"
+	                            onError={(e) => {
+	                              e.currentTarget.onerror = null
+	                              e.currentTarget.src = p.fallbackAvatarUrl
+	                            }}
+	                          />
+	                        ) : (
+		                          <span
+		                            className="w-4 h-4 rounded flex items-center justify-center text-[10px] text-white font-medium"
+		                            style={{ backgroundColor: ["#26b5ce", "#f2994a", "#eb5757", "#5e6ad2", "#27ae60"][idx % 5] }}
+		                          >
+		                            {(p.name || p.slug || "P").charAt(0).toUpperCase()}
+		                          </span>
+	                        )}
+		                        <span className="text-[13px]" style={{ color: "#2d2d2d" }}>{p.name || p.slug}</span>
+			                      </div>
+			                      {selectedProjectId === p.id && (
+			                        <Check className="w-4 h-4" style={{ color: "#2d2d2d" }} />
+			                      )}
 		                    </DropdownMenuItem>
 		                  ))}
 

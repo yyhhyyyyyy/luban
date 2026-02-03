@@ -16,6 +16,7 @@ import { runNewTaskModal } from './scenarios/new-task-modal.mjs';
 import { runNewTaskDoubleSubmitNoDuplicate } from './scenarios/new-task-double-submit-no-duplicate.mjs';
 import { runNewTaskDefaultProjectFollowsContext } from './scenarios/new-task-default-project-follows-context.mjs';
 import { runNewTaskGitProjectWithoutWorkdirs } from './scenarios/new-task-git-project-without-workdirs.mjs';
+import { runNewTaskProjectAvatars } from './scenarios/new-task-project-avatars.mjs';
 import { runSettingsPanel } from './scenarios/settings-panel.mjs';
 import { runSidebarProjectAvatars } from './scenarios/sidebar-project-avatars.mjs';
 import { runStarFavorites } from './scenarios/star-favorites.mjs';
@@ -146,15 +147,16 @@ async function main() {
     await page.goto(baseUrl, { waitUntil: 'networkidle' });
 
     await page.getByTestId('nav-sidebar').waitFor({ state: 'visible' });
-    await page.getByTestId('task-list-view').waitFor({ state: 'visible' });
-
-    await runSidebarProjectAvatars({ page, baseUrl });
-    await runNewTaskModal({ page, baseUrl });
-    await runNewTaskGitProjectWithoutWorkdirs({ page, baseUrl });
-    await runActivityAttachments({ page, baseUrl });
-    await runInboxRead({ page, baseUrl });
-    await runInboxSortStability({ page, baseUrl });
-    await runStarFavorites({ page, baseUrl });
+	    await page.getByTestId('task-list-view').waitFor({ state: 'visible' });
+	
+	    await runSidebarProjectAvatars({ page, baseUrl });
+	    await runNewTaskModal({ page, baseUrl });
+	    await runNewTaskProjectAvatars({ page, baseUrl });
+	    await runNewTaskGitProjectWithoutWorkdirs({ page, baseUrl });
+	    await runActivityAttachments({ page, baseUrl });
+	    await runInboxRead({ page, baseUrl });
+	    await runInboxSortStability({ page, baseUrl });
+	    await runStarFavorites({ page, baseUrl });
     await runNewTaskDefaultProjectFollowsContext({ page, baseUrl });
     await runSettingsPanel({ page, baseUrl });
     await runTaskListNavigation({ page, baseUrl });
