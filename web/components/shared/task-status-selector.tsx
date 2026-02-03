@@ -1,6 +1,6 @@
 "use client"
 
-import { Check } from "lucide-react"
+import { Check, ChevronDown } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { TaskStatus } from "@/lib/luban-api"
 import {
@@ -83,6 +83,7 @@ interface TaskStatusSelectorProps {
   size?: "sm" | "md"
   disabled?: boolean
   triggerTestId?: string
+  variant?: "icon" | "pill"
 }
 
 export function TaskStatusSelector({
@@ -91,26 +92,47 @@ export function TaskStatusSelector({
   size = "sm",
   disabled = false,
   triggerTestId,
+  variant = "icon",
 }: TaskStatusSelectorProps) {
   const currentConfig = taskStatusConfig[status]
 
   const buttonSize = size === "sm" ? "w-6 h-6" : "w-7 h-7"
+  const pillHeightClass = size === "sm" ? "h-[26px]" : "h-[28px]"
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button
-          disabled={disabled}
-          data-testid={triggerTestId ?? "task-status-trigger"}
-          className={cn(
-            "flex items-center justify-center rounded hover:bg-muted transition-colors",
-            disabled && "opacity-50 cursor-not-allowed",
-            buttonSize
-          )}
-          title={`Status: ${currentConfig.label}`}
-        >
-          <TaskStatusIcon status={status} size={size === "sm" ? "sm" : "md"} />
-        </button>
+        {variant === "pill" ? (
+          <button
+            disabled={disabled}
+            data-testid={triggerTestId ?? "task-status-trigger"}
+            className={cn(
+              "flex items-center gap-1.5 px-2 rounded-[7px] border transition-colors",
+              "hover:bg-[#f7f7f7]",
+              disabled && "opacity-50 cursor-not-allowed",
+              pillHeightClass,
+            )}
+            style={{ borderColor: "#ebebeb", color: "#1b1b1b" }}
+            title={`Status: ${currentConfig.label}`}
+          >
+            <TaskStatusIcon status={status} size="xs" />
+            <span className="text-[12px] font-medium">{currentConfig.label}</span>
+            <ChevronDown className="w-3.5 h-3.5" style={{ color: "#9b9b9b" }} />
+          </button>
+        ) : (
+          <button
+            disabled={disabled}
+            data-testid={triggerTestId ?? "task-status-trigger"}
+            className={cn(
+              "flex items-center justify-center rounded hover:bg-muted transition-colors",
+              disabled && "opacity-50 cursor-not-allowed",
+              buttonSize,
+            )}
+            title={`Status: ${currentConfig.label}`}
+          >
+            <TaskStatusIcon status={status} size={size === "sm" ? "sm" : "md"} />
+          </button>
+        )}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-40 p-1.5" data-testid="task-status-menu">
         <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">

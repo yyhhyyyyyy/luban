@@ -16,12 +16,13 @@ import {
 import { cn } from "@/lib/utils"
 import { TaskActivityPanel } from "./task-activity-panel"
 import { TaskHeader } from "./shared/task-header"
+import { TaskStatusSelector } from "./shared/task-status-selector"
 import type { ChangedFile } from "./right-sidebar"
 import { useLuban } from "@/lib/luban-context"
 import { computeProjectDisplayNames } from "@/lib/project-display-names"
 import { projectColorClass } from "@/lib/project-colors"
 import { fetchConversation, fetchTasks } from "@/lib/luban-http"
-import type { ConversationSnapshot, OperationStatus, TasksSnapshot, TurnResult, TurnStatus } from "@/lib/luban-api"
+import type { ConversationSnapshot, OperationStatus, TaskStatus, TasksSnapshot, TurnResult, TurnStatus } from "@/lib/luban-api"
 import { isMockMode } from "@/lib/luban-mode"
 
 export interface InboxNotification {
@@ -34,6 +35,7 @@ export interface InboxNotification {
   projectAvatarUrl: string
   projectFallbackAvatarUrl: string
   projectColor: string
+  taskLifecycleStatus: TaskStatus
   taskStatus: {
     agentRunStatus: OperationStatus
     turnStatus: TurnStatus
@@ -208,7 +210,7 @@ function EmptyState({ unreadCount }: { unreadCount: number }) {
 }
 
 export function InboxView({ onOpenFullView }: InboxViewProps) {
-  const { app, openWorkdir, activateTask, setTaskStarred } = useLuban()
+  const { app, openWorkdir, activateTask, setTaskStarred, setTaskStatus } = useLuban()
   const [tasksSnapshot, setTasksSnapshot] = useState<TasksSnapshot | null>(null)
   const [selectedNotificationId, setSelectedNotificationId] = useState<string | null>(null)
   const [pendingDiffFile, setPendingDiffFile] = useState<ChangedFile | null>(null)
@@ -243,6 +245,39 @@ export function InboxView({ onOpenFullView }: InboxViewProps) {
       cancelled = true
     }
   }, [app != null])
+
+  const refreshTasks = useCallback(async () => {
+    if (!app) return
+    try {
+      const snap = await fetchTasks()
+      setTasksSnapshot(snap)
+    } catch (err) {
+      console.warn("fetchTasks failed", err)
+    }
+  }, [app])
+
+  const applyLocalTaskLifecycleStatus = useCallback((args: { workdirId: number; taskId: number; status: TaskStatus }) => {
+    setTasksSnapshot((prev) => {
+      if (!prev) return prev
+      let changed = false
+      const nextTasks = prev.tasks.map((t) => {
+        if (t.workdir_id !== args.workdirId || t.task_id !== args.taskId) return t
+        if (t.task_status === args.status) return t
+        changed = true
+        return { ...t, task_status: args.status }
+      })
+      return changed ? { ...prev, tasks: nextTasks, rev: prev.rev + 1 } : prev
+    })
+  }, [])
+
+  const handleTaskLifecycleStatusChange = useCallback(
+    (args: { workdirId: number; taskId: number; status: TaskStatus }) => {
+      applyLocalTaskLifecycleStatus(args)
+      setTaskStatus(args.workdirId, args.taskId, args.status)
+      window.setTimeout(() => void refreshTasks(), 200)
+    },
+    [applyLocalTaskLifecycleStatus, refreshTasks, setTaskStatus],
+  )
 
   useEffect(() => {
     const update = () => setNowMs(Date.now())
@@ -332,6 +367,7 @@ export function InboxView({ onOpenFullView }: InboxViewProps) {
         projectAvatarUrl: projectInfo.avatarUrl,
         projectFallbackAvatarUrl: projectInfo.fallbackAvatarUrl,
         projectColor: projectInfo.color,
+        taskLifecycleStatus: t.task_status,
         taskStatus: {
           agentRunStatus: t.agent_run_status,
           turnStatus: t.turn_status,
@@ -492,6 +528,23 @@ export function InboxView({ onOpenFullView }: InboxViewProps) {
               title={selectedNotification.taskTitle}
               workdir={selectedNotification.workdir}
               project={{ name: selectedNotification.projectName, color: selectedNotification.projectColor }}
+              actionBar={
+                <div className="flex items-center gap-2 min-w-0">
+                  <TaskStatusSelector
+                    status={selectedNotification.taskLifecycleStatus}
+                    onStatusChange={(status) =>
+                      handleTaskLifecycleStatusChange({
+                        workdirId: selectedNotification.workdirId,
+                        taskId: selectedNotification.taskId,
+                        status,
+                      })
+                    }
+                    variant="pill"
+                    size="sm"
+                    triggerTestId="inbox-task-status-trigger"
+                  />
+                </div>
+              }
               showFullActions
               isStarred={selectedNotification.isStarred}
               onToggleStar={(nextStarred) => {

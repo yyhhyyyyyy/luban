@@ -27,6 +27,8 @@ interface TaskHeaderProps {
   onToggleStar?: (nextStarred: boolean) => void
   /** Custom actions to render on the right side */
   customActions?: React.ReactNode
+  /** Optional action bar rendered below the header row */
+  actionBar?: React.ReactNode
 }
 
 /**
@@ -56,77 +58,89 @@ export function TaskHeader({
   isStarred = false,
   onToggleStar,
   customActions,
+  actionBar,
 }: TaskHeaderProps) {
   return (
-    <div
-      className="flex items-center justify-between h-[39px] flex-shrink-0"
-      style={{ padding: '0 20px', borderBottom: '1px solid #ebebeb' }}
-    >
-      {/* Left: Breadcrumb + Title + Badge + Star + Settings */}
-      <div className="flex items-center gap-1.5 min-w-0 flex-1">
-        {/* Project breadcrumb (optional) */}
-        {project && (
-          <>
-            <button
-              onClick={onProjectClick}
-              className="flex items-center gap-1 hover:opacity-70 transition-opacity flex-shrink-0"
-            >
-              <ProjectIcon name={project.name} color={project.color} />
-              <span className="text-[13px] font-medium" style={{ color: '#1b1b1b' }}>
-                {project.name}
+    <div className="flex flex-col flex-shrink-0" style={{ borderBottom: "1px solid #ebebeb" }}>
+      <div className="flex items-center justify-between h-[39px]" style={{ padding: "0 20px" }}>
+        {/* Left: Breadcrumb + Title + Badge + Star + Settings */}
+        <div className="flex items-center gap-1.5 min-w-0 flex-1">
+          {/* Project breadcrumb (optional) */}
+          {project && (
+            <>
+              <button
+                onClick={onProjectClick}
+                className="flex items-center gap-1 hover:opacity-70 transition-opacity flex-shrink-0"
+              >
+                <ProjectIcon name={project.name} color={project.color} />
+                <span className="text-[13px] font-medium" style={{ color: "#1b1b1b" }}>
+                  {project.name}
+                </span>
+              </button>
+              <span className="text-[13px] flex-shrink-0" style={{ color: "#9b9b9b" }}>
+                ›
               </span>
-            </button>
-            <span className="text-[13px] flex-shrink-0" style={{ color: '#9b9b9b' }}>›</span>
-          </>
-        )}
+            </>
+          )}
 
-        {/* Task title */}
-        <span
-          data-testid="task-header-title"
-          className="text-[13px] font-medium truncate"
-          style={{ color: '#1b1b1b' }}
-        >
-          {title || "Untitled Task"}
-        </span>
-
-        {/* Workdir badge */}
-        {workdir && (
+          {/* Task title */}
           <span
-            className="text-[11px] px-1.5 py-0.5 rounded flex-shrink-0 ml-1"
-            style={{ backgroundColor: '#f0f0f0', color: '#6b6b6b' }}
+            data-testid="task-header-title"
+            className="text-[13px] font-medium truncate"
+            style={{ color: "#1b1b1b" }}
           >
-            {workdir}
+            {title || "Untitled Task"}
           </span>
-        )}
 
-        {/* Star and Settings buttons - next to title */}
-        {showFullActions && (
-          <div className="flex items-center gap-0.5 ml-1 flex-shrink-0">
-            <button
-              data-testid="task-star-button"
-              className="w-6 h-6 flex items-center justify-center rounded-[5px] hover:bg-[#eeeeee] transition-colors"
-              style={{ color: isStarred ? '#f2c94c' : '#9b9b9b' }}
-              title={isStarred ? "Unstar" : "Star"}
-              aria-pressed={isStarred}
-              onClick={() => onToggleStar?.(!isStarred)}
+          {/* Workdir badge */}
+          {workdir && (
+            <span
+              className="text-[11px] px-1.5 py-0.5 rounded flex-shrink-0 ml-1"
+              style={{ backgroundColor: "#f0f0f0", color: "#6b6b6b" }}
             >
-              <Star className="w-4 h-4" fill={isStarred ? "#f2c94c" : "none"} />
-            </button>
-            <button
-              className="w-6 h-6 flex items-center justify-center rounded-[5px] hover:bg-[#eeeeee] transition-colors"
-              style={{ color: '#6b6b6b' }}
-            >
-              <MoreHorizontal className="w-4 h-4" />
-            </button>
-          </div>
-        )}
+              {workdir}
+            </span>
+          )}
+
+          {/* Star and Settings buttons - next to title */}
+          {showFullActions && (
+            <div className="flex items-center gap-0.5 ml-1 flex-shrink-0">
+              <button
+                data-testid="task-star-button"
+                className="w-6 h-6 flex items-center justify-center rounded-[5px] hover:bg-[#eeeeee] transition-colors"
+                style={{ color: isStarred ? "#f2c94c" : "#9b9b9b" }}
+                title={isStarred ? "Unstar" : "Star"}
+                aria-pressed={isStarred}
+                onClick={() => onToggleStar?.(!isStarred)}
+              >
+                <Star className="w-4 h-4" fill={isStarred ? "#f2c94c" : "none"} />
+              </button>
+              <button
+                className="w-6 h-6 flex items-center justify-center rounded-[5px] hover:bg-[#eeeeee] transition-colors"
+                style={{ color: "#6b6b6b" }}
+              >
+                <MoreHorizontal className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Right: Open button */}
+        <div className="flex items-center gap-0.5 flex-shrink-0">
+          {customActions}
+          {showFullActions && <OpenButton />}
+        </div>
       </div>
 
-      {/* Right: Open button */}
-      <div className="flex items-center gap-0.5 flex-shrink-0">
-        {customActions}
-        {showFullActions && <OpenButton />}
-      </div>
+      {actionBar ? (
+        <div
+          data-testid="task-header-action-bar"
+          className="flex items-center min-w-0 h-[34px]"
+          style={{ padding: "0 20px" }}
+        >
+          {actionBar}
+        </div>
+      ) : null}
     </div>
   )
 }
