@@ -2,19 +2,33 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
+  CheckCircle2,
   ChevronDown,
   ChevronRight,
+  Loader2,
   Plus,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ProjectIcon, type ProjectInfo } from "./shared/task-header"
 import { TaskStatusSelector } from "./shared/task-status-selector"
 import { useLuban } from "@/lib/luban-context"
+import { agentRunnerLabel } from "@/lib/conversation-ui"
 import { computeProjectDisplayNames } from "@/lib/project-display-names"
 import { projectColorClass } from "@/lib/project-colors"
-import { buildSidebarProjects } from "@/lib/sidebar-view-model"
 import { fetchTasks } from "@/lib/luban-http"
-import type { TaskStatus, TasksSnapshot, WorkspaceId, WorkspaceThreadId } from "@/lib/luban-api"
+import type {
+  AgentRunnerKind,
+  OperationStatus,
+  TaskStatus,
+  TasksSnapshot,
+  TurnResult,
+  TurnStatus,
+  WorkspaceId,
+  WorkspaceThreadId,
+} from "@/lib/luban-api"
+import { UnifiedProviderLogo } from "@/components/shared/unified-provider-logo"
+
+const AMP_MARK_URL = "https://ampcode.com/press-kit/mark-color.svg"
 
 export interface Task {
   id: string
@@ -28,14 +42,27 @@ export interface Task {
   createdAt: string
 }
 
+type TaskRowModel = Task & {
+  agentRunStatus: OperationStatus
+  turnStatus: TurnStatus
+  lastTurnResult: TurnResult | null
+  hasUnreadCompletion: boolean
+}
+
 interface TaskRowProps {
-  task: Task
+  task: TaskRowModel
   selected?: boolean
   onClick?: () => void
   onStatusChange?: (status: TaskStatus) => void
 }
 
-function TaskRow({ task, selected, onClick, onStatusChange }: TaskRowProps) {
+function TaskRow({
+  task,
+  selected,
+  onClick,
+  onStatusChange,
+  agentRunner,
+}: TaskRowProps & { agentRunner: AgentRunnerKind | null | undefined }) {
   return (
     <div
       onClick={onClick}
@@ -66,12 +93,94 @@ function TaskRow({ task, selected, onClick, onStatusChange }: TaskRowProps) {
         {task.workdir}
       </span>
       <span className="flex-1" />
+      <TaskAgentPill
+        runner={agentRunner}
+        agentRunStatus={task.agentRunStatus}
+        turnStatus={task.turnStatus}
+        lastTurnResult={task.lastTurnResult}
+        hasUnreadCompletion={task.hasUnreadCompletion}
+        testId={`task-agent-pill-${task.workspaceId}-${task.taskId}`}
+      />
       {task.createdAt ? (
         <span className="text-[12px] flex-shrink-0" style={{ color: "#9b9b9b" }}>
           {task.createdAt}
         </span>
       ) : null}
     </div>
+  )
+}
+
+function TaskAgentPill({
+  runner,
+  agentRunStatus,
+  turnStatus,
+  lastTurnResult,
+  hasUnreadCompletion,
+  testId,
+}: {
+  runner: AgentRunnerKind | null | undefined
+  agentRunStatus: OperationStatus
+  turnStatus: TurnStatus
+  lastTurnResult: TurnResult | null
+  hasUnreadCompletion: boolean
+  testId: string
+}): React.ReactElement | null {
+  const isRunning = agentRunStatus === "running" || turnStatus === "running"
+  const isAwaitingAck =
+    !isRunning && (turnStatus === "awaiting" || (hasUnreadCompletion && lastTurnResult === "completed"))
+  if (!isRunning && !isAwaitingAck) return null
+
+  const label = agentRunnerLabel(runner)
+  const title = isRunning ? `${label}: running` : `${label}: awaiting_ack`
+
+  const avatar = (() => {
+    if (runner === "amp") {
+      return (
+        <img
+          data-agent-runner-icon="amp"
+          src={AMP_MARK_URL}
+          alt=""
+          aria-hidden="true"
+          className="w-3.5 h-3.5"
+        />
+      )
+    }
+    if (runner === "claude") {
+      return <UnifiedProviderLogo providerId="anthropic" className="w-3.5 h-3.5" />
+    }
+    return <UnifiedProviderLogo providerId="openai" className="w-3.5 h-3.5" />
+  })()
+
+  const glyph = isRunning ? (
+    <Loader2 className="w-3.5 h-3.5 animate-spin" style={{ color: "#5e6ad2" }} />
+  ) : (
+    <span className="relative flex items-center justify-center">
+      <CheckCircle2 className="w-3.5 h-3.5" style={{ color: "#5e6ad2" }} />
+      <span
+        className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full"
+        style={{ backgroundColor: "#5e6ad2" }}
+      />
+    </span>
+  )
+
+  return (
+    <span
+      data-testid={testId}
+      className="inline-flex items-center gap-1.5 pl-1 pr-2 py-0.5 rounded-full flex-shrink-0"
+      style={{ backgroundColor: "#f0f0f0", border: "1px solid #ebebeb" }}
+      title={title}
+    >
+      <span
+        className="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0"
+        style={{ backgroundColor: "#fcfcfc", border: "1px solid #ebebeb" }}
+      >
+        {avatar}
+      </span>
+      <span className="text-[11px] font-medium" style={{ color: "#6b6b6b" }}>
+        {label}
+      </span>
+      {glyph}
+    </span>
   )
 }
 
@@ -131,15 +240,12 @@ interface TaskListViewProps {
   onTaskClick?: (task: Task) => void
 }
 
-type HeaderProjectInfo = ProjectInfo & {
-  avatarUrl?: string
-}
-
 export function TaskListView({ activeProjectId, onTaskClick }: TaskListViewProps) {
   const { app, setTaskStatus } = useLuban()
   const [tasksSnapshot, setTasksSnapshot] = useState<TasksSnapshot | null>(null)
   const [selectedTask, setSelectedTask] = useState<string | null>(null)
-  const [headerAvatarFailed, setHeaderAvatarFailed] = useState(false)
+  const agentRunner = app?.agent.default_runner ?? null
+  const refreshInFlightRef = useRef(false)
 
   const formatCreatedAt = useCallback((createdAtUnixSeconds: number): string => {
     if (!createdAtUnixSeconds) return ""
@@ -155,11 +261,15 @@ export function TaskListView({ activeProjectId, onTaskClick }: TaskListViewProps
       setTasksSnapshot(null)
       return
     }
+    if (refreshInFlightRef.current) return
+    refreshInFlightRef.current = true
     try {
       const snap = await fetchTasks({ projectId: activeProjectId })
       setTasksSnapshot(snap)
     } catch (err) {
       console.warn("fetchTasks failed", err)
+    } finally {
+      refreshInFlightRef.current = false
     }
   }, [activeProjectId])
 
@@ -185,6 +295,19 @@ export function TaskListView({ activeProjectId, onTaskClick }: TaskListViewProps
     }
   }, [activeProjectId, app])
 
+  useEffect(() => {
+    if (!activeProjectId) return
+    const tasks = tasksSnapshot?.tasks ?? []
+    const needsFastPolling = tasks.some((t) => {
+      if (t.agent_run_status === "running" || t.turn_status === "running" || t.turn_status === "awaiting") return true
+      if (t.has_unread_completion && t.last_turn_result === "completed") return true
+      return false
+    })
+    const intervalMs = needsFastPolling ? 1500 : 12_000
+    const id = window.setInterval(() => void refreshTasks(), intervalMs)
+    return () => window.clearInterval(id)
+  }, [activeProjectId, refreshTasks, tasksSnapshot])
+
   const applyLocalTaskStatus = useCallback((args: { workspaceId: WorkspaceId; taskId: WorkspaceThreadId; status: TaskStatus }) => {
     setTasksSnapshot((prev) => {
       if (!prev) return prev
@@ -209,7 +332,7 @@ export function TaskListView({ activeProjectId, onTaskClick }: TaskListViewProps
   )
 
   const tasks = useMemo(() => {
-    if (!app || !tasksSnapshot) return [] as Task[]
+    if (!app || !tasksSnapshot) return [] as TaskRowModel[]
 
     const displayNames = computeProjectDisplayNames(app.projects.map((p) => ({ path: p.path, name: p.name })))
     const projectInfoById = new Map<string, { name: string; color: string }>()
@@ -232,7 +355,7 @@ export function TaskListView({ activeProjectId, onTaskClick }: TaskListViewProps
       }
     }
 
-    const out: Task[] = []
+    const out: TaskRowModel[] = []
 
     const filtered = tasksSnapshot.tasks.filter((t) => {
       const workdir = workdirById.get(t.workdir_id) ?? null
@@ -261,25 +384,25 @@ export function TaskListView({ activeProjectId, onTaskClick }: TaskListViewProps
         projectName: project.name,
         projectColor: project.color,
         createdAt: formatCreatedAt(t.created_at_unix_seconds),
+        agentRunStatus: t.agent_run_status,
+        turnStatus: t.turn_status,
+        lastTurnResult: t.last_turn_result,
+        hasUnreadCompletion: t.has_unread_completion,
       })
     }
 
     return out
   }, [app, formatCreatedAt, tasksSnapshot])
 
-  const headerProject: HeaderProjectInfo = useMemo(() => {
+  const headerProject: ProjectInfo = useMemo(() => {
     if (!app) return { name: "Projects", color: "bg-violet-500" }
+    const displayNames = computeProjectDisplayNames(app.projects.map((p) => ({ path: p.path, name: p.name })))
     if (activeProjectId) {
-      const sidebarProjects = buildSidebarProjects(app, { projectOrder: app.ui.sidebar_project_order ?? [] })
-      const p = sidebarProjects.find((p) => p.id === activeProjectId) ?? null
-      if (p) return { name: p.displayName, color: projectColorClass(p.id), avatarUrl: p.avatarUrl }
+      const p = app.projects.find((p) => p.id === activeProjectId)
+      if (p) return { name: displayNames.get(p.path) ?? p.slug, color: projectColorClass(p.id) }
     }
     return { name: "Projects", color: "bg-violet-500" }
   }, [activeProjectId, app])
-
-  useEffect(() => {
-    setHeaderAvatarFailed(false)
-  }, [headerProject.avatarUrl])
 
   const iteratingTasks = tasks.filter((t) => t.status === "iterating")
   const validatingTasks = tasks.filter((t) => t.status === "validating")
@@ -296,21 +419,8 @@ export function TaskListView({ activeProjectId, onTaskClick }: TaskListViewProps
         style={{ padding: '0 24px 0 20px', borderBottom: '1px solid #ebebeb' }}
       >
         {/* Project Indicator */}
-        <div className="flex items-center gap-1" data-testid="task-list-project-indicator">
-          {headerProject.avatarUrl && !headerAvatarFailed ? (
-            <img
-              src={headerProject.avatarUrl}
-              alt=""
-              width={18}
-              height={18}
-              className="w-[18px] h-[18px] rounded overflow-hidden flex-shrink-0"
-              loading="lazy"
-              decoding="async"
-              onError={() => setHeaderAvatarFailed(true)}
-            />
-          ) : (
-            <ProjectIcon name={headerProject.name} color={headerProject.color} />
-          )}
+        <div className="flex items-center gap-1">
+          <ProjectIcon name={headerProject.name} color={headerProject.color} />
           <span className="text-[13px] font-medium" style={{ color: '#1b1b1b' }}>
             {headerProject.name}
           </span>
@@ -340,6 +450,7 @@ export function TaskListView({ activeProjectId, onTaskClick }: TaskListViewProps
             <TaskRow
               key={task.id}
               task={task}
+              agentRunner={agentRunner}
               selected={selectedTask === task.id}
               onClick={() => {
                 setSelectedTask(task.id)
@@ -357,6 +468,7 @@ export function TaskListView({ activeProjectId, onTaskClick }: TaskListViewProps
             <TaskRow
               key={task.id}
               task={task}
+              agentRunner={agentRunner}
               selected={selectedTask === task.id}
               onClick={() => {
                 setSelectedTask(task.id)
@@ -374,6 +486,7 @@ export function TaskListView({ activeProjectId, onTaskClick }: TaskListViewProps
             <TaskRow
               key={task.id}
               task={task}
+              agentRunner={agentRunner}
               selected={selectedTask === task.id}
               onClick={() => {
                 setSelectedTask(task.id)
@@ -391,6 +504,7 @@ export function TaskListView({ activeProjectId, onTaskClick }: TaskListViewProps
             <TaskRow
               key={task.id}
               task={task}
+              agentRunner={agentRunner}
               selected={selectedTask === task.id}
               onClick={() => {
                 setSelectedTask(task.id)
@@ -408,6 +522,7 @@ export function TaskListView({ activeProjectId, onTaskClick }: TaskListViewProps
             <TaskRow
               key={task.id}
               task={task}
+              agentRunner={agentRunner}
               selected={selectedTask === task.id}
               onClick={() => {
                 setSelectedTask(task.id)
@@ -425,6 +540,7 @@ export function TaskListView({ activeProjectId, onTaskClick }: TaskListViewProps
             <TaskRow
               key={task.id}
               task={task}
+              agentRunner={agentRunner}
               selected={selectedTask === task.id}
               onClick={() => {
                 setSelectedTask(task.id)

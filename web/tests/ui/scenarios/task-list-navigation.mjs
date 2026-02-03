@@ -13,22 +13,29 @@ export async function runTaskListNavigation({ page }) {
   await page.getByTestId('sidebar-project-mock-project-1').click();
   await page.getByTestId('task-list-view').waitFor({ state: 'visible' });
   {
-    const indicator = page.getByTestId('task-list-project-indicator');
-    await indicator.waitFor({ state: 'visible' });
-
-    const img = indicator.locator('img').first();
-    await img.waitFor({ state: 'visible' });
-
-    const src = await img.getAttribute('src');
-    if (!src) throw new Error('missing task list project avatar src');
-    if (!src.startsWith('data:image/svg+xml,')) {
-      throw new Error(`expected mock avatar data URL, got: ${src.slice(0, 64)}`);
+    const runningPill = page.getByTestId('task-agent-pill-2-3');
+    await runningPill.waitFor({ state: 'attached' });
+    await runningPill.scrollIntoViewIfNeeded();
+    await runningPill.waitFor({ state: 'visible' });
+    const titleAttr = await runningPill.getAttribute('title');
+    if (titleAttr !== 'Codex: running') {
+      throw new Error(`expected running pill title to be Codex: running, got: ${titleAttr}`);
     }
-
-    const box = await img.boundingBox();
-    if (!box) throw new Error('missing task list project avatar bounding box');
-    if (Math.round(box.width) !== 18 || Math.round(box.height) !== 18) {
-      throw new Error(`expected task list project avatar to be 18x18, got ${box.width}x${box.height}`);
+  }
+  {
+    const awaitingAckPill = page.getByTestId('task-agent-pill-1-4');
+    await awaitingAckPill.waitFor({ state: 'attached' });
+    await awaitingAckPill.scrollIntoViewIfNeeded();
+    await awaitingAckPill.waitFor({ state: 'visible' });
+    const titleAttr = await awaitingAckPill.getAttribute('title');
+    if (titleAttr !== 'Codex: awaiting_ack') {
+      throw new Error(`expected awaiting ack pill title to be Codex: awaiting_ack, got: ${titleAttr}`);
+    }
+  }
+  {
+    const idlePill = page.getByTestId('task-agent-pill-1-1');
+    if ((await idlePill.count()) !== 0) {
+      throw new Error('expected idle task not to render agent pill');
     }
   }
   await page.getByText('Mock task 1').first().click();
