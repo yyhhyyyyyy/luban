@@ -163,6 +163,7 @@ export function LubanIDE() {
       />
       <NewTaskModal
         open={newTaskOpen}
+        activeProjectId={activeProjectId}
         onOpenChange={(open) => {
           setNewTaskOpen(open)
           if (!open) setShowDetail(true)

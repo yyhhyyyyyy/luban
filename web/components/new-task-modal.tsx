@@ -27,6 +27,7 @@ import type { AppSnapshot } from "@/lib/luban-api"
 interface NewTaskModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  activeProjectId?: string | null
 }
 
 type PendingAttachment = {
@@ -37,7 +38,7 @@ type PendingAttachment = {
   url?: string
 }
 
-export function NewTaskModal({ open, onOpenChange }: NewTaskModalProps) {
+export function NewTaskModal({ open, onOpenChange, activeProjectId }: NewTaskModalProps) {
   const {
     app,
     executeTask,
@@ -59,6 +60,7 @@ export function NewTaskModal({ open, onOpenChange }: NewTaskModalProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const appRef = useRef<AppSnapshot | null>(null)
   const submitInFlightRef = useRef(false)
+  const prevOpenRef = useRef(false)
 
   useEffect(() => {
     appRef.current = app
@@ -78,13 +80,28 @@ export function NewTaskModal({ open, onOpenChange }: NewTaskModalProps) {
   }, [app])
 
   const defaultProjectId = useMemo(() => {
+    if (activeProjectId) {
+      const opt = projectOptions.find((p) => p.id === activeProjectId) ?? null
+      if (opt) return opt.id
+    }
     if (activeWorkdirId != null) {
       const opt = projectOptions.find((p) => p.workdirs.some((w) => w.id === activeWorkdirId)) ?? null
       if (opt) return opt.id
     }
     if (projectOptions.length === 1) return projectOptions[0]?.id ?? ""
     return ""
-  }, [activeWorkdirId, projectOptions])
+  }, [activeProjectId, activeWorkdirId, projectOptions])
+
+  useEffect(() => {
+    const prev = prevOpenRef.current
+    prevOpenRef.current = open
+    if (prev || !open) return
+
+    setProjectSearch("")
+    setWorkdirSearch("")
+    setSelectedWorkdirId(null)
+    setSelectedProjectId(defaultProjectId || "")
+  }, [defaultProjectId, open])
 
   useEffect(() => {
     if (!open) return

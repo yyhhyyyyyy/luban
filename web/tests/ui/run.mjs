@@ -13,7 +13,9 @@ import { runInboxRead } from './scenarios/inbox-read.mjs';
 import { runLatestEventsVisible } from './scenarios/latest-events-visible.mjs';
 import { runNewTaskModal } from './scenarios/new-task-modal.mjs';
 import { runNewTaskDoubleSubmitNoDuplicate } from './scenarios/new-task-double-submit-no-duplicate.mjs';
+import { runNewTaskDefaultProjectFollowsContext } from './scenarios/new-task-default-project-follows-context.mjs';
 import { runSettingsPanel } from './scenarios/settings-panel.mjs';
+import { runSidebarProjectAvatars } from './scenarios/sidebar-project-avatars.mjs';
 import { runStarFavorites } from './scenarios/star-favorites.mjs';
 import { runTaskStatusChange } from './scenarios/task-status-change.mjs';
 import { runTaskListNavigation } from './scenarios/task-list-navigation.mjs';
@@ -144,10 +146,12 @@ async function main() {
     await page.getByTestId('nav-sidebar').waitFor({ state: 'visible' });
     await page.getByTestId('task-list-view').waitFor({ state: 'visible' });
 
+    await runSidebarProjectAvatars({ page, baseUrl });
     await runNewTaskModal({ page, baseUrl });
     await runActivityAttachments({ page, baseUrl });
     await runInboxRead({ page, baseUrl });
     await runStarFavorites({ page, baseUrl });
+    await runNewTaskDefaultProjectFollowsContext({ page, baseUrl });
     await runSettingsPanel({ page, baseUrl });
     await runTaskListNavigation({ page, baseUrl });
     await runTaskStatusChange({ page, baseUrl });
