@@ -17,8 +17,8 @@ Enum values:
 
 - `backlog`: captured but not ready to start
 - `todo`: ready to start
-- `in_progress`: actively being worked on
-- `in_review`: awaiting verification/acceptance
+- `iterating`: active developer ↔ agent iteration (implementation and local feedback loops)
+- `validating`: external verification (review, CI, QA, or any acceptance gate outside the developer↔agent loop)
 - `done`: accepted and closed
 - `canceled`: stopped and closed
 
@@ -26,6 +26,16 @@ Notes:
 
 - Archive is intentionally not modeled as a task status.
 - Task status changes are triggered by explicit user actions (including sending a message, which is treated as an explicit start-work action).
+- Legacy values `in_progress` and `in_review` may exist in persisted data and are treated as aliases for `iterating` and `validating` respectively.
+
+### Stage semantics (what each stage means)
+
+- `backlog`: the task exists, but work is intentionally not started (missing requirements, lower priority, or waiting on prerequisites).
+- `todo`: the task is ready to start (clear enough to begin; still no active iteration yet).
+- `iterating`: the task is in the active working loop (developer and agent are producing/adjusting changes, running local checks, and refining until it is ready for external validation).
+- `validating`: the task is waiting on acceptance signals outside the iteration loop (code review, CI, external testing, stakeholder approval, etc.). Changes may still happen, but the default expectation is “validate what was produced”.
+- `done`: the task is accepted and no further work is expected.
+- `canceled`: the task is intentionally stopped and no further work is expected.
 
 ## Turn status and last turn result
 
@@ -64,4 +74,3 @@ The following snapshots expose task/turn state:
 - `ConversationSnapshot.task_status`
 - `ThreadMeta.task_status`, `ThreadMeta.turn_status`, `ThreadMeta.last_turn_result`
 - `TaskSummarySnapshot.task_status`, `TaskSummarySnapshot.turn_status`, `TaskSummarySnapshot.last_turn_result`
-

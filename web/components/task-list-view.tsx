@@ -271,8 +271,8 @@ export function TaskListView({ activeProjectId, onTaskClick }: TaskListViewProps
     return { name: "Projects", color: "bg-violet-500" }
   }, [activeProjectId, app])
 
-  const inProgressTasks = tasks.filter((t) => t.status === "in_progress")
-  const inReviewTasks = tasks.filter((t) => t.status === "in_review")
+  const iteratingTasks = tasks.filter((t) => t.status === "iterating")
+  const validatingTasks = tasks.filter((t) => t.status === "validating")
   const todoTasks = tasks.filter((t) => t.status === "todo")
   const backlogTasks = tasks.filter((t) => t.status === "backlog")
   const doneTasks = tasks.filter((t) => t.status === "done")
@@ -312,8 +312,8 @@ export function TaskListView({ activeProjectId, onTaskClick }: TaskListViewProps
 
       {/* Task List */}
       <div className="flex-1 overflow-y-auto">
-        <TaskGroup title="In Progress" count={inProgressTasks.length}>
-          {inProgressTasks.map((task) => (
+        <TaskGroup title="Iterating" count={iteratingTasks.length}>
+          {iteratingTasks.map((task) => (
             <TaskRow
               key={task.id}
               task={task}
@@ -329,8 +329,8 @@ export function TaskListView({ activeProjectId, onTaskClick }: TaskListViewProps
           ))}
         </TaskGroup>
 
-        <TaskGroup title="In Review" count={inReviewTasks.length}>
-          {inReviewTasks.map((task) => (
+        <TaskGroup title="Validating" count={validatingTasks.length}>
+          {validatingTasks.map((task) => (
             <TaskRow
               key={task.id}
               task={task}

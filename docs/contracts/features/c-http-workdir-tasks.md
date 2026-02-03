@@ -37,6 +37,7 @@ Task titles are user-facing and should be short:
 - `ThreadMeta.created_at_unix_seconds` is the stable task creation timestamp.
 - `ThreadMeta.task_status` is the explicit lifecycle stage (`TaskStatus`).
 - `ThreadMeta.turn_status` and `ThreadMeta.last_turn_result` are derived turn-level status (see `docs/task-and-turn-status.md`).
+- `TaskStatus` values: `backlog` / `todo` / `iterating` / `validating` / `done` / `canceled` (legacy aliases: `in_progress` -> `iterating`, `in_review` -> `validating`).
 
 ## Web usage
 

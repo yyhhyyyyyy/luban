@@ -370,10 +370,35 @@ pub enum TaskStatus {
     Backlog,
     #[default]
     Todo,
-    InProgress,
-    InReview,
+    #[serde(alias = "in_progress")]
+    Iterating,
+    #[serde(alias = "in_review")]
+    Validating,
     Done,
     Canceled,
+}
+
+#[cfg(test)]
+mod task_status_tests {
+    use super::TaskStatus;
+
+    #[test]
+    fn task_status_roundtrips_with_current_values() {
+        let json = serde_json::to_string(&TaskStatus::Iterating).expect("serialize");
+        assert_eq!(json, "\"iterating\"");
+
+        let parsed: TaskStatus = serde_json::from_str("\"validating\"").expect("deserialize");
+        assert_eq!(parsed, TaskStatus::Validating);
+    }
+
+    #[test]
+    fn task_status_deserialize_accepts_legacy_aliases() {
+        let parsed: TaskStatus = serde_json::from_str("\"in_progress\"").expect("deserialize");
+        assert_eq!(parsed, TaskStatus::Iterating);
+
+        let parsed: TaskStatus = serde_json::from_str("\"in_review\"").expect("deserialize");
+        assert_eq!(parsed, TaskStatus::Validating);
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]

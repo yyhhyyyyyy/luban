@@ -165,6 +165,14 @@ update this section.
   - `mode=start`: server sends the initial user message with `attachments`.
   - `mode=create`: attachments are ignored (no message is sent).
 
+### `ClientAction::TaskStatusSet`
+
+- Sets a task's explicit lifecycle stage (`TaskStatus`).
+- `TaskStatus` values: `backlog` / `todo` / `iterating` / `validating` / `done` / `canceled`.
+- Providers should accept legacy aliases for backward compatibility:
+  - `in_progress` -> `iterating`
+  - `in_review` -> `validating`
+
 ## Event inventory (tracked)
 
 All `ServerEvent` variants are part of this contract surface:

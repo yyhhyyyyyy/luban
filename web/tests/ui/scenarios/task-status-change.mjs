@@ -21,9 +21,9 @@ export async function runTaskStatusChange({ page }) {
   const currentLabel = parseStatusTitle(currentTitle) ?? '';
 
   const next =
-    currentLabel === 'In Progress'
+    currentLabel === 'Iterating'
       ? { id: 'todo', label: 'Todo' }
-      : { id: 'in_progress', label: 'In Progress' };
+      : { id: 'iterating', label: 'Iterating' };
 
   await trigger.click();
   await page.getByTestId(`task-status-option-${next.id}`).click();

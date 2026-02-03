@@ -58,7 +58,7 @@ export function LubanIDE() {
             ? "done"
             : notification.type === "failed"
               ? "canceled"
-              : "in_progress",
+              : "iterating",
         workdir: notification.workdir,
         projectName: notification.projectName,
         projectColor: notification.projectColor,

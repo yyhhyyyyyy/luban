@@ -258,8 +258,8 @@ export type OperationStatus = "idle" | "running"
 export type TaskStatus =
   | "backlog"
   | "todo"
-  | "in_progress"
-  | "in_review"
+  | "iterating"
+  | "validating"
   | "done"
   | "canceled"
 

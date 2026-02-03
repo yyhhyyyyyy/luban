@@ -553,9 +553,14 @@ export function mockDispatchAction(args: { action: ClientAction; onEvent: (event
     const threads = state.threadsByWorkdir.get(a.workdir_id) ?? null
     if (threads) {
       const now = Math.floor(Date.now() / 1000)
+      const bumpedNow =
+        Math.max(
+          now,
+          ...threads.tasks.map((t) => t.updated_at_unix_seconds),
+        ) + 1
       threads.tasks = threads.tasks.map((t) =>
         t.task_id === a.task_id
-          ? { ...t, updated_at_unix_seconds: Math.max(t.updated_at_unix_seconds, now) }
+          ? { ...t, updated_at_unix_seconds: bumpedNow }
           : t,
       )
     }
@@ -653,9 +658,14 @@ export function mockDispatchAction(args: { action: ClientAction; onEvent: (event
     if (!snap) return
 
     const now = Math.floor(Date.now() / 1000)
+    const bumpedNow =
+      Math.max(
+        now,
+        ...snap.tasks.map((t) => t.updated_at_unix_seconds),
+      ) + 1
     snap.tasks = snap.tasks.map((t) =>
       t.task_id === a.task_id
-        ? { ...t, task_status: a.task_status, updated_at_unix_seconds: Math.max(t.updated_at_unix_seconds, now) }
+        ? { ...t, task_status: a.task_status, updated_at_unix_seconds: bumpedNow }
         : t,
     )
 

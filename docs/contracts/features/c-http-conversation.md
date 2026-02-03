@@ -81,6 +81,7 @@ For `event.type=item`:
 ### Task status
 
 - `snapshot.task_status`: explicit lifecycle stage (`TaskStatus`, see `docs/task-and-turn-status.md`)
+- `TaskStatus` values: `backlog` / `todo` / `iterating` / `validating` / `done` / `canceled` (legacy aliases: `in_progress` -> `iterating`, `in_review` -> `validating`).
 
 ### Title
 

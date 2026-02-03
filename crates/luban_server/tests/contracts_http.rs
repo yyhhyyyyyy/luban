@@ -732,7 +732,7 @@ async fn http_contracts_smoke() {
         server.addr,
         workdir_id,
         task_id,
-        luban_api::TaskStatus::InProgress,
+        luban_api::TaskStatus::Iterating,
     )
     .await;
 
@@ -757,7 +757,7 @@ async fn http_contracts_smoke() {
                 .find(|t| t.workspace_id.0 == workdir_id && t.thread_id.0 == task_id)
                 .expect("task should exist in tasks snapshot");
 
-            if active.task_status == luban_api::TaskStatus::InProgress {
+            if active.task_status == luban_api::TaskStatus::Iterating {
                 saw_updated = true;
                 break;
             }

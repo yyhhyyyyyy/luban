@@ -387,10 +387,10 @@ export function defaultMockFixtures(): MockFixtures {
       tasks: [
         { task_id: task1, remote_thread_id: null, title: "Mock task 1", created_at_unix_seconds: unixSeconds(-30), updated_at_unix_seconds: unixSeconds(-30), task_status: "todo" as TaskStatus, turn_status: "idle" as TurnStatus, last_turn_result: "completed" as TurnResult },
         { task_id: task2, remote_thread_id: null, title: "Mock task 2", created_at_unix_seconds: unixSeconds(-10), updated_at_unix_seconds: unixSeconds(-10), task_status: "backlog" as TaskStatus, turn_status: "idle" as TurnStatus, last_turn_result: null },
-        { task_id: task4, remote_thread_id: null, title: "Review: awaiting feedback", created_at_unix_seconds: unixSeconds(-8), updated_at_unix_seconds: unixSeconds(-8), task_status: "in_review" as TaskStatus, turn_status: "awaiting" as TurnStatus, last_turn_result: "completed" as TurnResult },
+        { task_id: task4, remote_thread_id: null, title: "Validating: awaiting feedback", created_at_unix_seconds: unixSeconds(-8), updated_at_unix_seconds: unixSeconds(-8), task_status: "validating" as TaskStatus, turn_status: "awaiting" as TurnStatus, last_turn_result: "completed" as TurnResult },
         { task_id: task5, remote_thread_id: null, title: "Done: completed successfully", created_at_unix_seconds: unixSeconds(-20), updated_at_unix_seconds: unixSeconds(-20), task_status: "done" as TaskStatus, turn_status: "idle" as TurnStatus, last_turn_result: "completed" as TurnResult },
         { task_id: task6, remote_thread_id: null, title: "Canceled: aborted by user", created_at_unix_seconds: unixSeconds(-15), updated_at_unix_seconds: unixSeconds(-15), task_status: "canceled" as TaskStatus, turn_status: "idle" as TurnStatus, last_turn_result: null },
-        { task_id: task7, remote_thread_id: null, title: "In progress: queue paused", created_at_unix_seconds: unixSeconds(-12), updated_at_unix_seconds: unixSeconds(-12), task_status: "in_progress" as TaskStatus, turn_status: "paused" as TurnStatus, last_turn_result: null },
+        { task_id: task7, remote_thread_id: null, title: "Iterating: queue paused", created_at_unix_seconds: unixSeconds(-12), updated_at_unix_seconds: unixSeconds(-12), task_status: "iterating" as TaskStatus, turn_status: "paused" as TurnStatus, last_turn_result: null },
         { task_id: task8, remote_thread_id: null, title: "Todo: last turn failed", created_at_unix_seconds: unixSeconds(-18), updated_at_unix_seconds: unixSeconds(-18), task_status: "todo" as TaskStatus, turn_status: "idle" as TurnStatus, last_turn_result: "failed" as TurnResult },
         { task_id: task9, remote_thread_id: null, title: "Mock: Turn states", created_at_unix_seconds: unixSeconds(-1), updated_at_unix_seconds: unixSeconds(-1), task_status: "todo" as TaskStatus, turn_status: "idle" as TurnStatus, last_turn_result: "completed" as TurnResult },
       ],
@@ -399,7 +399,7 @@ export function defaultMockFixtures(): MockFixtures {
       rev: 1,
       workdir_id: workdir2,
       tabs: tabs2,
-      tasks: [{ task_id: task3, remote_thread_id: null, title: "PR: pending", created_at_unix_seconds: unixSeconds(-5), updated_at_unix_seconds: unixSeconds(-5), task_status: "in_progress" as TaskStatus, turn_status: "running" as TurnStatus, last_turn_result: null }],
+      tasks: [{ task_id: task3, remote_thread_id: null, title: "PR: pending", created_at_unix_seconds: unixSeconds(-5), updated_at_unix_seconds: unixSeconds(-5), task_status: "iterating" as TaskStatus, turn_status: "running" as TurnStatus, last_turn_result: null }],
     },
     [workdir3]: {
       rev: 1,
@@ -407,10 +407,10 @@ export function defaultMockFixtures(): MockFixtures {
       tabs: tabs3,
       tasks: [
         { task_id: task1, remote_thread_id: null, title: "Local task", created_at_unix_seconds: unixSeconds(-120), updated_at_unix_seconds: unixSeconds(-120), task_status: "todo" as TaskStatus, turn_status: "idle" as TurnStatus, last_turn_result: "failed" as TurnResult },
-        { task_id: task4, remote_thread_id: null, title: "Local: in review", created_at_unix_seconds: unixSeconds(-8), updated_at_unix_seconds: unixSeconds(-8), task_status: "in_review" as TaskStatus, turn_status: "awaiting" as TurnStatus, last_turn_result: "completed" as TurnResult },
+        { task_id: task4, remote_thread_id: null, title: "Local: validating", created_at_unix_seconds: unixSeconds(-8), updated_at_unix_seconds: unixSeconds(-8), task_status: "validating" as TaskStatus, turn_status: "awaiting" as TurnStatus, last_turn_result: "completed" as TurnResult },
         { task_id: task5, remote_thread_id: null, title: "Local: done", created_at_unix_seconds: unixSeconds(-20), updated_at_unix_seconds: unixSeconds(-20), task_status: "done" as TaskStatus, turn_status: "idle" as TurnStatus, last_turn_result: "completed" as TurnResult },
         { task_id: task6, remote_thread_id: null, title: "Local: canceled", created_at_unix_seconds: unixSeconds(-15), updated_at_unix_seconds: unixSeconds(-15), task_status: "canceled" as TaskStatus, turn_status: "idle" as TurnStatus, last_turn_result: null },
-        { task_id: task7, remote_thread_id: null, title: "Local: paused queue", created_at_unix_seconds: unixSeconds(-12), updated_at_unix_seconds: unixSeconds(-12), task_status: "in_progress" as TaskStatus, turn_status: "paused" as TurnStatus, last_turn_result: null },
+        { task_id: task7, remote_thread_id: null, title: "Local: paused queue", created_at_unix_seconds: unixSeconds(-12), updated_at_unix_seconds: unixSeconds(-12), task_status: "iterating" as TaskStatus, turn_status: "paused" as TurnStatus, last_turn_result: null },
         { task_id: task8, remote_thread_id: null, title: "Local: failed turn", created_at_unix_seconds: unixSeconds(-18), updated_at_unix_seconds: unixSeconds(-18), task_status: "todo" as TaskStatus, turn_status: "idle" as TurnStatus, last_turn_result: "failed" as TurnResult },
         { task_id: task9, remote_thread_id: null, title: "Local: turn states", created_at_unix_seconds: unixSeconds(-1), updated_at_unix_seconds: unixSeconds(-1), task_status: "todo" as TaskStatus, turn_status: "idle" as TurnStatus, last_turn_result: "completed" as TurnResult },
       ],
@@ -536,8 +536,8 @@ export function defaultMockFixtures(): MockFixtures {
     [key(workdir1, task4)]: conversationBase({
       workdirId: workdir1,
       taskId: task4,
-      title: "Review: awaiting feedback",
-      taskStatus: "in_review",
+      title: "Validating: awaiting feedback",
+      taskStatus: "validating",
       runStatus: "idle",
       entries: [
         systemEvent({
@@ -548,7 +548,7 @@ export function defaultMockFixtures(): MockFixtures {
         systemEvent({
           id: "sys_2",
           createdAtUnixMs: unixMs(-3 * 60 * 60 * 1000 + 20_000),
-          event: { event_type: "task_status_changed", from: "todo", to: "in_review" },
+          event: { event_type: "task_status_changed", from: "todo", to: "validating" },
         }),
         userMessage("Please review the changes and suggest improvements."),
         agentActivity("reasoning", { text: "Reviewing the diff and checking for edge cases" }),
@@ -572,12 +572,12 @@ export function defaultMockFixtures(): MockFixtures {
         systemEvent({
           id: "sys_2",
           createdAtUnixMs: unixMs(-6 * 60 * 60 * 1000 + 15_000),
-          event: { event_type: "task_status_changed", from: "todo", to: "in_progress" },
+          event: { event_type: "task_status_changed", from: "todo", to: "iterating" },
         }),
         systemEvent({
           id: "sys_3",
           createdAtUnixMs: unixMs(-6 * 60 * 60 * 1000 + 60_000),
-          event: { event_type: "task_status_changed", from: "in_progress", to: "done" },
+          event: { event_type: "task_status_changed", from: "iterating", to: "done" },
         }),
         userMessage("Implement the requested change and make sure tests pass."),
         agentActivity("reasoning", { text: "Implementing the change and validating behavior" }),
@@ -602,7 +602,7 @@ export function defaultMockFixtures(): MockFixtures {
         systemEvent({
           id: "sys_2",
           createdAtUnixMs: unixMs(-4 * 60 * 60 * 1000 + 10_000),
-          event: { event_type: "task_status_changed", from: "todo", to: "in_progress" },
+          event: { event_type: "task_status_changed", from: "todo", to: "iterating" },
         }),
         userMessage("Start the task, but I might cancel it midway."),
         agentActivity("reasoning", { text: "Starting work and preparing a safe plan" }),
@@ -611,7 +611,7 @@ export function defaultMockFixtures(): MockFixtures {
         systemEvent({
           id: "sys_3",
           createdAtUnixMs: unixMs(-4 * 60 * 60 * 1000 + 30_000),
-          event: { event_type: "task_status_changed", from: "in_progress", to: "canceled" },
+          event: { event_type: "task_status_changed", from: "iterating", to: "canceled" },
         }),
       ],
     }),
@@ -619,8 +619,8 @@ export function defaultMockFixtures(): MockFixtures {
       ...conversationBase({
         workdirId: workdir1,
         taskId: task7,
-        title: "In progress: queue paused",
-        taskStatus: "in_progress",
+        title: "Iterating: queue paused",
+        taskStatus: "iterating",
         runStatus: "idle",
         entries: [
           systemEvent({
@@ -631,7 +631,7 @@ export function defaultMockFixtures(): MockFixtures {
           systemEvent({
             id: "sys_2",
             createdAtUnixMs: unixMs(-2 * 60 * 60 * 1000 + 10_000),
-            event: { event_type: "task_status_changed", from: "todo", to: "in_progress" },
+            event: { event_type: "task_status_changed", from: "todo", to: "iterating" },
           }),
           userMessage("Queue a few prompts and then pause the queue."),
           agentActivity("todo_list", { items: [{ text: "Analyze", completed: true }, { text: "Implement", completed: false }, { text: "Verify", completed: false }] }),
@@ -691,7 +691,7 @@ export function defaultMockFixtures(): MockFixtures {
       workdirId: workdir2,
       taskId: task3,
       title: "PR: pending",
-      taskStatus: "in_progress",
+      taskStatus: "iterating",
       runStatus: "running",
       entries: [
         systemEvent({
@@ -702,7 +702,7 @@ export function defaultMockFixtures(): MockFixtures {
         systemEvent({
           id: "sys_2",
           createdAtUnixMs: unixMs(-25 * 60 * 1000),
-          event: { event_type: "task_status_changed", from: "backlog", to: "in_progress" },
+          event: { event_type: "task_status_changed", from: "backlog", to: "iterating" },
         }),
         userMessage("Please open a PR."),
         {
@@ -809,8 +809,8 @@ export function defaultMockFixtures(): MockFixtures {
     [key(workdir3, task4)]: conversationBase({
       workdirId: workdir3,
       taskId: task4,
-      title: "Local: in review",
-      taskStatus: "in_review",
+      title: "Local: validating",
+      taskStatus: "validating",
       runStatus: "idle",
       entries: [
         systemEvent({
@@ -821,7 +821,7 @@ export function defaultMockFixtures(): MockFixtures {
         systemEvent({
           id: "sys_2",
           createdAtUnixMs: unixMs(-3 * 60 * 60 * 1000 + 20_000),
-          event: { event_type: "task_status_changed", from: "todo", to: "in_review" },
+          event: { event_type: "task_status_changed", from: "todo", to: "validating" },
         }),
         userMessage("Please review the local changes."),
         agentActivity("reasoning", { text: "Reviewing local diff" }),
@@ -844,7 +844,7 @@ export function defaultMockFixtures(): MockFixtures {
         systemEvent({
           id: "sys_2",
           createdAtUnixMs: unixMs(-6 * 60 * 60 * 1000 + 60_000),
-          event: { event_type: "task_status_changed", from: "in_progress", to: "done" },
+          event: { event_type: "task_status_changed", from: "iterating", to: "done" },
         }),
         userMessage("Finish the local task."),
         agentActivity("command_execution", { command: "just test-fast", status: "completed", aggregated_output: "ok" }),
@@ -873,7 +873,7 @@ export function defaultMockFixtures(): MockFixtures {
         workdirId: workdir3,
         taskId: task7,
         title: "Local: paused queue",
-        taskStatus: "in_progress",
+        taskStatus: "iterating",
         runStatus: "idle",
         entries: [
           systemEvent({
@@ -1053,14 +1053,14 @@ export function defaultMockFixtures(): MockFixtures {
         project_id: project1,
         workdir_id: workdir1,
         task_id: task4,
-        title: "Review: awaiting feedback",
+        title: "Validating: awaiting feedback",
         created_at_unix_seconds: unixSeconds(-8),
         updated_at_unix_seconds: unixSeconds(-8),
         branch_name: "main",
         workdir_name: "main",
         agent_run_status: "idle",
         has_unread_completion: false,
-        task_status: "in_review",
+        task_status: "validating",
         turn_status: "awaiting",
         last_turn_result: "completed",
         is_starred: false,
@@ -1101,14 +1101,14 @@ export function defaultMockFixtures(): MockFixtures {
         project_id: project1,
         workdir_id: workdir1,
         task_id: task7,
-        title: "In progress: queue paused",
+        title: "Iterating: queue paused",
         created_at_unix_seconds: unixSeconds(-12),
         updated_at_unix_seconds: unixSeconds(-12),
         branch_name: "main",
         workdir_name: "main",
         agent_run_status: "idle",
         has_unread_completion: false,
-        task_status: "in_progress",
+        task_status: "iterating",
         turn_status: "paused",
         last_turn_result: null,
         is_starred: false,
@@ -1156,7 +1156,7 @@ export function defaultMockFixtures(): MockFixtures {
         workdir_name: "feat-ui",
         agent_run_status: "running",
         has_unread_completion: true,
-        task_status: "in_progress",
+        task_status: "iterating",
         turn_status: "running",
         last_turn_result: null,
         is_starred: false,
@@ -1181,14 +1181,14 @@ export function defaultMockFixtures(): MockFixtures {
         project_id: project2,
         workdir_id: workdir3,
         task_id: task4,
-        title: "Local: in review",
+        title: "Local: validating",
         created_at_unix_seconds: unixSeconds(-8),
         updated_at_unix_seconds: unixSeconds(-8),
         branch_name: "",
         workdir_name: "main",
         agent_run_status: "idle",
         has_unread_completion: false,
-        task_status: "in_review",
+        task_status: "validating",
         turn_status: "awaiting",
         last_turn_result: "completed",
         is_starred: false,
@@ -1236,7 +1236,7 @@ export function defaultMockFixtures(): MockFixtures {
         workdir_name: "main",
         agent_run_status: "idle",
         has_unread_completion: false,
-        task_status: "in_progress",
+        task_status: "iterating",
         turn_status: "paused",
         last_turn_result: null,
         is_starred: false,

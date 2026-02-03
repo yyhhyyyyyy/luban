@@ -445,11 +445,11 @@ impl Engine {
                                         luban_api::TaskStatus::Backlog
                                     }
                                     luban_domain::TaskStatus::Todo => luban_api::TaskStatus::Todo,
-                                    luban_domain::TaskStatus::InProgress => {
-                                        luban_api::TaskStatus::InProgress
+                                    luban_domain::TaskStatus::Iterating => {
+                                        luban_api::TaskStatus::Iterating
                                     }
-                                    luban_domain::TaskStatus::InReview => {
-                                        luban_api::TaskStatus::InReview
+                                    luban_domain::TaskStatus::Validating => {
+                                        luban_api::TaskStatus::Validating
                                     }
                                     luban_domain::TaskStatus::Done => luban_api::TaskStatus::Done,
                                     luban_domain::TaskStatus::Canceled => {
@@ -1773,8 +1773,8 @@ impl Engine {
             task_status: match loaded.task_status {
                 luban_domain::TaskStatus::Backlog => luban_api::TaskStatus::Backlog,
                 luban_domain::TaskStatus::Todo => luban_api::TaskStatus::Todo,
-                luban_domain::TaskStatus::InProgress => luban_api::TaskStatus::InProgress,
-                luban_domain::TaskStatus::InReview => luban_api::TaskStatus::InReview,
+                luban_domain::TaskStatus::Iterating => luban_api::TaskStatus::Iterating,
+                luban_domain::TaskStatus::Validating => luban_api::TaskStatus::Validating,
                 luban_domain::TaskStatus::Done => luban_api::TaskStatus::Done,
                 luban_domain::TaskStatus::Canceled => luban_api::TaskStatus::Canceled,
             },
@@ -3352,8 +3352,8 @@ impl Engine {
                 task_status: match t.task_status {
                     luban_domain::TaskStatus::Backlog => luban_api::TaskStatus::Backlog,
                     luban_domain::TaskStatus::Todo => luban_api::TaskStatus::Todo,
-                    luban_domain::TaskStatus::InProgress => luban_api::TaskStatus::InProgress,
-                    luban_domain::TaskStatus::InReview => luban_api::TaskStatus::InReview,
+                    luban_domain::TaskStatus::Iterating => luban_api::TaskStatus::Iterating,
+                    luban_domain::TaskStatus::Validating => luban_api::TaskStatus::Validating,
                     luban_domain::TaskStatus::Done => luban_api::TaskStatus::Done,
                     luban_domain::TaskStatus::Canceled => luban_api::TaskStatus::Canceled,
                 },
@@ -3618,8 +3618,8 @@ impl Engine {
             task_status: match conversation.task_status {
                 luban_domain::TaskStatus::Backlog => luban_api::TaskStatus::Backlog,
                 luban_domain::TaskStatus::Todo => luban_api::TaskStatus::Todo,
-                luban_domain::TaskStatus::InProgress => luban_api::TaskStatus::InProgress,
-                luban_domain::TaskStatus::InReview => luban_api::TaskStatus::InReview,
+                luban_domain::TaskStatus::Iterating => luban_api::TaskStatus::Iterating,
+                luban_domain::TaskStatus::Validating => luban_api::TaskStatus::Validating,
                 luban_domain::TaskStatus::Done => luban_api::TaskStatus::Done,
                 luban_domain::TaskStatus::Canceled => luban_api::TaskStatus::Canceled,
             },
@@ -4156,20 +4156,20 @@ fn map_conversation_entry(entry: &ConversationEntry) -> luban_api::ConversationE
                         from: match from {
                             luban_domain::TaskStatus::Backlog => luban_api::TaskStatus::Backlog,
                             luban_domain::TaskStatus::Todo => luban_api::TaskStatus::Todo,
-                            luban_domain::TaskStatus::InProgress => {
-                                luban_api::TaskStatus::InProgress
+                            luban_domain::TaskStatus::Iterating => luban_api::TaskStatus::Iterating,
+                            luban_domain::TaskStatus::Validating => {
+                                luban_api::TaskStatus::Validating
                             }
-                            luban_domain::TaskStatus::InReview => luban_api::TaskStatus::InReview,
                             luban_domain::TaskStatus::Done => luban_api::TaskStatus::Done,
                             luban_domain::TaskStatus::Canceled => luban_api::TaskStatus::Canceled,
                         },
                         to: match to {
                             luban_domain::TaskStatus::Backlog => luban_api::TaskStatus::Backlog,
                             luban_domain::TaskStatus::Todo => luban_api::TaskStatus::Todo,
-                            luban_domain::TaskStatus::InProgress => {
-                                luban_api::TaskStatus::InProgress
+                            luban_domain::TaskStatus::Iterating => luban_api::TaskStatus::Iterating,
+                            luban_domain::TaskStatus::Validating => {
+                                luban_api::TaskStatus::Validating
                             }
-                            luban_domain::TaskStatus::InReview => luban_api::TaskStatus::InReview,
                             luban_domain::TaskStatus::Done => luban_api::TaskStatus::Done,
                             luban_domain::TaskStatus::Canceled => luban_api::TaskStatus::Canceled,
                         },
@@ -4315,8 +4315,8 @@ fn map_client_action(action: luban_api::ClientAction) -> Option<Action> {
             task_status: match task_status {
                 luban_api::TaskStatus::Backlog => luban_domain::TaskStatus::Backlog,
                 luban_api::TaskStatus::Todo => luban_domain::TaskStatus::Todo,
-                luban_api::TaskStatus::InProgress => luban_domain::TaskStatus::InProgress,
-                luban_api::TaskStatus::InReview => luban_domain::TaskStatus::InReview,
+                luban_api::TaskStatus::Iterating => luban_domain::TaskStatus::Iterating,
+                luban_api::TaskStatus::Validating => luban_domain::TaskStatus::Validating,
                 luban_api::TaskStatus::Done => luban_domain::TaskStatus::Done,
                 luban_api::TaskStatus::Canceled => luban_domain::TaskStatus::Canceled,
             },

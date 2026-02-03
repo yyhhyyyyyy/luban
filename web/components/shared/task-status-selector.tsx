@@ -30,13 +30,13 @@ export const taskStatusConfig: Record<
     color: "#6b6b6b",
     iconClass: "icon-[tabler--circle]",
   },
-  in_progress: {
-    label: "In Progress",
+  iterating: {
+    label: "Iterating",
     color: "#f2994a",
     iconClass: "icon-[tabler--percentage-50]",
   },
-  in_review: {
-    label: "In Review",
+  validating: {
+    label: "Validating",
     color: "#5e6ad2",
     iconClass: "icon-[tabler--percentage-75]",
   },

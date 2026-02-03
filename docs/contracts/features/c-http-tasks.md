@@ -32,6 +32,7 @@ client to iterate all workdirs and fan out requests.
 - `TaskSummarySnapshot.is_starred` indicates whether the user has starred the task.
 - `TaskSummarySnapshot.task_status` is an explicit lifecycle stage (`TaskStatus`).
 - `TaskSummarySnapshot.turn_status` and `TaskSummarySnapshot.last_turn_result` provide derived turn-level status (see `docs/task-and-turn-status.md`).
+- `TaskStatus` values: `backlog` / `todo` / `iterating` / `validating` / `done` / `canceled` (legacy aliases: `in_progress` -> `iterating`, `in_review` -> `validating`).
 
 ## Invariants
 

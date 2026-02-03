@@ -64,6 +64,7 @@ Legend:
 - `C-HTTP-TASKS`: `TaskSummarySnapshot` includes `is_starred` for rendering Favorites and in-view star toggles.
 - `C-HTTP-TASKS` / `C-HTTP-WORKDIR-TASKS`: thread metadata includes `created_at_unix_seconds` for stable creation-time sorting.
 - `C-HTTP-TASKS` / `C-HTTP-WORKDIR-TASKS`: thread metadata includes `task_status`, `turn_status`, and `last_turn_result` (see `docs/task-and-turn-status.md`).
+- `TaskStatus` uses `iterating` / `validating` (legacy aliases: `in_progress` / `in_review`).
 
 ## Feature contracts
 

@@ -694,7 +694,7 @@ impl AppState {
                     conversation.task_status,
                     crate::TaskStatus::Backlog | crate::TaskStatus::Todo
                 ) {
-                    conversation.task_status = crate::TaskStatus::InProgress;
+                    conversation.task_status = crate::TaskStatus::Iterating;
                     task_status_effects.push(Effect::StoreConversationTaskStatus {
                         workspace_id,
                         thread_id,

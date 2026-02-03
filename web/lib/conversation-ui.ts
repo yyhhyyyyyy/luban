@@ -3,6 +3,7 @@
 import type {
   AttachmentRef,
   AgentEvent,
+  AgentRunnerKind,
   ConversationEntry,
   ConversationSnapshot,
   ThinkingEffort,
@@ -38,6 +39,7 @@ export interface Message {
   id: string
   type: "user" | "assistant" | "event" | "agent_turn"
   eventSource?: "system" | "user" | "agent"
+  agentRunner?: AgentRunnerKind
   content: string
   attachments?: AttachmentRef[]
   timestamp?: string
@@ -66,6 +68,14 @@ function safeStringify(value: unknown): string {
 export function agentModelLabel(modelId: string | null | undefined): string {
   if (!modelId) return "Model"
   return AGENT_MODELS.find((m) => m.id === modelId)?.label ?? modelId
+}
+
+export function agentRunnerLabel(runner: AgentRunnerKind | null | undefined): string {
+  if (!runner) return "Agent"
+  if (runner === "codex") return "Codex"
+  if (runner === "claude") return "Claude"
+  if (runner === "amp") return "Amp"
+  return runner
 }
 
 export function thinkingEffortLabel(effort: ThinkingEffort | null | undefined): string {
@@ -343,10 +353,12 @@ function buildMessagesGroupedTurns(conversation: ConversationSnapshot): Message[
         return "Backlog"
       case "todo":
         return "Todo"
+      case "iterating":
       case "in_progress":
-        return "In Progress"
+        return "Iterating"
+      case "validating":
       case "in_review":
-        return "In Review"
+        return "Validating"
       case "done":
         return "Done"
       case "canceled":
@@ -373,6 +385,7 @@ function buildMessagesGroupedTurns(conversation: ConversationSnapshot): Message[
       id: turnId,
       type: "agent_turn",
       eventSource: "agent",
+      agentRunner: conversation.agent_runner,
       content: "",
       activities: [],
       turnStatus: "done",
@@ -477,6 +490,7 @@ function buildMessagesGroupedTurns(conversation: ConversationSnapshot): Message[
             id: baseId,
             type: "assistant",
             eventSource: "agent",
+            agentRunner: conversation.agent_runner,
             content: ev.text.trim(),
             timestamp: new Date().toISOString(),
           }
@@ -596,10 +610,12 @@ function buildMessagesFlatEvents(conversation: ConversationSnapshot): Message[] 
         return "Backlog"
       case "todo":
         return "Todo"
+      case "iterating":
       case "in_progress":
-        return "In Progress"
+        return "Iterating"
+      case "validating":
       case "in_review":
-        return "In Review"
+        return "Validating"
       case "done":
         return "Done"
       case "canceled":
@@ -674,6 +690,7 @@ function buildMessagesFlatEvents(conversation: ConversationSnapshot): Message[] 
             id: baseId,
             type: "assistant",
             eventSource: "agent",
+            agentRunner: conversation.agent_runner,
             content: ev.text.trim(),
             timestamp: new Date().toISOString(),
           })
@@ -698,6 +715,7 @@ function buildMessagesFlatEvents(conversation: ConversationSnapshot): Message[] 
             id: baseId,
             type: "event",
             eventSource: "agent",
+            agentRunner: conversation.agent_runner,
             status,
             content: activity.title,
             timestamp: new Date().toISOString(),
@@ -712,6 +730,7 @@ function buildMessagesFlatEvents(conversation: ConversationSnapshot): Message[] 
           id: `ae_turn_duration_${out.length}_${ev.duration_ms}`,
           type: "event",
           eventSource: "agent",
+          agentRunner: conversation.agent_runner,
           status: "done",
           content: `Turn duration: ${formatDurationMs(ev.duration_ms)}`,
           timestamp: new Date().toISOString(),
@@ -724,6 +743,7 @@ function buildMessagesFlatEvents(conversation: ConversationSnapshot): Message[] 
           id: `ae_turn_usage_${out.length}`,
           type: "event",
           eventSource: "agent",
+          agentRunner: conversation.agent_runner,
           status: "done",
           content: "Turn usage",
           timestamp: new Date().toISOString(),
@@ -736,6 +756,7 @@ function buildMessagesFlatEvents(conversation: ConversationSnapshot): Message[] 
           id: `ae_turn_error_${out.length}`,
           type: "event",
           eventSource: "agent",
+          agentRunner: conversation.agent_runner,
           status: "done",
           content: `Turn error: ${ev.message}`,
           timestamp: new Date().toISOString(),
@@ -748,6 +769,7 @@ function buildMessagesFlatEvents(conversation: ConversationSnapshot): Message[] 
           id: `ae_turn_canceled_${out.length}`,
           type: "event",
           eventSource: "agent",
+          agentRunner: conversation.agent_runner,
           status: "done",
           content: "Turn canceled",
           timestamp: new Date().toISOString(),
