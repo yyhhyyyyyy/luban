@@ -35,6 +35,7 @@ export interface InboxNotification {
   projectAvatarUrl: string
   projectFallbackAvatarUrl: string
   projectColor: string
+  type: TurnResult | null
   taskLifecycleStatus: TaskStatus
   taskStatus: {
     agentRunStatus: OperationStatus
@@ -84,6 +85,18 @@ function extractLatestAgentResponsePreviewLine(conversation: ConversationSnapsho
   return null
 }
 
+function extractLatestUserMessagePreviewLine(conversation: ConversationSnapshot): string | null {
+  for (let i = conversation.entries.length - 1; i >= 0; i -= 1) {
+    const entry = conversation.entries[i]
+    if (!entry) continue
+    if (entry.type !== "user_event") continue
+    if (entry.event.type !== "message") continue
+    const line = firstNonEmptyLine(entry.event.text)
+    if (line) return line
+  }
+  return null
+}
+
 function firstNonEmptyLine(text: string): string | null {
   for (const raw of text.split(/\r?\n/)) {
     const trimmed = raw.trim()
@@ -120,13 +133,14 @@ function InboxTaskStatusIcon({ status }: { status: InboxNotification["taskStatus
 interface NotificationRowProps {
   notification: InboxNotification
   previewText: string
+  timestampText: string
   testId?: string
   selected?: boolean
   onClick?: () => void
   onDoubleClick?: () => void
 }
 
-function NotificationRow({ notification, previewText, testId, selected, onClick, onDoubleClick }: NotificationRowProps) {
+function NotificationRow({ notification, previewText, timestampText, testId, selected, onClick, onDoubleClick }: NotificationRowProps) {
   return (
     <div
       data-testid={testId}
@@ -187,10 +201,11 @@ function NotificationRow({ notification, previewText, testId, selected, onClick,
           <InboxTaskStatusIcon status={notification.taskStatus} />
         </span>
         <span
+          data-testid="inbox-notification-timestamp"
           className="text-[11px]"
           style={{ color: '#9b9b9b' }}
         >
-          {notification.timestamp}
+          {timestampText}
         </span>
       </div>
     </div>
@@ -215,13 +230,15 @@ export function InboxView({ onOpenFullView }: InboxViewProps) {
   const [selectedNotificationId, setSelectedNotificationId] = useState<string | null>(null)
   const [pendingDiffFile, setPendingDiffFile] = useState<ChangedFile | null>(null)
   const [nowMs, setNowMs] = useState<number | null>(null)
-  const [agentPreviewByNotificationId, setAgentPreviewByNotificationId] = useState<Record<string, string | null>>({})
-  const agentPreviewByNotificationIdRef = useRef(agentPreviewByNotificationId)
+  const [previewByNotificationId, setPreviewByNotificationId] = useState<
+    Record<string, { userLine: string | null; agentLine: string | null; runStartedAtUnixMs: number | null } | null>
+  >({})
+  const previewByNotificationIdRef = useRef(previewByNotificationId)
   const previewInFlightRef = useRef<Set<string>>(new Set())
 
   useEffect(() => {
-    agentPreviewByNotificationIdRef.current = agentPreviewByNotificationId
-  }, [agentPreviewByNotificationId])
+    previewByNotificationIdRef.current = previewByNotificationId
+  }, [previewByNotificationId])
 
   useEffect(() => {
     const hasApp = app != null
@@ -367,6 +384,7 @@ export function InboxView({ onOpenFullView }: InboxViewProps) {
         projectAvatarUrl: projectInfo.avatarUrl,
         projectFallbackAvatarUrl: projectInfo.fallbackAvatarUrl,
         projectColor: projectInfo.color,
+        type: t.last_turn_result,
         taskLifecycleStatus: t.task_status,
         taskStatus: {
           agentRunStatus: t.agent_run_status,
@@ -388,7 +406,7 @@ export function InboxView({ onOpenFullView }: InboxViewProps) {
     const concurrency = 4
     const queue = notifications
       .map((n) => ({ id: n.id, workdirId: n.workdirId, taskId: n.taskId }))
-      .filter((n) => agentPreviewByNotificationIdRef.current[n.id] === undefined && !previewInFlightRef.current.has(n.id))
+      .filter((n) => previewByNotificationIdRef.current[n.id] === undefined && !previewInFlightRef.current.has(n.id))
 
     if (queue.length === 0) return
 
@@ -406,14 +424,16 @@ export function InboxView({ onOpenFullView }: InboxViewProps) {
         try {
           const convo = await fetchConversation(item.workdirId, item.taskId, { limit: 200 })
           if (cancelled) return
-          const preview = extractLatestAgentResponsePreviewLine(convo)
-          setAgentPreviewByNotificationId((prev) => {
+          const agentLine = extractLatestAgentResponsePreviewLine(convo)
+          const userLine = extractLatestUserMessagePreviewLine(convo)
+          const runStartedAtUnixMs = convo.run_started_at_unix_ms ?? null
+          setPreviewByNotificationId((prev) => {
             if (prev[item.id] !== undefined) return prev
-            return { ...prev, [item.id]: preview }
+            return { ...prev, [item.id]: { agentLine, userLine, runStartedAtUnixMs } }
           })
         } catch (err) {
           if (cancelled) return
-          setAgentPreviewByNotificationId((prev) => {
+          setPreviewByNotificationId((prev) => {
             if (prev[item.id] !== undefined) return prev
             return { ...prev, [item.id]: null }
           })
@@ -483,15 +503,31 @@ export function InboxView({ onOpenFullView }: InboxViewProps) {
         {/* Notification List */}
         <div className="flex-1 overflow-y-auto">
           {notifications.map((notification, idx) => {
-            const preview = agentPreviewByNotificationId[notification.id]
-            const previewText =
-              preview === undefined ? "Loading response..." : preview == null ? "No agent response yet." : preview
+            const preview = previewByNotificationId[notification.id]
+            const isRunning =
+              notification.taskStatus.agentRunStatus === "running" || notification.taskStatus.turnStatus === "running"
+
+            let previewText = "Loading response..."
+            if (preview !== undefined) {
+              if (preview == null) {
+                previewText = "No agent response yet."
+              } else {
+                const selected = isRunning ? preview.userLine ?? preview.agentLine : preview.agentLine ?? preview.userLine
+                previewText = selected ?? "No agent response yet."
+              }
+            }
+
+            const timestampText =
+              isRunning && preview && preview.runStartedAtUnixMs != null
+                ? formatTimestamp(Math.floor(preview.runStartedAtUnixMs / 1000))
+                : notification.timestamp
 
             return (
               <NotificationRow
                 key={notification.id}
                 notification={notification}
                 previewText={previewText}
+                timestampText={timestampText}
                 testId={`inbox-notification-row-${idx}`}
                 selected={selectedNotification?.id === notification.id}
                 onClick={() => {

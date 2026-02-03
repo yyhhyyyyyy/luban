@@ -703,16 +703,17 @@ export function defaultMockFixtures(): MockFixtures {
           createdAtUnixMs: unixMs(-30 * 60 * 1000),
           event: { event_type: "task_created" },
         }),
-        systemEvent({
-          id: "sys_2",
-          createdAtUnixMs: unixMs(-25 * 60 * 1000),
-          event: { event_type: "task_status_changed", from: "backlog", to: "iterating" },
-        }),
-        userMessage("Please open a PR."),
-        {
-          type: "agent_event",
-          entry_id: newEntryId("ae"),
-          event: {
+	        systemEvent({
+	          id: "sys_2",
+	          createdAtUnixMs: unixMs(-25 * 60 * 1000),
+	          event: { event_type: "task_status_changed", from: "backlog", to: "iterating" },
+	        }),
+	        userMessage("Please open a PR."),
+	        agentMessage("Ok. I'll open a PR and share the link."),
+	        {
+	          type: "agent_event",
+	          entry_id: newEntryId("ae"),
+	          event: {
             type: "item",
             id: "prog_1",
             kind: "reasoning",
@@ -787,15 +788,16 @@ export function defaultMockFixtures(): MockFixtures {
         {
           type: "agent_event",
           entry_id: newEntryId("ae"),
-          event: {
-            type: "item",
-            id: "prog_9",
-            kind: "command_execution",
-            payload: { command: "git add -A && git commit -m 'feat: add new API endpoints'", status: "in_progress" },
-          },
-        },
-      ],
-    }),
+	          event: {
+	            type: "item",
+	            id: "prog_9",
+	            kind: "command_execution",
+	            payload: { command: "git add -A && git commit -m 'feat: add new API endpoints'", status: "in_progress" },
+	          },
+	        },
+	        userMessage("Also include tests."),
+	      ],
+	    }),
     [key(workdir2, task10)]: conversationBase({
       workdirId: workdir2,
       taskId: task10,

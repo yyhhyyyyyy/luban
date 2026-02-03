@@ -11,6 +11,17 @@ async function waitForTextEquals(locator, expected, timeoutMs = 20_000) {
   throw new Error(`timeout waiting for text; expected="${expected}" got="${last}"`);
 }
 
+async function waitForTextMatches(locator, regex, timeoutMs = 20_000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const text = ((await locator.textContent()) ?? '').trim();
+    if (regex.test(text)) return text;
+    await sleep(200);
+  }
+  const last = ((await locator.textContent()) ?? '').trim();
+  throw new Error(`timeout waiting for text match; regex=${regex} got="${last}"`);
+}
+
 export async function runInboxPreviewLine({ page }) {
   await page.getByTestId('nav-inbox-button').click();
   await page.getByTestId('inbox-view').waitFor({ state: 'visible' });
@@ -25,18 +36,22 @@ export async function runInboxPreviewLine({ page }) {
   const rowCount = await rows.count();
   if (rowCount === 0) throw new Error('expected inbox to have at least one row');
 
-  let target = null;
+  let turnStatesRow = null;
+  let prPendingRow = null;
   for (let i = 0; i < Math.min(rowCount, 30); i += 1) {
     const row = page.getByTestId(`inbox-notification-row-${i}`);
     const title = ((await row.getByTestId('inbox-notification-task-title').textContent()) ?? '').trim();
     if (title === 'Mock: Turn states') {
-      target = row;
-      break;
+      turnStatesRow = row;
+    } else if (title === 'PR: pending') {
+      prPendingRow = row;
     }
+    if (turnStatesRow && prPendingRow) break;
   }
-  if (!target) throw new Error('failed to locate inbox row for task title "Mock: Turn states"');
+  if (!turnStatesRow) throw new Error('failed to locate inbox row for task title "Mock: Turn states"');
+  if (!prPendingRow) throw new Error('failed to locate inbox row for task title "PR: pending"');
 
-  const avatar = target.getByTestId('inbox-notification-project-avatar');
+  const avatar = turnStatesRow.getByTestId('inbox-notification-project-avatar');
   await avatar.waitFor({ state: 'visible' });
 
   const box = await avatar.boundingBox();
@@ -50,7 +65,19 @@ export async function runInboxPreviewLine({ page }) {
     throw new Error(`expected inbox avatar alt to include "git/project", got ${JSON.stringify(alt)}`);
   }
 
-  const preview = target.getByTestId('inbox-notification-preview');
+  const preview = turnStatesRow.getByTestId('inbox-notification-preview');
   await preview.waitFor({ state: 'visible' });
   await waitForTextEquals(preview, 'Canceled as requested.');
+
+  const runningPreview = prPendingRow.getByTestId('inbox-notification-preview');
+  await runningPreview.waitFor({ state: 'visible' });
+  await waitForTextEquals(runningPreview, 'Also include tests.');
+
+  const runningTimestamp = prPendingRow.getByTestId('inbox-notification-timestamp');
+  await runningTimestamp.waitFor({ state: 'visible' });
+  const ts = await waitForTextMatches(runningTimestamp, /^\d+m$/);
+  const minutes = Number(ts.slice(0, -1));
+  if (!Number.isFinite(minutes) || minutes < 1) {
+    throw new Error(`expected running inbox timestamp to be >= 1m, got ${JSON.stringify(ts)}`);
+  }
 }

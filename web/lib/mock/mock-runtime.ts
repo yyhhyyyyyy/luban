@@ -233,8 +233,14 @@ export async function mockFetchConversation(
   _args: { before?: number; limit?: number } = {},
 ): Promise<ConversationSnapshot> {
   const state = getRuntime()
-  const snap = state.conversationsByWorkdirTask.get(workdirTaskKey(workdirId, taskId))
+  const key = workdirTaskKey(workdirId, taskId)
+  let snap = state.conversationsByWorkdirTask.get(key)
   if (!snap) throw new Error(`mock: unknown conversation: ${workdirId}:${taskId}`)
+  if (snap.run_status === "running" && snap.run_started_at_unix_ms == null) {
+    const runStartedAtUnixMs = Date.now() - 5 * 60_000
+    snap = { ...snap, run_started_at_unix_ms: runStartedAtUnixMs }
+    state.conversationsByWorkdirTask.set(key, snap)
+  }
   return clone(snap)
 }
 
