@@ -136,8 +136,12 @@ export function TaskListView({ activeProjectId, onTaskClick }: TaskListViewProps
   const [selectedTask, setSelectedTask] = useState<string | null>(null)
 
   const refreshTasks = useCallback(async () => {
+    if (!activeProjectId) {
+      setTasksSnapshot(null)
+      return
+    }
     try {
-      const snap = await fetchTasks(activeProjectId ? { projectId: activeProjectId } : {})
+      const snap = await fetchTasks({ projectId: activeProjectId })
       setTasksSnapshot(snap)
     } catch (err) {
       console.warn("fetchTasks failed", err)
@@ -145,7 +149,7 @@ export function TaskListView({ activeProjectId, onTaskClick }: TaskListViewProps
   }, [activeProjectId])
 
   useEffect(() => {
-    if (!app) {
+    if (!app || !activeProjectId) {
       setTasksSnapshot(null)
       return
     }
@@ -153,7 +157,7 @@ export function TaskListView({ activeProjectId, onTaskClick }: TaskListViewProps
     let cancelled = false
     void (async () => {
       try {
-        const snap = await fetchTasks(activeProjectId ? { projectId: activeProjectId } : {})
+        const snap = await fetchTasks({ projectId: activeProjectId })
         if (cancelled) return
         setTasksSnapshot(snap)
       } catch (err) {
@@ -279,12 +283,6 @@ export function TaskListView({ activeProjectId, onTaskClick }: TaskListViewProps
           <button
             className="h-6 px-2 text-[12px] font-medium rounded-[5px] flex items-center"
             style={{ backgroundColor: '#eeeeee', color: '#1b1b1b' }}
-          >
-            All Issues
-          </button>
-          <button
-            className="h-6 px-2 text-[12px] font-medium rounded-[5px] flex items-center hover:bg-[#eeeeee] transition-colors"
-            style={{ color: '#6b6b6b' }}
           >
             Active
           </button>

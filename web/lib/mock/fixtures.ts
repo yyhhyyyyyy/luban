@@ -18,9 +18,11 @@ import type {
   MentionItemSnapshot,
   OperationStatus,
   ProjectId,
+  QueuedPromptSnapshot,
   TaskStatus,
   TaskSummarySnapshot,
   TasksSnapshot,
+  ThinkingEffort,
   ThreadsSnapshot,
   TurnResult,
   TurnStatus,
@@ -126,6 +128,40 @@ function agentActivity(kind: AgentItemKind, payload: unknown): ConversationEntry
   }
 }
 
+function agentTurnDuration(durationMs: number): ConversationEntry {
+  return { type: "agent_event", entry_id: newEntryId("ae"), event: { type: "turn_duration", duration_ms: durationMs } }
+}
+
+function agentTurnError(message: string): ConversationEntry {
+  return { type: "agent_event", entry_id: newEntryId("ae"), event: { type: "turn_error", message } }
+}
+
+function agentTurnCanceled(): ConversationEntry {
+  return { type: "agent_event", entry_id: newEntryId("ae"), event: { type: "turn_canceled" } }
+}
+
+function queuedPrompt(args: {
+  id: number
+  text: string
+  attachments?: AttachmentRef[]
+  runner?: AgentRunnerKind
+  modelId?: string
+  thinkingEffort?: ThinkingEffort
+  ampMode?: string | null
+}): QueuedPromptSnapshot {
+  return {
+    id: args.id,
+    text: args.text,
+    attachments: args.attachments ?? [],
+    run_config: {
+      runner: args.runner ?? "codex",
+      model_id: args.modelId ?? "gpt-5",
+      thinking_effort: args.thinkingEffort ?? "medium",
+      amp_mode: args.ampMode ?? null,
+    },
+  }
+}
+
 function systemEvent(args: {
   id: string
   createdAtUnixMs: number
@@ -204,6 +240,12 @@ export function defaultMockFixtures(): MockFixtures {
   const task1: WorkspaceThreadId = 1
   const task2: WorkspaceThreadId = 2
   const task3: WorkspaceThreadId = 3
+  const task4: WorkspaceThreadId = 4
+  const task5: WorkspaceThreadId = 5
+  const task6: WorkspaceThreadId = 6
+  const task7: WorkspaceThreadId = 7
+  const task8: WorkspaceThreadId = 8
+  const task9: WorkspaceThreadId = 9
 
   const project1: ProjectId = "mock-project-1"
   const project2: ProjectId = "mock-project-2"
@@ -333,9 +375,9 @@ export function defaultMockFixtures(): MockFixtures {
     },
   }
 
-  const tabs1: WorkspaceTabsSnapshot = { open_tabs: [task1, task2], archived_tabs: [], active_tab: task1 }
+  const tabs1: WorkspaceTabsSnapshot = { open_tabs: [task1, task9, task7, task4, task2, task8, task5, task6], archived_tabs: [], active_tab: task1 }
   const tabs2: WorkspaceTabsSnapshot = { open_tabs: [task3], archived_tabs: [], active_tab: task3 }
-  const tabs3: WorkspaceTabsSnapshot = { open_tabs: [task1], archived_tabs: [], active_tab: task1 }
+  const tabs3: WorkspaceTabsSnapshot = { open_tabs: [task1, task9, task7, task4, task8, task5, task6], archived_tabs: [], active_tab: task1 }
 
   const threadsByWorkspace: Record<number, ThreadsSnapshot> = {
     [workdir1]: {
@@ -345,6 +387,12 @@ export function defaultMockFixtures(): MockFixtures {
       tasks: [
         { task_id: task1, remote_thread_id: null, title: "Mock task 1", updated_at_unix_seconds: unixSeconds(-30), task_status: "todo" as TaskStatus, turn_status: "idle" as TurnStatus, last_turn_result: "completed" as TurnResult },
         { task_id: task2, remote_thread_id: null, title: "Mock task 2", updated_at_unix_seconds: unixSeconds(-10), task_status: "backlog" as TaskStatus, turn_status: "idle" as TurnStatus, last_turn_result: null },
+        { task_id: task4, remote_thread_id: null, title: "Review: awaiting feedback", updated_at_unix_seconds: unixSeconds(-8), task_status: "in_review" as TaskStatus, turn_status: "awaiting" as TurnStatus, last_turn_result: "completed" as TurnResult },
+        { task_id: task5, remote_thread_id: null, title: "Done: completed successfully", updated_at_unix_seconds: unixSeconds(-20), task_status: "done" as TaskStatus, turn_status: "idle" as TurnStatus, last_turn_result: "completed" as TurnResult },
+        { task_id: task6, remote_thread_id: null, title: "Canceled: aborted by user", updated_at_unix_seconds: unixSeconds(-15), task_status: "canceled" as TaskStatus, turn_status: "idle" as TurnStatus, last_turn_result: null },
+        { task_id: task7, remote_thread_id: null, title: "In progress: queue paused", updated_at_unix_seconds: unixSeconds(-12), task_status: "in_progress" as TaskStatus, turn_status: "paused" as TurnStatus, last_turn_result: null },
+        { task_id: task8, remote_thread_id: null, title: "Todo: last turn failed", updated_at_unix_seconds: unixSeconds(-18), task_status: "todo" as TaskStatus, turn_status: "idle" as TurnStatus, last_turn_result: "failed" as TurnResult },
+        { task_id: task9, remote_thread_id: null, title: "Mock: Turn states", updated_at_unix_seconds: unixSeconds(-1), task_status: "todo" as TaskStatus, turn_status: "idle" as TurnStatus, last_turn_result: "completed" as TurnResult },
       ],
     },
     [workdir2]: {
@@ -357,7 +405,15 @@ export function defaultMockFixtures(): MockFixtures {
       rev: 1,
       workdir_id: workdir3,
       tabs: tabs3,
-      tasks: [{ task_id: task1, remote_thread_id: null, title: "Local task", updated_at_unix_seconds: unixSeconds(-120), task_status: "todo" as TaskStatus, turn_status: "idle" as TurnStatus, last_turn_result: "failed" as TurnResult }],
+      tasks: [
+        { task_id: task1, remote_thread_id: null, title: "Local task", updated_at_unix_seconds: unixSeconds(-120), task_status: "todo" as TaskStatus, turn_status: "idle" as TurnStatus, last_turn_result: "failed" as TurnResult },
+        { task_id: task4, remote_thread_id: null, title: "Local: in review", updated_at_unix_seconds: unixSeconds(-8), task_status: "in_review" as TaskStatus, turn_status: "awaiting" as TurnStatus, last_turn_result: "completed" as TurnResult },
+        { task_id: task5, remote_thread_id: null, title: "Local: done", updated_at_unix_seconds: unixSeconds(-20), task_status: "done" as TaskStatus, turn_status: "idle" as TurnStatus, last_turn_result: "completed" as TurnResult },
+        { task_id: task6, remote_thread_id: null, title: "Local: canceled", updated_at_unix_seconds: unixSeconds(-15), task_status: "canceled" as TaskStatus, turn_status: "idle" as TurnStatus, last_turn_result: null },
+        { task_id: task7, remote_thread_id: null, title: "Local: paused queue", updated_at_unix_seconds: unixSeconds(-12), task_status: "in_progress" as TaskStatus, turn_status: "paused" as TurnStatus, last_turn_result: null },
+        { task_id: task8, remote_thread_id: null, title: "Local: failed turn", updated_at_unix_seconds: unixSeconds(-18), task_status: "todo" as TaskStatus, turn_status: "idle" as TurnStatus, last_turn_result: "failed" as TurnResult },
+        { task_id: task9, remote_thread_id: null, title: "Local: turn states", updated_at_unix_seconds: unixSeconds(-1), task_status: "todo" as TaskStatus, turn_status: "idle" as TurnStatus, last_turn_result: "completed" as TurnResult },
+      ],
     },
   }
 
@@ -477,6 +533,160 @@ export function defaultMockFixtures(): MockFixtures {
         userMessage("Hello from mock task 2."),
       ],
     }),
+    [key(workdir1, task4)]: conversationBase({
+      workdirId: workdir1,
+      taskId: task4,
+      title: "Review: awaiting feedback",
+      taskStatus: "in_review",
+      runStatus: "idle",
+      entries: [
+        systemEvent({
+          id: "sys_1",
+          createdAtUnixMs: unixMs(-3 * 60 * 60 * 1000),
+          event: { event_type: "task_created" },
+        }),
+        systemEvent({
+          id: "sys_2",
+          createdAtUnixMs: unixMs(-3 * 60 * 60 * 1000 + 20_000),
+          event: { event_type: "task_status_changed", from: "todo", to: "in_review" },
+        }),
+        userMessage("Please review the changes and suggest improvements."),
+        agentActivity("reasoning", { text: "Reviewing the diff and checking for edge cases" }),
+        agentActivity("command_execution", { command: "rg -n \"TODO\" web", status: "completed", aggregated_output: "web/lib/mock/fixtures.ts:1:..." }),
+        agentMessage("Review completed. Left a few actionable suggestions and questions."),
+        agentTurnDuration(18_500),
+      ],
+    }),
+    [key(workdir1, task5)]: conversationBase({
+      workdirId: workdir1,
+      taskId: task5,
+      title: "Done: completed successfully",
+      taskStatus: "done",
+      runStatus: "idle",
+      entries: [
+        systemEvent({
+          id: "sys_1",
+          createdAtUnixMs: unixMs(-6 * 60 * 60 * 1000),
+          event: { event_type: "task_created" },
+        }),
+        systemEvent({
+          id: "sys_2",
+          createdAtUnixMs: unixMs(-6 * 60 * 60 * 1000 + 15_000),
+          event: { event_type: "task_status_changed", from: "todo", to: "in_progress" },
+        }),
+        systemEvent({
+          id: "sys_3",
+          createdAtUnixMs: unixMs(-6 * 60 * 60 * 1000 + 60_000),
+          event: { event_type: "task_status_changed", from: "in_progress", to: "done" },
+        }),
+        userMessage("Implement the requested change and make sure tests pass."),
+        agentActivity("reasoning", { text: "Implementing the change and validating behavior" }),
+        agentActivity("file_change", { changes: [{ path: "src/main.rs", kind: "update" }, { path: "src/lib.rs", kind: "update" }] }),
+        agentActivity("command_execution", { command: "just fmt && just lint && just test", status: "completed", aggregated_output: "All checks passed" }),
+        agentMessage("Implemented the change and verified tests locally."),
+        agentTurnDuration(62_000),
+      ],
+    }),
+    [key(workdir1, task6)]: conversationBase({
+      workdirId: workdir1,
+      taskId: task6,
+      title: "Canceled: aborted by user",
+      taskStatus: "canceled",
+      runStatus: "idle",
+      entries: [
+        systemEvent({
+          id: "sys_1",
+          createdAtUnixMs: unixMs(-4 * 60 * 60 * 1000),
+          event: { event_type: "task_created" },
+        }),
+        systemEvent({
+          id: "sys_2",
+          createdAtUnixMs: unixMs(-4 * 60 * 60 * 1000 + 10_000),
+          event: { event_type: "task_status_changed", from: "todo", to: "in_progress" },
+        }),
+        userMessage("Start the task, but I might cancel it midway."),
+        agentActivity("reasoning", { text: "Starting work and preparing a safe plan" }),
+        agentActivity("command_execution", { command: "just test-fast", status: "in_progress", aggregated_output: "" }),
+        agentTurnCanceled(),
+        systemEvent({
+          id: "sys_3",
+          createdAtUnixMs: unixMs(-4 * 60 * 60 * 1000 + 30_000),
+          event: { event_type: "task_status_changed", from: "in_progress", to: "canceled" },
+        }),
+      ],
+    }),
+    [key(workdir1, task7)]: {
+      ...conversationBase({
+        workdirId: workdir1,
+        taskId: task7,
+        title: "In progress: queue paused",
+        taskStatus: "in_progress",
+        runStatus: "idle",
+        entries: [
+          systemEvent({
+            id: "sys_1",
+            createdAtUnixMs: unixMs(-2 * 60 * 60 * 1000),
+            event: { event_type: "task_created" },
+          }),
+          systemEvent({
+            id: "sys_2",
+            createdAtUnixMs: unixMs(-2 * 60 * 60 * 1000 + 10_000),
+            event: { event_type: "task_status_changed", from: "todo", to: "in_progress" },
+          }),
+          userMessage("Queue a few prompts and then pause the queue."),
+          agentActivity("todo_list", { items: [{ text: "Analyze", completed: true }, { text: "Implement", completed: false }, { text: "Verify", completed: false }] }),
+          agentMessage("Queued work; waiting to resume."),
+        ],
+      }),
+      queue_paused: true,
+      pending_prompts: [
+        queuedPrompt({ id: 1, text: "Queued prompt A (mock)" }),
+        queuedPrompt({ id: 2, text: "Queued prompt B (mock)", attachments: [fileA] }),
+      ],
+    },
+    [key(workdir1, task8)]: conversationBase({
+      workdirId: workdir1,
+      taskId: task8,
+      title: "Todo: last turn failed",
+      taskStatus: "todo",
+      runStatus: "idle",
+      entries: [
+        systemEvent({
+          id: "sys_1",
+          createdAtUnixMs: unixMs(-5 * 60 * 60 * 1000),
+          event: { event_type: "task_created" },
+        }),
+        userMessage("Try to run the command and handle failures gracefully."),
+        agentActivity("command_execution", { command: "just lint", status: "completed", aggregated_output: "error: clippy::some_lint\n..." }),
+        agentTurnError("Command failed: clippy reported errors (mock)."),
+      ],
+    }),
+    [key(workdir1, task9)]: conversationBase({
+      workdirId: workdir1,
+      taskId: task9,
+      title: "Mock: Turn states",
+      taskStatus: "todo",
+      runStatus: "idle",
+      entries: [
+        systemEvent({
+          id: "sys_1",
+          createdAtUnixMs: unixMs(-45 * 60 * 1000),
+          event: { event_type: "task_created" },
+        }),
+        userMessage("Show a completed turn."),
+        agentActivity("command_execution", { command: "rg -n \"FIXME\" -S", status: "completed", aggregated_output: "No matches" }),
+        agentTurnDuration(2_400),
+        agentMessage("Done."),
+        userMessage("Show a failed turn."),
+        agentActivity("command_execution", { command: "just lint", status: "in_progress", aggregated_output: "" }),
+        agentTurnError("mock: command failed: exit status 1"),
+        agentMessage("I hit an error and stopped."),
+        userMessage("Show a canceled turn."),
+        agentActivity("command_execution", { command: "just test", status: "in_progress", aggregated_output: "" }),
+        agentTurnCanceled(),
+        agentMessage("Canceled as requested."),
+      ],
+    }),
     [key(workdir2, task3)]: conversationBase({
       workdirId: workdir2,
       taskId: task3,
@@ -581,7 +791,6 @@ export function defaultMockFixtures(): MockFixtures {
           },
         },
       ],
-      runStatus: "running",
     }),
     [key(workdir3, task1)]: conversationBase({
       workdirId: workdir3,
@@ -595,6 +804,127 @@ export function defaultMockFixtures(): MockFixtures {
           event: { event_type: "task_created" },
         }),
         userMessage("Local project task."),
+      ],
+    }),
+    [key(workdir3, task4)]: conversationBase({
+      workdirId: workdir3,
+      taskId: task4,
+      title: "Local: in review",
+      taskStatus: "in_review",
+      runStatus: "idle",
+      entries: [
+        systemEvent({
+          id: "sys_1",
+          createdAtUnixMs: unixMs(-3 * 60 * 60 * 1000),
+          event: { event_type: "task_created" },
+        }),
+        systemEvent({
+          id: "sys_2",
+          createdAtUnixMs: unixMs(-3 * 60 * 60 * 1000 + 20_000),
+          event: { event_type: "task_status_changed", from: "todo", to: "in_review" },
+        }),
+        userMessage("Please review the local changes."),
+        agentActivity("reasoning", { text: "Reviewing local diff" }),
+        agentMessage("Review done."),
+        agentTurnDuration(9_500),
+      ],
+    }),
+    [key(workdir3, task5)]: conversationBase({
+      workdirId: workdir3,
+      taskId: task5,
+      title: "Local: done",
+      taskStatus: "done",
+      runStatus: "idle",
+      entries: [
+        systemEvent({
+          id: "sys_1",
+          createdAtUnixMs: unixMs(-6 * 60 * 60 * 1000),
+          event: { event_type: "task_created" },
+        }),
+        systemEvent({
+          id: "sys_2",
+          createdAtUnixMs: unixMs(-6 * 60 * 60 * 1000 + 60_000),
+          event: { event_type: "task_status_changed", from: "in_progress", to: "done" },
+        }),
+        userMessage("Finish the local task."),
+        agentActivity("command_execution", { command: "just test-fast", status: "completed", aggregated_output: "ok" }),
+        agentMessage("Done."),
+        agentTurnDuration(12_000),
+      ],
+    }),
+    [key(workdir3, task6)]: conversationBase({
+      workdirId: workdir3,
+      taskId: task6,
+      title: "Local: canceled",
+      taskStatus: "canceled",
+      runStatus: "idle",
+      entries: [
+        systemEvent({
+          id: "sys_1",
+          createdAtUnixMs: unixMs(-4 * 60 * 60 * 1000),
+          event: { event_type: "task_created" },
+        }),
+        userMessage("Cancel the local task."),
+        agentTurnCanceled(),
+      ],
+    }),
+    [key(workdir3, task7)]: {
+      ...conversationBase({
+        workdirId: workdir3,
+        taskId: task7,
+        title: "Local: paused queue",
+        taskStatus: "in_progress",
+        runStatus: "idle",
+        entries: [
+          systemEvent({
+            id: "sys_1",
+            createdAtUnixMs: unixMs(-2 * 60 * 60 * 1000),
+            event: { event_type: "task_created" },
+          }),
+          userMessage("Queue a prompt in local project."),
+          agentMessage("Queue is paused."),
+        ],
+      }),
+      queue_paused: true,
+      pending_prompts: [
+        queuedPrompt({ id: 1, text: "Local queued prompt (mock)" }),
+      ],
+    },
+    [key(workdir3, task8)]: conversationBase({
+      workdirId: workdir3,
+      taskId: task8,
+      title: "Local: failed turn",
+      taskStatus: "todo",
+      runStatus: "idle",
+      entries: [
+        systemEvent({
+          id: "sys_1",
+          createdAtUnixMs: unixMs(-5 * 60 * 60 * 1000),
+          event: { event_type: "task_created" },
+        }),
+        userMessage("Fail in local project."),
+        agentTurnError("mock: local failure"),
+      ],
+    }),
+    [key(workdir3, task9)]: conversationBase({
+      workdirId: workdir3,
+      taskId: task9,
+      title: "Local: turn states",
+      taskStatus: "todo",
+      runStatus: "idle",
+      entries: [
+        systemEvent({
+          id: "sys_1",
+          createdAtUnixMs: unixMs(-45 * 60 * 1000),
+          event: { event_type: "task_created" },
+        }),
+        userMessage("Turn done."),
+        agentTurnDuration(1_200),
+        agentMessage("Ok."),
+        userMessage("Turn error."),
+        agentTurnError("mock: error"),
+        userMessage("Turn canceled."),
+        agentTurnCanceled(),
       ],
     }),
   }
@@ -704,6 +1034,111 @@ export function defaultMockFixtures(): MockFixtures {
       } satisfies TaskSummarySnapshot,
       {
         project_id: project1,
+        workdir_id: workdir1,
+        task_id: task2,
+        title: "Mock task 2",
+        updated_at_unix_seconds: unixSeconds(-10),
+        branch_name: "main",
+        workdir_name: "main",
+        agent_run_status: "idle",
+        has_unread_completion: false,
+        task_status: "backlog",
+        turn_status: "idle",
+        last_turn_result: null,
+        is_starred: false,
+      } satisfies TaskSummarySnapshot,
+      {
+        project_id: project1,
+        workdir_id: workdir1,
+        task_id: task4,
+        title: "Review: awaiting feedback",
+        updated_at_unix_seconds: unixSeconds(-8),
+        branch_name: "main",
+        workdir_name: "main",
+        agent_run_status: "idle",
+        has_unread_completion: false,
+        task_status: "in_review",
+        turn_status: "awaiting",
+        last_turn_result: "completed",
+        is_starred: false,
+      } satisfies TaskSummarySnapshot,
+      {
+        project_id: project1,
+        workdir_id: workdir1,
+        task_id: task5,
+        title: "Done: completed successfully",
+        updated_at_unix_seconds: unixSeconds(-20),
+        branch_name: "main",
+        workdir_name: "main",
+        agent_run_status: "idle",
+        has_unread_completion: false,
+        task_status: "done",
+        turn_status: "idle",
+        last_turn_result: "completed",
+        is_starred: false,
+      } satisfies TaskSummarySnapshot,
+      {
+        project_id: project1,
+        workdir_id: workdir1,
+        task_id: task6,
+        title: "Canceled: aborted by user",
+        updated_at_unix_seconds: unixSeconds(-15),
+        branch_name: "main",
+        workdir_name: "main",
+        agent_run_status: "idle",
+        has_unread_completion: false,
+        task_status: "canceled",
+        turn_status: "idle",
+        last_turn_result: null,
+        is_starred: false,
+      } satisfies TaskSummarySnapshot,
+      {
+        project_id: project1,
+        workdir_id: workdir1,
+        task_id: task7,
+        title: "In progress: queue paused",
+        updated_at_unix_seconds: unixSeconds(-12),
+        branch_name: "main",
+        workdir_name: "main",
+        agent_run_status: "idle",
+        has_unread_completion: false,
+        task_status: "in_progress",
+        turn_status: "paused",
+        last_turn_result: null,
+        is_starred: false,
+      } satisfies TaskSummarySnapshot,
+      {
+        project_id: project1,
+        workdir_id: workdir1,
+        task_id: task8,
+        title: "Todo: last turn failed",
+        updated_at_unix_seconds: unixSeconds(-18),
+        branch_name: "main",
+        workdir_name: "main",
+        agent_run_status: "idle",
+        has_unread_completion: false,
+        task_status: "todo",
+        turn_status: "idle",
+        last_turn_result: "failed",
+        is_starred: false,
+      } satisfies TaskSummarySnapshot,
+      {
+        project_id: project1,
+        workdir_id: workdir1,
+        task_id: task9,
+        title: "Mock: Turn states",
+        updated_at_unix_seconds: unixSeconds(-1),
+        branch_name: "main",
+        workdir_name: "main",
+        agent_run_status: "idle",
+        has_unread_completion: false,
+        task_status: "todo",
+        turn_status: "idle",
+        last_turn_result: "completed",
+        is_starred: false,
+      } satisfies TaskSummarySnapshot,
+      {
+        project_id: project1,
         workdir_id: workdir2,
         task_id: task3,
         title: "PR: pending",
@@ -715,6 +1150,111 @@ export function defaultMockFixtures(): MockFixtures {
         task_status: "in_progress",
         turn_status: "running",
         last_turn_result: null,
+        is_starred: false,
+      } satisfies TaskSummarySnapshot,
+      {
+        project_id: project2,
+        workdir_id: workdir3,
+        task_id: task1,
+        title: "Local task",
+        updated_at_unix_seconds: unixSeconds(-120),
+        branch_name: "",
+        workdir_name: "main",
+        agent_run_status: "idle",
+        has_unread_completion: false,
+        task_status: "todo",
+        turn_status: "idle",
+        last_turn_result: "failed",
+        is_starred: false,
+      } satisfies TaskSummarySnapshot,
+      {
+        project_id: project2,
+        workdir_id: workdir3,
+        task_id: task4,
+        title: "Local: in review",
+        updated_at_unix_seconds: unixSeconds(-8),
+        branch_name: "",
+        workdir_name: "main",
+        agent_run_status: "idle",
+        has_unread_completion: false,
+        task_status: "in_review",
+        turn_status: "awaiting",
+        last_turn_result: "completed",
+        is_starred: false,
+      } satisfies TaskSummarySnapshot,
+      {
+        project_id: project2,
+        workdir_id: workdir3,
+        task_id: task5,
+        title: "Local: done",
+        updated_at_unix_seconds: unixSeconds(-20),
+        branch_name: "",
+        workdir_name: "main",
+        agent_run_status: "idle",
+        has_unread_completion: false,
+        task_status: "done",
+        turn_status: "idle",
+        last_turn_result: "completed",
+        is_starred: false,
+      } satisfies TaskSummarySnapshot,
+      {
+        project_id: project2,
+        workdir_id: workdir3,
+        task_id: task6,
+        title: "Local: canceled",
+        updated_at_unix_seconds: unixSeconds(-15),
+        branch_name: "",
+        workdir_name: "main",
+        agent_run_status: "idle",
+        has_unread_completion: false,
+        task_status: "canceled",
+        turn_status: "idle",
+        last_turn_result: null,
+        is_starred: false,
+      } satisfies TaskSummarySnapshot,
+      {
+        project_id: project2,
+        workdir_id: workdir3,
+        task_id: task7,
+        title: "Local: paused queue",
+        updated_at_unix_seconds: unixSeconds(-12),
+        branch_name: "",
+        workdir_name: "main",
+        agent_run_status: "idle",
+        has_unread_completion: false,
+        task_status: "in_progress",
+        turn_status: "paused",
+        last_turn_result: null,
+        is_starred: false,
+      } satisfies TaskSummarySnapshot,
+      {
+        project_id: project2,
+        workdir_id: workdir3,
+        task_id: task8,
+        title: "Local: failed turn",
+        updated_at_unix_seconds: unixSeconds(-18),
+        branch_name: "",
+        workdir_name: "main",
+        agent_run_status: "idle",
+        has_unread_completion: false,
+        task_status: "todo",
+        turn_status: "idle",
+        last_turn_result: "failed",
+        is_starred: false,
+      } satisfies TaskSummarySnapshot,
+      {
+        project_id: project2,
+        workdir_id: workdir3,
+        task_id: task9,
+        title: "Local: turn states",
+        updated_at_unix_seconds: unixSeconds(-1),
+        branch_name: "",
+        workdir_name: "main",
+        agent_run_status: "idle",
+        has_unread_completion: false,
+        task_status: "todo",
+        turn_status: "idle",
+        last_turn_result: "completed",
         is_starred: false,
       } satisfies TaskSummarySnapshot,
     ],
