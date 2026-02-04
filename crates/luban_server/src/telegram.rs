@@ -24,6 +24,7 @@ const KB_PROJECTS: &str = "Projects";
 const KB_RECENT_TASKS: &str = "Recent tasks";
 const KB_ACTIVE_TASK: &str = "Active task";
 const KB_NEW_TASK: &str = "New task";
+const KB_CREATE_NEW_WORKTREE: &str = "Create new";
 const KB_BACK: &str = "Back";
 const KB_CANCEL: &str = "Cancel";
 
@@ -194,6 +195,7 @@ enum KeyboardRoute {
     SelectProject { project_slug: String },
     SelectTask { workspace_id: u64, thread_id: u64 },
     NewTask { project_slug: String },
+    CreateNewWorktree { project_slug: String },
     SelectWorktree { workspace_id: u64 },
 }
 
@@ -235,6 +237,103 @@ impl TelegramGateway {
             topic_bindings: HashMap::new(),
             inbox_initialized_workspaces: HashSet::new(),
             inbox_task_status: HashMap::new(),
+        }
+    }
+
+    async fn project_workspaces_for_new_task_menu(
+        &mut self,
+        project: &luban_api::ProjectSnapshot,
+    ) -> anyhow::Result<Vec<luban_api::WorkspaceSnapshot>> {
+        let mut out = Vec::new();
+        for ws in &project.workspaces {
+            if ws.status != luban_api::WorkspaceStatus::Active {
+                continue;
+            }
+            if is_main_worktree(ws) {
+                out.push(ws.clone());
+                continue;
+            }
+
+            let snapshot = self
+                .engine
+                .threads_snapshot(luban_api::WorkspaceId(ws.id.0))
+                .await
+                .context("threads snapshot")?;
+
+            if should_show_worktree_in_new_task_menu(ws, &snapshot.threads) {
+                out.push(ws.clone());
+            }
+        }
+
+        promote_main_worktree(&mut out);
+        Ok(out)
+    }
+
+    async fn create_task_in_new_worktree(
+        &mut self,
+        project_slug: &str,
+    ) -> anyhow::Result<(u64, u64)> {
+        let workspace_id = self.create_new_worktree(project_slug).await?;
+        let thread_id = self.create_task(workspace_id).await?;
+        Ok((workspace_id, thread_id))
+    }
+
+    async fn create_new_worktree(&mut self, project_slug: &str) -> anyhow::Result<u64> {
+        let before = self.engine.app_snapshot().await.context("app snapshot")?;
+        let Some(project) = before.projects.iter().find(|p| p.slug == project_slug) else {
+            anyhow::bail!("project not found");
+        };
+
+        let project_id = project.id.clone();
+        let existing_ids: HashSet<u64> = project.workspaces.iter().map(|w| w.id.0).collect();
+
+        let action = luban_api::ClientAction::CreateWorkspace { project_id };
+        let _ = self
+            .engine
+            .apply_client_action("telegram_create_worktree".to_owned(), action)
+            .await;
+
+        self.wait_for_new_worktree_id(project_slug, &existing_ids)
+            .await
+    }
+
+    async fn wait_for_new_worktree_id(
+        &mut self,
+        project_slug: &str,
+        existing_ids: &HashSet<u64>,
+    ) -> anyhow::Result<u64> {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut last_seen_count = existing_ids.len();
+
+        loop {
+            let app = self.engine.app_snapshot().await.context("app snapshot")?;
+            let Some(project) = app.projects.iter().find(|p| p.slug == project_slug) else {
+                anyhow::bail!("project not found");
+            };
+
+            let mut candidates = project
+                .workspaces
+                .iter()
+                .filter(|w| !existing_ids.contains(&w.id.0))
+                .filter(|w| w.status == luban_api::WorkspaceStatus::Active)
+                .map(|w| w.id.0)
+                .collect::<Vec<_>>();
+            candidates.sort_unstable();
+            if let Some(id) = candidates.last().copied() {
+                return Ok(id);
+            }
+
+            last_seen_count = last_seen_count.max(project.workspaces.len());
+            if Instant::now() >= deadline {
+                anyhow::bail!(
+                    "timed out waiting for new worktree (project_slug={}, existing={}, latest_seen={})",
+                    project_slug,
+                    existing_ids.len(),
+                    last_seen_count
+                );
+            }
+
+            tokio::time::sleep(Duration::from_millis(200)).await;
         }
     }
 
@@ -721,6 +820,20 @@ impl TelegramGateway {
                 self.bind_topic_to_task(chat_id, topic_id, workspace_id, thread_id, false)
                     .await?;
             }
+            TopicCallbackAction::CreateTaskInNewWorktree {
+                topic_id,
+                project_slug,
+            } => {
+                let app = self.engine.app_snapshot().await.context("app snapshot")?;
+                let Some(project) = app.projects.iter().find(|p| p.slug == project_slug) else {
+                    self.send_topic_project_menu(chat_id, topic_id).await?;
+                    return Ok(());
+                };
+                let (workspace_id, thread_id) =
+                    self.create_task_in_new_worktree(&project.slug).await?;
+                self.bind_topic_to_task(chat_id, topic_id, workspace_id, thread_id, false)
+                    .await?;
+            }
             TopicCallbackAction::Unbind { topic_id } => {
                 self.unbind_topic(chat_id, topic_id).await?;
             }
@@ -789,7 +902,13 @@ impl TelegramGateway {
         };
 
         let mut rows = Vec::new();
-        for ws in &project.workspaces {
+        rows.push(vec![InlineButton::new(
+            KB_CREATE_NEW_WORKTREE,
+            &format!("tcreate_new:{topic_id}:{project_slug}"),
+        )]);
+
+        let workspaces = self.project_workspaces_for_new_task_menu(project).await?;
+        for ws in &workspaces {
             let label = format!("{} ({})", ws.workspace_name, ws.branch_name);
             let data = format!("tcreate:{topic_id}:{}", ws.id.0);
             rows.push(vec![InlineButton::new(&label, &data)]);
@@ -1171,6 +1290,18 @@ impl TelegramGateway {
                 self.send_project_worktree_menu(chat_id, &project_slug)
                     .await?;
             }
+            KeyboardRoute::CreateNewWorktree { project_slug } => {
+                let (workspace_id, thread_id) =
+                    self.create_task_in_new_worktree(&project_slug).await?;
+                self.session.active_workspace_id = Some(workspace_id);
+                self.session.active_thread_id = Some(thread_id);
+                self.session.ui_state = TelegramUiState::Home;
+                self.session.keyboard_routes.clear();
+                let title = self.task_title_or_default(workspace_id, thread_id).await;
+                let text = format!("Created and selected: {title}");
+                self.send_message(chat_id, None, &text, Some(home_reply_keyboard()))
+                    .await?;
+            }
             KeyboardRoute::SelectWorktree { workspace_id } => {
                 let thread_id = self.create_task(workspace_id).await?;
                 self.session.active_workspace_id = Some(workspace_id);
@@ -1297,7 +1428,21 @@ impl TelegramGateway {
         self.session.keyboard_routes.clear();
 
         let mut rows = Vec::new();
-        for ws in &project.workspaces {
+
+        let create_new_label = ensure_unique_label(
+            &self.session.keyboard_routes,
+            KB_CREATE_NEW_WORKTREE.to_owned(),
+        );
+        self.session.keyboard_routes.insert(
+            create_new_label.clone(),
+            KeyboardRoute::CreateNewWorktree {
+                project_slug: project_slug.to_owned(),
+            },
+        );
+        rows.push(vec![create_new_label]);
+
+        let workspaces = self.project_workspaces_for_new_task_menu(project).await?;
+        for ws in &workspaces {
             let label = format!("{} ({})", ws.workspace_name, ws.branch_name);
             let label =
                 ensure_unique_label(&self.session.keyboard_routes, truncate_label(&label, 48));
@@ -1738,6 +1883,10 @@ enum TopicCallbackAction {
         topic_id: i64,
         workspace_id: u64,
     },
+    CreateTaskInNewWorktree {
+        topic_id: i64,
+        project_slug: String,
+    },
     Unbind {
         topic_id: i64,
     },
@@ -1848,6 +1997,19 @@ fn parse_topic_callback_action(raw: &str) -> Option<TopicCallbackAction> {
         });
     }
 
+    if let Some(rest) = raw.strip_prefix("tcreate_new:") {
+        let mut parts = rest.split(':');
+        let topic_id = parts.next()?.parse::<i64>().ok()?;
+        let slug = parts.next()?.trim();
+        if slug.is_empty() {
+            return None;
+        }
+        return Some(TopicCallbackAction::CreateTaskInNewWorktree {
+            topic_id,
+            project_slug: slug.to_owned(),
+        });
+    }
+
     if let Some(rest) = raw.strip_prefix("tunbind:")
         && let Ok(topic_id) = rest.trim().parse::<i64>()
     {
@@ -1906,6 +2068,39 @@ fn home_reply_keyboard() -> serde_json::Value {
         vec![KB_ACTIVE_TASK.to_owned(), KB_HOME.to_owned()],
         vec![KB_CANCEL.to_owned()],
     ])
+}
+
+fn is_terminal_task_status(status: TaskStatus) -> bool {
+    matches!(status, TaskStatus::Done | TaskStatus::Canceled)
+}
+
+fn is_main_worktree(ws: &luban_api::WorkspaceSnapshot) -> bool {
+    ws.workspace_name == "main"
+}
+
+fn should_show_worktree_in_new_task_menu(
+    ws: &luban_api::WorkspaceSnapshot,
+    threads: &[luban_api::ThreadMeta],
+) -> bool {
+    if ws.status != luban_api::WorkspaceStatus::Active {
+        return false;
+    }
+    if is_main_worktree(ws) {
+        return true;
+    }
+    if threads.is_empty() {
+        return true;
+    }
+    threads
+        .iter()
+        .any(|t| !is_terminal_task_status(t.task_status))
+}
+
+fn promote_main_worktree(workspaces: &mut Vec<luban_api::WorkspaceSnapshot>) {
+    if let Some(idx) = workspaces.iter().position(is_main_worktree) {
+        let main = workspaces.remove(idx);
+        workspaces.insert(0, main);
+    }
 }
 
 fn ensure_unique_label(routes: &HashMap<String, KeyboardRoute>, raw: String) -> String {
@@ -2230,5 +2425,95 @@ mod tests {
             resolve_message_target(&msg, &session, &routes, &topic_bindings, now),
             Some((7, 8))
         );
+    }
+
+    fn workspace_snapshot(
+        id: u64,
+        workspace_name: &str,
+        status: luban_api::WorkspaceStatus,
+    ) -> luban_api::WorkspaceSnapshot {
+        luban_api::WorkspaceSnapshot {
+            id: luban_api::WorkspaceId(id),
+            short_id: format!("w{id}"),
+            workspace_name: workspace_name.to_owned(),
+            branch_name: "branch".to_owned(),
+            worktree_path: "/tmp/worktree".to_owned(),
+            status,
+            archive_status: luban_api::OperationStatus::Idle,
+            branch_rename_status: luban_api::OperationStatus::Idle,
+            agent_run_status: luban_api::OperationStatus::Idle,
+            has_unread_completion: false,
+            pull_request: None,
+        }
+    }
+
+    fn thread_meta(id: u64, status: TaskStatus) -> luban_api::ThreadMeta {
+        luban_api::ThreadMeta {
+            thread_id: luban_api::WorkspaceThreadId(id),
+            remote_thread_id: None,
+            title: "t".to_owned(),
+            created_at_unix_seconds: 0,
+            updated_at_unix_seconds: 0,
+            task_status: status,
+            turn_status: Default::default(),
+            last_turn_result: None,
+        }
+    }
+
+    #[test]
+    fn should_show_worktree_filters_archived_and_terminal() {
+        let archived = workspace_snapshot(1, "w1", luban_api::WorkspaceStatus::Archived);
+        assert!(!should_show_worktree_in_new_task_menu(&archived, &[]));
+
+        let done = workspace_snapshot(2, "w2", luban_api::WorkspaceStatus::Active);
+        assert!(!should_show_worktree_in_new_task_menu(
+            &done,
+            &[thread_meta(1, TaskStatus::Done)]
+        ));
+
+        let canceled = workspace_snapshot(3, "w3", luban_api::WorkspaceStatus::Active);
+        assert!(!should_show_worktree_in_new_task_menu(
+            &canceled,
+            &[thread_meta(1, TaskStatus::Canceled)]
+        ));
+
+        let active = workspace_snapshot(4, "w4", luban_api::WorkspaceStatus::Active);
+        assert!(should_show_worktree_in_new_task_menu(
+            &active,
+            &[thread_meta(1, TaskStatus::Iterating)]
+        ));
+    }
+
+    #[test]
+    fn should_show_worktree_always_includes_main() {
+        let main = workspace_snapshot(1, "main", luban_api::WorkspaceStatus::Active);
+        assert!(should_show_worktree_in_new_task_menu(
+            &main,
+            &[thread_meta(1, TaskStatus::Done)]
+        ));
+    }
+
+    #[test]
+    fn promote_main_worktree_moves_main_to_front() {
+        let mut workspaces = vec![
+            workspace_snapshot(1, "w1", luban_api::WorkspaceStatus::Active),
+            workspace_snapshot(2, "main", luban_api::WorkspaceStatus::Active),
+            workspace_snapshot(3, "w2", luban_api::WorkspaceStatus::Active),
+        ];
+        promote_main_worktree(&mut workspaces);
+        assert_eq!(workspaces[0].workspace_name, "main");
+        assert_eq!(workspaces[1].workspace_name, "w1");
+        assert_eq!(workspaces[2].workspace_name, "w2");
+    }
+
+    #[test]
+    fn parse_topic_callback_action_supports_create_new() {
+        assert!(matches!(
+            parse_topic_callback_action("tcreate_new:12:proj"),
+            Some(TopicCallbackAction::CreateTaskInNewWorktree {
+                topic_id: 12,
+                project_slug
+            }) if project_slug == "proj"
+        ));
     }
 }
