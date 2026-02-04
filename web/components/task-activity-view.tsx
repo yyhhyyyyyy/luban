@@ -7,7 +7,6 @@ import {
   Brain,
   Check,
   CheckCircle2,
-  ChevronRight,
   ChevronsUpDown,
   Clock,
   Copy,
@@ -243,23 +242,17 @@ function ActivityEventItem({ event, isExpanded, onToggle, duration }: ActivityEv
         <span data-testid="activity-event-title" className="flex-1 text-left truncate">
           {event.title}
         </span>
-        {hasDuration && (
-          <span
-            data-testid="activity-event-duration"
-            className="font-mono tabular-nums text-right flex-shrink-0"
-            style={{ fontSize: "10px", color: COLORS.textMuted }}
-          >
-            {duration}
-          </span>
-        )}
-        <ChevronRight
-          className={cn(
-            "w-3 h-3 flex-shrink-0 transition-transform",
-            hasExpandableDetail ? "opacity-100" : "opacity-0",
-            isExpanded && "rotate-90"
+        <div data-testid="activity-event-trailing" className="flex items-center gap-1 flex-shrink-0">
+          {hasDuration && (
+            <span
+              data-testid="activity-event-duration"
+              className="font-mono tabular-nums text-right flex-shrink-0"
+              style={{ fontSize: "10px", color: COLORS.textMuted }}
+            >
+              {duration}
+            </span>
           )}
-          style={{ color: COLORS.textMuted }}
-        />
+        </div>
       </button>
       {isExpanded && hasExpandableDetail && (
         <div
