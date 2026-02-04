@@ -177,6 +177,7 @@ struct TelegramSession {
     ui_state: TelegramUiState,
     keyboard_routes: HashMap<String, KeyboardRoute>,
     pending_comment_target: Option<(u64, u64)>,
+    pending_new_task_project_slug: Option<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -645,6 +646,29 @@ impl TelegramGateway {
             self.send_agent_message(wid, tid, text).await;
             self.send_home(chat_id).await?;
             return Ok(());
+        }
+
+        if let Some(project_slug) = self.session.pending_new_task_project_slug.take() {
+            match self.create_task_in_new_worktree(&project_slug).await {
+                Ok((wid, tid)) => {
+                    self.session.active_workspace_id = Some(wid);
+                    self.session.active_thread_id = Some(tid);
+                    self.send_agent_message(wid, tid, text).await;
+                    return Ok(());
+                }
+                Err(err) => {
+                    let _ = self
+                        .send_message(
+                            chat_id,
+                            None,
+                            &format!("Failed to create worktree: {err}"),
+                            None,
+                        )
+                        .await;
+                    self.send_home(chat_id).await?;
+                    return Ok(());
+                }
+            }
         }
 
         self.prune_reply_routes();
@@ -1216,27 +1240,33 @@ impl TelegramGateway {
         match text {
             KB_HOME => {
                 self.session.pending_comment_target = None;
+                self.session.pending_new_task_project_slug = None;
                 self.send_home(chat_id).await?;
                 return Ok(true);
             }
             KB_CANCEL => {
                 self.session.pending_comment_target = None;
+                self.session.pending_new_task_project_slug = None;
                 self.send_home(chat_id).await?;
                 return Ok(true);
             }
             KB_PROJECTS => {
+                self.session.pending_new_task_project_slug = None;
                 self.send_project_menu(chat_id).await?;
                 return Ok(true);
             }
             KB_RECENT_TASKS => {
+                self.session.pending_new_task_project_slug = None;
                 self.send_recent_tasks_menu(chat_id).await?;
                 return Ok(true);
             }
             KB_ACTIVE_TASK => {
+                self.session.pending_new_task_project_slug = None;
                 self.send_active_task(chat_id).await?;
                 return Ok(true);
             }
             KB_BACK => {
+                self.session.pending_new_task_project_slug = None;
                 self.handle_keyboard_back(chat_id).await?;
                 return Ok(true);
             }
@@ -1269,6 +1299,7 @@ impl TelegramGateway {
         chat_id: i64,
         route: KeyboardRoute,
     ) -> anyhow::Result<()> {
+        self.session.pending_new_task_project_slug = None;
         match route {
             KeyboardRoute::SelectProject { project_slug } => {
                 self.send_project_task_menu(chat_id, &project_slug).await?;
@@ -1291,16 +1322,14 @@ impl TelegramGateway {
                     .await?;
             }
             KeyboardRoute::CreateNewWorktree { project_slug } => {
-                let (workspace_id, thread_id) =
-                    self.create_task_in_new_worktree(&project_slug).await?;
-                self.session.active_workspace_id = Some(workspace_id);
-                self.session.active_thread_id = Some(thread_id);
-                self.session.ui_state = TelegramUiState::Home;
-                self.session.keyboard_routes.clear();
-                let title = self.task_title_or_default(workspace_id, thread_id).await;
-                let text = format!("Created and selected: {title}");
-                self.send_message(chat_id, None, &text, Some(home_reply_keyboard()))
-                    .await?;
+                begin_pending_new_task(&mut self.session, project_slug);
+                self.send_message(
+                    chat_id,
+                    None,
+                    "Send a message to start a new task in a new worktree.",
+                    Some(home_reply_keyboard()),
+                )
+                .await?;
             }
             KeyboardRoute::SelectWorktree { workspace_id } => {
                 let thread_id = self.create_task(workspace_id).await?;
@@ -2070,6 +2099,14 @@ fn home_reply_keyboard() -> serde_json::Value {
     ])
 }
 
+fn begin_pending_new_task(session: &mut TelegramSession, project_slug: String) {
+    session.active_workspace_id = None;
+    session.active_thread_id = None;
+    session.pending_new_task_project_slug = Some(project_slug);
+    session.ui_state = TelegramUiState::Home;
+    session.keyboard_routes.clear();
+}
+
 fn is_terminal_task_status(status: TaskStatus) -> bool {
     matches!(status, TaskStatus::Done | TaskStatus::Canceled)
 }
@@ -2515,5 +2552,33 @@ mod tests {
                 project_slug
             }) if project_slug == "proj"
         ));
+    }
+
+    #[test]
+    fn begin_pending_new_task_resets_active_and_routes() {
+        let mut session = TelegramSession {
+            active_workspace_id: Some(1),
+            active_thread_id: Some(2),
+            ui_state: TelegramUiState::SelectingTask,
+            keyboard_routes: HashMap::from([(
+                "x".to_owned(),
+                KeyboardRoute::SelectProject {
+                    project_slug: "p".to_owned(),
+                },
+            )]),
+            pending_comment_target: Some((3, 4)),
+            pending_new_task_project_slug: None,
+        };
+
+        begin_pending_new_task(&mut session, "proj".to_owned());
+        assert_eq!(session.active_workspace_id, None);
+        assert_eq!(session.active_thread_id, None);
+        assert_eq!(
+            session.pending_new_task_project_slug.as_deref(),
+            Some("proj")
+        );
+        assert!(matches!(session.ui_state, TelegramUiState::Home));
+        assert!(session.keyboard_routes.is_empty());
+        assert_eq!(session.pending_comment_target, Some((3, 4)));
     }
 }
