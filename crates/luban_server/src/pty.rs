@@ -445,7 +445,19 @@ fn default_shell_path() -> PathBuf {
     if let Some(shell) = std::env::var_os("SHELL")
         && !shell.to_string_lossy().trim().is_empty()
     {
-        return PathBuf::from(shell);
+        let path = PathBuf::from(shell);
+        if path.exists() {
+            return path;
+        }
+    }
+
+    if cfg!(windows) {
+        if let Some(comspec) = std::env::var_os("COMSPEC")
+            && !comspec.to_string_lossy().trim().is_empty()
+        {
+            return PathBuf::from(comspec);
+        }
+        return PathBuf::from("C:\\Windows\\System32\\cmd.exe");
     }
 
     let candidates = ["/bin/zsh", "/bin/bash", "/bin/sh"];
@@ -459,11 +471,19 @@ fn default_shell_path() -> PathBuf {
 }
 
 fn shell_command_args(shell_path: &std::path::Path, command: &str) -> Vec<String> {
-    let name = shell_path
+    let path_str = shell_path.to_string_lossy();
+    let mut name = shell_path
         .file_name()
         .map(|v| v.to_string_lossy().to_string())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
+        .unwrap_or_default();
+    if name.is_empty() || name.contains('\\') || name.contains('/') {
+        name = path_str
+            .rsplit(|ch| ['/', '\\'].contains(&ch))
+            .next()
+            .unwrap_or_default()
+            .to_string();
+    }
+    let name = name.to_ascii_lowercase();
 
     if name.contains("zsh") || name.contains("bash") {
         return vec![
@@ -472,6 +492,12 @@ fn shell_command_args(shell_path: &std::path::Path, command: &str) -> Vec<String
             "-c".to_owned(),
             command.to_owned(),
         ];
+    }
+    if name == "cmd.exe" || name == "cmd" {
+        return vec!["/C".to_owned(), command.to_owned()];
+    }
+    if name.contains("powershell") || name.contains("pwsh") {
+        return vec!["-Command".to_owned(), command.to_owned()];
     }
     vec!["-c".to_owned(), command.to_owned()]
 }
@@ -574,5 +600,14 @@ mod tests {
 
         assert!(history.total_bytes <= MAX_OUTPUT_HISTORY_BYTES);
         assert!(!history.chunks.is_empty());
+    }
+
+    #[test]
+    fn shell_command_args_for_cmd() {
+        let args = shell_command_args(
+            PathBuf::from("C:\\Windows\\System32\\cmd.exe").as_path(),
+            "echo hi",
+        );
+        assert_eq!(args, vec!["/C".to_owned(), "echo hi".to_owned()]);
     }
 }
