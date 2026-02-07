@@ -15,6 +15,7 @@ import type {
   AgentRunConfigSnapshot,
   ClaudeConfigEntrySnapshot,
   CodexConfigEntrySnapshot,
+  DroidConfigEntrySnapshot,
   ConversationSnapshot,
   FeedbackSubmitAction,
   FeedbackSubmitResult,
@@ -150,6 +151,7 @@ type LubanContextValue = {
   setCodexEnabled: (enabled: boolean) => void
   setAmpEnabled: (enabled: boolean) => void
   setClaudeEnabled: (enabled: boolean) => void
+  setDroidEnabled: (enabled: boolean) => void
   setAgentRunner: (runner: AgentRunnerKind) => void
   setAgentAmpMode: (mode: string) => void
   setTelegramBotToken: (token: string) => void
@@ -173,6 +175,11 @@ type LubanContextValue = {
   listClaudeConfigDir: (path: string) => Promise<{ path: string; entries: ClaudeConfigEntrySnapshot[] }>
   readClaudeConfigFile: (path: string) => Promise<string>
   writeClaudeConfigFile: (path: string, contents: string) => Promise<void>
+  checkDroid: () => Promise<{ ok: boolean; message: string | null }>
+  getDroidConfigTree: () => Promise<DroidConfigEntrySnapshot[]>
+  listDroidConfigDir: (path: string) => Promise<{ path: string; entries: DroidConfigEntrySnapshot[] }>
+  readDroidConfigFile: (path: string) => Promise<string>
+  writeDroidConfigFile: (path: string, contents: string) => Promise<void>
 }
 
 const LubanContext = createContext<LubanContextValue | null>(null)
@@ -440,6 +447,7 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     setCodexEnabled: actions.setCodexEnabled,
     setAmpEnabled: actions.setAmpEnabled,
     setClaudeEnabled: actions.setClaudeEnabled,
+    setDroidEnabled: actions.setDroidEnabled,
     setAgentRunner: actions.setAgentRunner,
     setAgentAmpMode: actions.setAgentAmpMode,
     setTelegramBotToken: actions.setTelegramBotToken,
@@ -463,6 +471,11 @@ export function LubanProvider({ children }: { children: React.ReactNode }) {
     listClaudeConfigDir: actions.listClaudeConfigDir,
     readClaudeConfigFile: actions.readClaudeConfigFile,
     writeClaudeConfigFile: actions.writeClaudeConfigFile,
+    checkDroid: actions.checkDroid,
+    getDroidConfigTree: actions.getDroidConfigTree,
+    listDroidConfigDir: actions.listDroidConfigDir,
+    readDroidConfigFile: actions.readDroidConfigFile,
+    writeDroidConfigFile: actions.writeDroidConfigFile,
   }
 
   return <LubanContext.Provider value={value}>{children}</LubanContext.Provider>
