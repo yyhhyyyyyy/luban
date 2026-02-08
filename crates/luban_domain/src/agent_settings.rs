@@ -149,6 +149,7 @@ mod tests {
 
     #[test]
     fn agent_model_label_still_works_for_codex_models() {
+        assert_eq!(agent_model_label("gpt-5.3-codex"), Some("GPT-5.3-Codex"));
         assert_eq!(agent_model_label("gpt-5.2-codex"), Some("GPT-5.2-Codex"));
         assert_eq!(agent_model_label("gpt-5.2"), Some("GPT-5.2"));
     }
@@ -157,11 +158,11 @@ mod tests {
     fn model_valid_for_runner_checks_catalog() {
         assert!(model_valid_for_runner(
             AgentRunnerKind::Codex,
-            "gpt-5.2-codex"
-        ));
-        assert!(!model_valid_for_runner(
-            AgentRunnerKind::Codex,
             "gpt-5.3-codex"
+        ));
+        assert!(model_valid_for_runner(
+            AgentRunnerKind::Codex,
+            "gpt-5.2-codex"
         ));
         assert!(model_valid_for_runner(
             AgentRunnerKind::Droid,
@@ -252,6 +253,11 @@ const STANDARD_EFFORTS: &[ThinkingEffort] = &[
 ];
 
 const AGENT_MODELS: &[AgentModelSpec] = &[
+    AgentModelSpec {
+        id: "gpt-5.3-codex",
+        label: "GPT-5.3-Codex",
+        supported_thinking_efforts: STANDARD_EFFORTS,
+    },
     AgentModelSpec {
         id: "gpt-5.2-codex",
         label: "GPT-5.2-Codex",

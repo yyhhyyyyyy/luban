@@ -12,6 +12,11 @@ export const THINKING_EFFORTS: ThinkingEffort[] = ["minimal", "low", "medium", "
 
 export const AGENT_MODELS: AgentModelSpec[] = [
   {
+    id: "gpt-5.3-codex",
+    label: "GPT-5.3-Codex",
+    supportedThinkingEfforts: THINKING_EFFORTS,
+  },
+  {
     id: "gpt-5.2-codex",
     label: "GPT-5.2-Codex",
     supportedThinkingEfforts: THINKING_EFFORTS,
